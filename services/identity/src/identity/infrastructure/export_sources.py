@@ -1,9 +1,11 @@
 """The other services' data of a tenant, for an export: ``GET /v1/<service>/data-export``.
 
 ``HttpExportSource`` calls one service's export route with the tenant in ``x-tenant-id`` and an
-access token identity mints for itself in the process (``token``): a service principal with the
-data:export and tenant:act scopes, living a couple of minutes. A service in header mode ignores
-the token and reads the header, as every tenant route does there.
+access token identity mints for itself in the process for that tenant (``token(tenant)``): a
+service principal with the data:export scope only, bound to the tenant (``tid``) and addressed to
+that one service (``aud``), living a couple of minutes. Each source checks both, so a token that
+leaks cannot be replayed for another tenant or at another service. A service in header mode
+ignores the token and reads the header, as every tenant route does there.
 
 The list of services comes from ``CW_IDENTITY_EXPORT_SOURCES``
 (``identity.domain.data_requests.parse_export_sources``),
@@ -34,7 +36,8 @@ def export_path(service: str) -> str:
 
 
 class HttpExportSource:
-    """``service`` at ``base_url``. ``token`` returns the bearer to send (None sends none);
+    """``service`` at ``base_url``. ``token`` returns the bearer to send for a tenant (None sends
+    none);
     ``client`` replaces the network, as tests and the demo do, and ``base_url`` is then unused."""
 
     def __init__(
@@ -42,7 +45,7 @@ class HttpExportSource:
         service: str,
         base_url: str,
         *,
-        token: Callable[[], str] | None = None,
+        token: Callable[[TenantId], str] | None = None,
         client: httpx2.Client | None = None,
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
     ) -> None:
@@ -58,7 +61,7 @@ class HttpExportSource:
         headers = {TENANT_HEADER: str(tenant_id)}
         try:
             if self._token is not None:
-                headers["Authorization"] = f"Bearer {self._token()}"
+                headers["Authorization"] = f"Bearer {self._token(tenant_id)}"
             response = self._client.get(export_path(self._service), headers=headers)
         except httpx2.HTTPError as exc:
             return self._failed(f"unreachable ({type(exc).__name__})")

@@ -18,6 +18,7 @@ from domain_kernel.ids import TenantId, UserId
 from identity.domain.billing import BillingRepository
 from identity.domain.consent import ConsentRepository
 from identity.domain.data_requests import DataRequestRepository
+from identity.domain.pages import ExportAfter
 from identity.domain.service_clients import ServiceClientRepository
 from identity.domain.tenancy import SubjectEntry, Tenant, User
 
@@ -44,6 +45,11 @@ class UserRepository(Protocol):
 
     def get(self, user_id: UserId) -> User | None:
         """The user with this id in the unit of work's tenant; None for another tenant's."""
+        ...
+
+    def page(self, after: ExportAfter | None, limit: int) -> list[User]:
+        """The tenant's users oldest first (by ``created_at``, then id), at most ``limit``,
+        after ``after``: a page of its export."""
         ...
 
     def list(self) -> list[User]:

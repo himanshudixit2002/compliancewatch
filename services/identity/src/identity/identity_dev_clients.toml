@@ -37,5 +37,5 @@ scopes = ["notification:preferences", "notification:receipts", "identity:channel
 reason = "records keyword consents at identity, reads and changes channel preferences and reports delivery receipts to notification"
 
 [worker]
-scopes = ["rulebook:write", "llm:call", "tenant:act", "notification:send", "entitlements:read", "data:export"]
-reason = "the combined worker process (cw-mvp worker) runs every service's consumers, jobs and activities under one client: pipeline writes and model calls, engine and notification reads for a tenant, sends, plan checks and exports"
+scopes = ["rulebook:write", "llm:call", "tenant:act", "notification:send", "entitlements:read"]
+reason = "the combined worker process (cw-mvp worker) runs every service's consumers, jobs and activities under one client: pipeline writes and model calls, engine and notification reads for a tenant, sends and plan checks; no worker path reads a tenant's export, which only identity's own bound token does"

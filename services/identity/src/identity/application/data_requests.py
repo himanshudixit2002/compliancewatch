@@ -14,19 +14,29 @@ exists (``DataRequestKindUnavailableError``, 422).
 
 ``ExportTenantData`` assembles the export on download, and never stores it: identity's own data
 of the tenant (the tenant, its users, its consent records, its billing ledger and its data
-requests), then each ``ExportSource``'s, one section per service, each with when it was
-generated. No transaction stays open while the sources answer. The request then records the
-services that answered: it completes once every one of them has, and a source that failed stays
-pending, which the bundle says too. Each download writes a ``data_request.exported`` audit
-entry naming the services that answered and those still pending.
+requests, each read ``EXPORT_PAGE_SIZE`` rows at a time), then each ``ExportSource``'s, one
+section per service, each with when it was generated. The sources are asked ``concurrency`` at a
+time and all within ``deadline_seconds`` (the settings' ``identity_export_concurrency`` and
+``identity_export_deadline_seconds``); one still answering at the deadline counts as failed. No
+transaction stays open while the sources answer. The request then records the services that
+answered, holding its row (``lock``) so two downloads at once each add theirs: it completes once
+every one of them has, and a source that failed stays pending, which the bundle says too. Each
+download writes a ``data_request.exported`` audit entry naming the services that answered and
+those still pending. ``ExportBundle.chunks`` writes the bundle a section at a time, so the
+response is never one more copy of the whole export.
 
 Secrets and tokens never reach the bundle: no session versions, no service clients, no
-idempotency keys of the billing starts, no checkout links and no digests of webhook bodies; a
-support request shows ``support`` as who asked, never the internal admin's id. The personal data
-the tenant holds stays as it is, since the export is the tenant's own data.
+idempotency keys of the billing starts, no checkout links, no digests of webhook bodies and no
+id of the platform's own payment account. A support request shows ``support`` as who asked in
+the bundle, which is a copy of the tenant's data. The audit trail (``GET /v1/identity/audit``)
+names the regulatory admin who recorded it, as it names every actor: it is the record of who
+acted on the tenant's data, which the tenant may read. The personal data the tenant holds stays
+as it is, since the export is the tenant's own data.
 """
 
-from collections.abc import Callable, Mapping, Sequence
+import json
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Final
@@ -53,6 +63,7 @@ from identity.domain.errors import (
     ExportNotReadyError,
     TenantNotFoundError,
 )
+from identity.domain.pages import EXPORT_PAGE_SIZE, ExportAfter
 from identity.domain.repository import UnitOfWork, UnitOfWorkFactory
 from identity.domain.tenancy import Tenant, TenantKind, User
 from py_common.auth.errors import AuthForbiddenError
@@ -66,6 +77,13 @@ BUNDLE_FORMAT: Final = "compliancewatch.tenant-export"
 BUNDLE_VERSION: Final = 1
 AVAILABLE_KINDS: Final = frozenset({DataRequestKind.EXPORT})
 """The kinds the routes take; deletion waits for the erasure cascade."""
+DEFAULT_CONCURRENCY: Final = 4
+"""How many services an export asks at once."""
+DEFAULT_DEADLINE_SECONDS: Final = 45.0
+"""How long an export waits for all the services together."""
+PLATFORM_FIELDS: Final = frozenset({"account_id"})
+"""Fields of a stored webhook that name the platform's own payment account, not the tenant's
+data, and stay out of the bundle."""
 
 
 def requester_context(uow: UnitOfWork, tenant_id: TenantId, actor: Principal) -> Tenant:
@@ -192,16 +210,22 @@ class ExportBundle:
     def document(self) -> dict[str, Any]:
         """The bundle as JSON: one entry per service, each with its ``generated_at``, or with
         ``status: unavailable`` and why when the service did not answer."""
-        services: dict[str, Any] = {}
-        for section in self.sections:
-            if section.data is not None:
-                services[section.service] = dict(section.data)
-            else:
-                services[section.service] = {
-                    "service": section.service,
-                    "status": "unavailable",
-                    "error": section.error,
-                }
+        return {
+            **self._head(),
+            "services": {section.service: _entry(section) for section in self.sections},
+        }
+
+    def chunks(self) -> Iterator[bytes]:
+        """``document`` as JSON text, written a service at a time."""
+        head = json.dumps(self._head())
+        yield (head[:-1] + ', "services": {').encode()
+        for index, section in enumerate(self.sections):
+            separator = ", " if index else ""
+            name = json.dumps(section.service)
+            yield f"{separator}{name}: {json.dumps(_entry(section))}".encode()
+        yield b"}}"
+
+    def _head(self) -> dict[str, Any]:
         return {
             "format": BUNDLE_FORMAT,
             "format_version": BUNDLE_VERSION,
@@ -210,21 +234,37 @@ class ExportBundle:
             "generated_at": self.generated_at.isoformat(),
             "complete": not self.pending,
             "services_pending": list(self.pending),
-            "services": services,
         }
 
 
+def _entry(section: SourceSection) -> dict[str, Any]:
+    if section.data is not None:
+        return dict(section.data)
+    return {"service": section.service, "status": "unavailable", "error": section.error}
+
+
 class ExportTenantData:
+    """``page_size`` is how many rows each read of identity's own data takes (tests make it
+    small to cross pages)."""
+
     def __init__(
         self,
         unit_of_work: UnitOfWorkFactory,
         sources: Sequence[ExportSource] = (),
         *,
         clock: Callable[[], datetime] = utc_now,
+        concurrency: int = DEFAULT_CONCURRENCY,
+        deadline_seconds: float = DEFAULT_DEADLINE_SECONDS,
+        page_size: int = EXPORT_PAGE_SIZE,
     ) -> None:
+        if concurrency < 1 or deadline_seconds <= 0 or page_size < 1:
+            raise ValueError("an export asks at least one service at a time, with a deadline")
         self._unit_of_work = unit_of_work
         self._sources = tuple(sources)
         self._clock = clock
+        self._concurrency = concurrency
+        self._deadline_seconds = deadline_seconds
+        self._page_size = page_size
 
     @property
     def services(self) -> tuple[str, ...]:
@@ -239,12 +279,15 @@ class ExportTenantData:
                 raise DataRequestNotFoundError()
             if request.kind is not DataRequestKind.EXPORT:
                 raise ExportNotReadyError(request.kind.value)
-            own = SourceSection(IDENTITY_SERVICE, identity_section(uow, tenant, self._clock()))
-        answers = [own, *(source.export(tenant_id) for source in self._sources)]
+            own = SourceSection(
+                IDENTITY_SERVICE,
+                identity_section(uow, tenant, self._clock(), page_size=self._page_size),
+            )
+        answers = [own, *self._ask(tenant_id)]
         answered = [section.service for section in answers if section.answered]
         at = self._clock()
         with self._unit_of_work(tenant_id) as uow:
-            current = uow.data_requests.get(request_id)
+            current = uow.data_requests.lock(request_id)
             if current is None:  # pragma: no cover - requests are never deleted
                 raise DataRequestNotFoundError()
             updated = current.record_answers(answered, self.services, at)
@@ -276,18 +319,83 @@ class ExportTenantData:
             pending=tuple(sorted({*pending, *failed})),
         )
 
+    def _ask(self, tenant_id: TenantId) -> list[SourceSection]:
+        """Every source's section, ``concurrency`` at a time, within the deadline; a source that
+        has not answered by then is a section without data. Its thread runs on until the
+        source's own timeout, and its answer is dropped."""
+        if not self._sources:
+            return []
+        pool = ThreadPoolExecutor(
+            max_workers=min(self._concurrency, len(self._sources)),
+            thread_name_prefix="identity-export",
+        )
+        try:
+            asked = [
+                (source.service, pool.submit(source.export, tenant_id)) for source in self._sources
+            ]
+            wait([future for _, future in asked], timeout=self._deadline_seconds)
+            return [self._section(service, future) for service, future in asked]
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
 
-def identity_section(uow: UnitOfWork, tenant: Tenant, at: datetime) -> dict[str, Any]:
-    """Identity's own data of the tenant, as JSON."""
+    def _section(self, service: str, future: Future[SourceSection]) -> SourceSection:
+        if not future.done():
+            future.cancel()
+            return SourceSection(
+                service, None, f"no answer within the export's {self._deadline_seconds:g} s"
+            )
+        try:
+            return future.result()
+        except Exception as exc:  # a source answers its failures; this is a bug, kept out
+            return SourceSection(service, None, f"not asked ({type(exc).__name__})")
+
+
+def _pages[T](
+    read: Callable[[ExportAfter | None, int], Sequence[T]],
+    cursor: Callable[[T], ExportAfter],
+    size: int,
+) -> Iterator[T]:
+    """Every row ``read`` gives, a page of ``size`` at a time, each after the last."""
+    after: ExportAfter | None = None
+    while True:
+        page = read(after, size)
+        yield from page
+        if len(page) < size:
+            return
+        after = cursor(page[-1])
+
+
+def identity_section(
+    uow: UnitOfWork, tenant: Tenant, at: datetime, *, page_size: int = EXPORT_PAGE_SIZE
+) -> dict[str, Any]:
+    """Identity's own data of the tenant, as JSON: users, consents, billing events and data
+    requests a page at a time, oldest first; the billing customer (one) and subscriptions (one
+    per plan the tenant ever started) as they are."""
     customer = uow.billing.customer()
+    users = _pages(
+        uow.users.page, lambda user: ExportAfter(user.created_at, user.id.value), page_size
+    )
+    consents = _pages(
+        uow.consents.page,
+        lambda record: ExportAfter(record.recorded_at, record.id.value),
+        page_size,
+    )
+    events = _pages(
+        uow.billing.events_page, lambda event: ExportAfter(event.received_at, event.id), page_size
+    )
+    requests = _pages(
+        uow.data_requests.page,
+        lambda request: ExportAfter(request.requested_at, request.id.value),
+        page_size,
+    )
     return {
         "service": IDENTITY_SERVICE,
         "tenant_id": str(tenant.id),
         "generated_at": at.isoformat(),
         "sections": {
             "tenant": [_tenant(tenant)],
-            "users": [_user(user) for user in uow.users.list()],
-            "consents": [_consent(record) for record in uow.consents.all()],
+            "users": [_user(user) for user in users],
+            "consents": [_consent(record) for record in consents],
             "billing_customer": []
             if customer is None
             else [
@@ -301,10 +409,8 @@ def identity_section(uow: UnitOfWork, tenant: Tenant, at: datetime) -> dict[str,
                 _subscription(subscription)
                 for subscription in reversed(uow.billing.subscriptions())
             ],
-            "billing_events": [_billing_event(event) for event in uow.billing.events()],
-            "data_requests": [
-                _data_request(request) for request in reversed(uow.data_requests.list())
-            ],
+            "billing_events": [_billing_event(event) for event in events],
+            "data_requests": [_data_request(request) for request in requests],
         },
     }
 
@@ -375,7 +481,7 @@ def _billing_event(event: StoredBillingEvent) -> dict[str, Any]:
         "status": None if event.status is None else event.status.value,
         "occurred_at": event.occurred_at.isoformat(),
         "received_at": event.received_at.isoformat(),
-        "payload": dict(payload),
+        "payload": {key: value for key, value in payload.items() if key not in PLATFORM_FIELDS},
     }
 
 

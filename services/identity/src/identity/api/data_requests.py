@@ -20,7 +20,7 @@ from typing import Annotated, Final
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import StreamingResponse
 
 from domain_kernel.access import TENANT_ADMIN_ROLES, Principal, Role
 from domain_kernel.ids import TenantId
@@ -119,7 +119,7 @@ def read_data_request(
 @router.get(
     "/data-requests/{request_id}/export",
     summary="Download the tenant's data as a JSON file, assembled now",
-    response_class=JSONResponse,
+    response_class=StreamingResponse,
     responses={
         200: {
             "description": (
@@ -133,13 +133,14 @@ def read_data_request(
 )
 def download_export(
     request_id: UUID, principal: Reader, tenant: Tenant, wired: Wired
-) -> JSONResponse:
-    """409 identity-export-not-ready for a request that is not an export. The file name is
-    built from the request id alone."""
+) -> StreamingResponse:
+    """409 identity-export-not-ready for a request that is not an export. The bundle is
+    assembled before the answer starts (a refusal is still a problem) and then written a service
+    at a time. The file name is built from the request id alone."""
     bundle = wired.export_tenant_data.run(principal, tenant, DataRequestId(request_id))
     filename = f"compliancewatch-export-{UUID(str(bundle.request.id))}.json"
-    return JSONResponse(
-        bundle.document(),
+    return StreamingResponse(
+        bundle.chunks(),
         media_type=EXPORT_MEDIA_TYPE,
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"',

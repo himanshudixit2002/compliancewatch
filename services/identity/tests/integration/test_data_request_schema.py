@@ -9,6 +9,7 @@ superuser but may create roles, and runs the migrations and roles.sql itself.
 """
 
 import importlib
+import threading
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -32,6 +33,7 @@ from identity.domain.data_requests import (
     DataRequestSource,
     DataRequestStatus,
     OpenRequests,
+    SourceSection,
 )
 from identity.domain.tenancy import Tenant, TenantKind
 from identity.infrastructure.models import Base
@@ -117,10 +119,12 @@ def add_tenant(factory: PostgresUnitOfWorkFactory, tenant: TenantId) -> None:
         uow.tenants.add(Tenant(tenant, TenantKind.BUSINESS, "Example Traders", NOW))
 
 
-def request_of(tenant: TenantId, *, at: datetime = NOW) -> DataRequest:
+def request_of(
+    tenant: TenantId, *, at: datetime = NOW, kind: DataRequestKind = DataRequestKind.EXPORT
+) -> DataRequest:
     return DataRequest.new(
         tenant,
-        DataRequestKind.EXPORT,
+        kind,
         DataRequestSource.SELF_SERVICE,
         requested_by="",
         reason="Example reason",
@@ -197,16 +201,23 @@ def test_the_directory_function_counts_every_tenant_s_open_requests(
     factory = PostgresUnitOfWorkFactory(role_engine)
     first, second = TenantId.new(), TenantId.new()
     long_ago = datetime.now(UTC) - timedelta(days=45)
+    deletion = DataRequestKind.DELETION
     with factory(first) as uow:
-        uow.data_requests.add(request_of(first, at=long_ago))
+        uow.data_requests.add(request_of(first, at=long_ago, kind=deletion))
+        uow.data_requests.add(request_of(first, at=datetime.now(UTC), kind=deletion))
         uow.data_requests.add(request_of(first, at=datetime.now(UTC)))
     with factory(second) as uow:
+        uow.data_requests.add(request_of(second, at=long_ago, kind=deletion))
         uow.data_requests.add(request_of(second, at=long_ago))
         done = request_of(second, at=long_ago)
         uow.data_requests.add(done.record_answers(["identity"], ["identity"], long_ago))
     found = counts(role_engine)
-    assert found[DataRequestKind.EXPORT] == OpenRequests(DataRequestKind.EXPORT, 3, 2)
-    assert found[DataRequestKind.DELETION] == OpenRequests(DataRequestKind.DELETION, 0, 0)
+    assert found[DataRequestKind.DELETION] == OpenRequests(DataRequestKind.DELETION, 3, 2), (
+        "never answered: open, and overdue past the deadline"
+    )
+    assert found[DataRequestKind.EXPORT] == OpenRequests(DataRequestKind.EXPORT, 1, 0), (
+        "an offered export is open until its deadline, then expires quietly; never overdue"
+    )
     with role_engine.connect() as connection:
         visible = connection.execute(text(f"SELECT count(*) FROM {TABLE}")).scalar_one()
     assert visible == 0, "without a tenant, row-level security still hides every request"
@@ -317,7 +328,18 @@ def test_a_non_superuser_owner_makes_the_directory_and_never_reads_through_it(
         with PostgresUnitOfWorkFactory(identity)(tenant) as uow:
             uow.data_requests.add(request_of(tenant, at=datetime.now(UTC) - timedelta(days=31)))
         assert counts(identity)[DataRequestKind.EXPORT] == OpenRequests(
-            DataRequestKind.EXPORT, 1, 1
+            DataRequestKind.EXPORT, 0, 0
+        ), "an offered export past its deadline has expired"
+        with PostgresUnitOfWorkFactory(identity)(tenant) as uow:
+            uow.data_requests.add(
+                request_of(
+                    tenant,
+                    at=datetime.now(UTC) - timedelta(days=31),
+                    kind=DataRequestKind.DELETION,
+                )
+            )
+        assert counts(identity)[DataRequestKind.DELETION] == OpenRequests(
+            DataRequestKind.DELETION, 1, 1
         )
         with owner.connect() as connection:
             member = connection.execute(
@@ -335,6 +357,17 @@ def test_a_non_superuser_owner_makes_the_directory_and_never_reads_through_it(
                 )
             ).scalar_one()
             assert owner_of == DIRECTORY_ROLE
+            acl = connection.execute(
+                text(f"SELECT proacl::text FROM pg_proc WHERE oid = '{FUNCTION}'::regprocedure")
+            ).scalar_one()
+            grantees = {entry.split("=")[0] for entry in acl.strip("{}").split(",")}
+            assert "" not in grantees, "PUBLIC may not run it, whoever owns the schemas"
+            assert grantees == {DIRECTORY_ROLE, "cw_identity"}
+            public = connection.execute(
+                text("SELECT has_function_privilege('cw_profile', :f, 'EXECUTE')"),
+                {"f": FUNCTION},
+            ).scalar_one()
+            assert public is False
     finally:
         owner.dispose()
         identity.dispose()
@@ -346,8 +379,93 @@ def test_a_non_superuser_owner_makes_the_directory_and_never_reads_through_it(
     apply_roles(deployment_url)
     identity = create_engine(as_role(with_schema(deployment_url), SCHEMA))
     try:
-        assert counts(identity)[DataRequestKind.EXPORT] == OpenRequests(
-            DataRequestKind.EXPORT, 0, 0
+        assert counts(identity)[DataRequestKind.DELETION] == OpenRequests(
+            DataRequestKind.DELETION, 0, 0
         ), "the downgrade dropped the function and the table; roles.sql made it again"
     finally:
         identity.dispose()
+
+
+class AnsweringSource:
+    """A source that answers ``service``'s part, after ``gate`` opens when one is given."""
+
+    def __init__(self, service: str, gate: threading.Event | None = None) -> None:
+        self._service = service
+        self._gate = gate
+
+    @property
+    def service(self) -> str:
+        return self._service
+
+    def export(self, tenant_id: TenantId) -> SourceSection:
+        if self._gate is not None:
+            self._gate.wait(10)
+        return SourceSection(
+            self._service,
+            {
+                "service": self._service,
+                "tenant_id": str(tenant_id),
+                "generated_at": NOW.isoformat(),
+                "sections": {},
+            },
+        )
+
+
+class SilentSource(AnsweringSource):
+    def export(self, tenant_id: TenantId) -> SourceSection:
+        return SourceSection(self.service, None, "answered 503")
+
+
+def test_two_downloads_at_once_each_keep_the_services_that_answered(
+    role_engine: Engine,
+) -> None:
+    """One download holds the request's row while it records profile; the other, whose
+    obligation answered, waits for it (FOR UPDATE) and then adds its own, so neither is lost."""
+    factory = PostgresUnitOfWorkFactory(role_engine)
+    tenant = TenantId.new()
+    add_tenant(factory, tenant)
+    made = RequestExport(factory, clock=lambda: NOW).run(
+        ANONYMOUS, tenant, DataRequestKind.EXPORT, reason="Example reason"
+    )
+    expected = ("identity", "obligation", "profile")
+    second = ExportTenantData(
+        factory, [SilentSource("profile"), AnsweringSource("obligation")], clock=lambda: NOW
+    )
+    finished: list[DataRequest] = []
+    with factory(tenant) as uow:
+        held = uow.data_requests.lock(made.id)
+        assert held is not None
+        uow.data_requests.save(held.record_answers(["identity", "profile"], expected, NOW))
+        worker = threading.Thread(
+            target=lambda: finished.append(second.run(ANONYMOUS, tenant, made.id).request)
+        )
+        worker.start()
+        worker.join(1.0)
+        assert worker.is_alive(), "the second download waits for the row"
+    worker.join(10)
+    assert not worker.is_alive()
+    (request,) = finished
+    assert request.services_done == expected
+    assert request.status is DataRequestStatus.COMPLETED
+    with factory(tenant) as uow:
+        stored = uow.data_requests.get(made.id)
+    assert stored is not None
+    assert stored.services_done == expected
+
+
+def test_identity_s_own_data_reads_a_page_at_a_time_on_postgres(role_engine: Engine) -> None:
+    factory = PostgresUnitOfWorkFactory(role_engine)
+    tenant = TenantId.new()
+    add_tenant(factory, tenant)
+    made = [
+        RequestExport(factory, clock=lambda: NOW).run(
+            ANONYMOUS, tenant, DataRequestKind.EXPORT, reason="Example reason"
+        )
+        for _ in range(3)
+    ]
+    paged = ExportTenantData(factory, clock=lambda: NOW, page_size=1).run(
+        ANONYMOUS, tenant, made[0].id
+    )
+    rows = paged.document()["services"]["identity"]["sections"]["data_requests"]
+    assert sorted(row["id"] for row in rows) == sorted(str(request.id) for request in made)
+    assert [row["id"] for row in rows] == sorted(str(request.id) for request in made)

@@ -13,10 +13,11 @@ counts every tenant's open data requests as ``identity.data_requests_open()`` do
 """
 
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import replace
 from datetime import datetime
+from uuid import UUID
 
 from domain_kernel.audit import AuditEntry
 from domain_kernel.events import DomainEvent
@@ -37,6 +38,7 @@ from identity.domain.data_requests import (
     counts_by_kind,
 )
 from identity.domain.errors import InternalTenantExistsError, SubjectRegisteredError
+from identity.domain.pages import ExportAfter
 from identity.domain.repository import UnitOfWork
 from identity.domain.service_clients import ServiceClient
 from identity.domain.tenancy import SubjectEntry, Tenant, TenantKind, User
@@ -72,9 +74,9 @@ class MemoryConsentRepository:
             and (purpose is None or r.purpose is purpose)
         ]
 
-    def all(self) -> list[ConsentRecord]:
+    def page(self, after: ExportAfter | None, limit: int) -> list[ConsentRecord]:
         mine = [r for r in self._records if r.tenant_id == self._tenant]
-        return sorted(mine, key=lambda r: (r.recorded_at, r.id.value))
+        return _page(mine, lambda r: (r.recorded_at, r.id.value), after, limit)
 
 
 class MemoryDataRequestRepository:
@@ -98,9 +100,29 @@ class MemoryDataRequestRepository:
         found = self._requests.get(request_id)
         return found if found is not None and found.tenant_id == self._tenant else None
 
+    def page(self, after: ExportAfter | None, limit: int) -> list[DataRequest]:
+        return _page(self.list(), lambda r: (r.requested_at, r.id.value), after, limit)
+
+    def lock(self, request_id: DataRequestId) -> DataRequest | None:
+        """``get``: memory units of work run one at a time, so the row is already locked."""
+        return self.get(request_id)
+
     def list(self) -> list[DataRequest]:
         mine = [r for r in self._requests.values() if r.tenant_id == self._tenant]
         return sorted(mine, key=lambda r: (r.requested_at, r.id.value), reverse=True)
+
+
+def _page[T](
+    rows: Iterable[T],
+    key: Callable[[T], tuple[datetime, UUID]],
+    after: ExportAfter | None,
+    limit: int,
+) -> list[T]:
+    """Up to ``limit`` of ``rows`` oldest first by ``key``, after ``after``: as Postgres pages."""
+    ordered = sorted(rows, key=key)
+    if after is not None:
+        ordered = [row for row in ordered if key(row) > (after.at, after.id)]
+    return ordered[:limit]
 
 
 class MemoryTenantRepository:
@@ -141,6 +163,9 @@ class MemoryUserRepository:
     def get(self, user_id: UserId) -> User | None:
         user = self._users.get(user_id)
         return user if user is not None and user.tenant_id == self._tenant else None
+
+    def page(self, after: ExportAfter | None, limit: int) -> list[User]:
+        return _page(self.list(), lambda user: (user.created_at, user.id.value), after, limit)
 
     def list(self) -> list[User]:
         mine = [user for user in self._users.values() if user.tenant_id == self._tenant]
@@ -271,9 +296,9 @@ class MemoryBillingRepository:
         self._ledger.events.append(event)
         return True
 
-    def events(self) -> list[StoredBillingEvent]:
+    def events_page(self, after: ExportAfter | None, limit: int) -> list[StoredBillingEvent]:
         mine = [e for e in self._ledger.events if e.tenant_id == self._tenant]
-        return sorted(mine, key=lambda e: (e.received_at, e.id))
+        return _page(mine, lambda e: (e.received_at, e.id), after, limit)
 
 
 class MemorySink:
@@ -437,7 +462,7 @@ class MemoryDataRequestDirectory:
         now = self._clock()
         found: dict[DataRequestKind, tuple[int, int]] = {}
         for request in list(self._store.data_requests.values()):
-            if request.is_completed:
+            if not request.is_open(now):
                 continue
             open_, overdue = found.get(request.kind, (0, 0))
             found[request.kind] = (open_ + 1, overdue + int(request.is_overdue(now)))

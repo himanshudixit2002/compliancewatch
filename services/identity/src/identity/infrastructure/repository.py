@@ -11,9 +11,19 @@ as row-level security would."""
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager
 from datetime import datetime
-from typing import Self
+from typing import Any, Self
 
-from sqlalchemy import Connection, Engine, create_engine, delete, select, text, update
+from sqlalchemy import (
+    Connection,
+    Engine,
+    Select,
+    create_engine,
+    delete,
+    select,
+    text,
+    tuple_,
+    update,
+)
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -45,6 +55,7 @@ from identity.domain.data_requests import (
     counts_by_kind,
 )
 from identity.domain.errors import InternalTenantExistsError, SubjectRegisteredError
+from identity.domain.pages import ExportAfter
 from identity.domain.repository import UnitOfWork
 from identity.domain.service_clients import ServiceClient
 from identity.domain.tenancy import (
@@ -109,15 +120,29 @@ class SqlAlchemyConsentRepository:
             statement = statement.where(ConsentRow.purpose == purpose.value)
         return [_to_record(row) for row in self._session.scalars(statement).all()]
 
-    def all(self) -> list[ConsentRecord]:
+    def page(self, after: ExportAfter | None, limit: int) -> list[ConsentRecord]:
         if self._tenant is None:
             return []
-        statement = (
-            select(ConsentRow)
-            .where(ConsentRow.tenant_id == self._tenant.value)
-            .order_by(ConsentRow.recorded_at, ConsentRow.id)
+        statement = _paged(
+            select(ConsentRow).where(ConsentRow.tenant_id == self._tenant.value),
+            (ConsentRow.recorded_at, ConsentRow.id),
+            after,
+            limit,
         )
         return [_to_record(row) for row in self._session.scalars(statement).all()]
+
+
+def _paged[R](
+    statement: Select[R],
+    order: tuple[Any, Any],
+    after: ExportAfter | None,
+    limit: int,
+) -> Select[R]:
+    """``statement`` oldest first by ``order`` (a time column, then the id), at most ``limit``
+    rows, after ``after``: one page of an export."""
+    if after is not None:
+        statement = statement.where(tuple_(*order) > tuple_(after.at, after.id))
+    return statement.order_by(*order).limit(limit)
 
 
 class SqlAlchemyDataRequestRepository:
@@ -151,17 +176,37 @@ class SqlAlchemyDataRequestRepository:
         )
 
     def get(self, request_id: DataRequestId) -> DataRequest | None:
+        return self._one(request_id, lock=False)
+
+    def lock(self, request_id: DataRequestId) -> DataRequest | None:
+        return self._one(request_id, lock=True)
+
+    def _one(self, request_id: DataRequestId, *, lock: bool) -> DataRequest | None:
         if self._tenant is None:
             return None
-        row = self._session.scalars(
+        statement = (
             select(DataRequestRow)
             .where(
                 DataRequestRow.id == request_id.value,
                 DataRequestRow.tenant_id == self._tenant.value,
             )
             .execution_options(populate_existing=True)
-        ).one_or_none()
+        )
+        if lock:
+            statement = statement.with_for_update()
+        row = self._session.scalars(statement).one_or_none()
         return None if row is None else _to_data_request(row)
+
+    def page(self, after: ExportAfter | None, limit: int) -> list[DataRequest]:
+        if self._tenant is None:
+            return []
+        statement = _paged(
+            select(DataRequestRow).where(DataRequestRow.tenant_id == self._tenant.value),
+            (DataRequestRow.requested_at, DataRequestRow.id),
+            after,
+            limit,
+        )
+        return [_to_data_request(row) for row in self._session.scalars(statement)]
 
     def list(self) -> list[DataRequest]:
         if self._tenant is None:
@@ -296,6 +341,17 @@ class SqlAlchemyUserRepository:
             )
         ).one_or_none()
         return None if row is None else _to_user(row)
+
+    def page(self, after: ExportAfter | None, limit: int) -> list[User]:
+        if self._tenant is None:
+            return []
+        statement = _paged(
+            select(UserRow).where(UserRow.tenant_id == self._tenant.value),
+            (UserRow.created_at, UserRow.id),
+            after,
+            limit,
+        )
+        return [_to_user(row) for row in self._session.scalars(statement)]
 
     def list(self) -> list[User]:
         if self._tenant is None:
@@ -557,13 +613,16 @@ class SqlAlchemyBillingRepository:
         )
         return self._session.execute(statement).scalar_one_or_none() is not None
 
-    def events(self) -> list[StoredBillingEvent]:
+    def events_page(self, after: ExportAfter | None, limit: int) -> list[StoredBillingEvent]:
         if self._tenant is None:
             return []
         rows = self._session.scalars(
-            select(BillingEventRow)
-            .where(BillingEventRow.tenant_id == self._tenant.value)
-            .order_by(BillingEventRow.received_at, BillingEventRow.id)
+            _paged(
+                select(BillingEventRow).where(BillingEventRow.tenant_id == self._tenant.value),
+                (BillingEventRow.received_at, BillingEventRow.id),
+                after,
+                limit,
+            )
         )
         return [
             StoredBillingEvent(

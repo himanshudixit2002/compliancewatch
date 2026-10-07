@@ -2,11 +2,22 @@
 
 A request is made by the tenant's owner or CA admin (``self_service``) or by the regulatory team's
 admin for the tenant (``support``), and must be answered within ``DEADLINE``, 30 days after it was
-made (docs/legal/data-map.md and the guide's section 16, until counsel confirms them). It is
-``received`` until the first export is assembled, ``in_progress`` while some service has not
-answered one, and ``completed`` once every service it needs has: ``services_done`` names those that
-have. A request past its deadline and not completed is overdue (``is_overdue``), which the
-DataRequestOverdue alert pages on.
+made (docs/legal/data-map.md and the guide's section 16, until counsel confirms them).
+
+- ``received``: recorded and not answered at all. A deletion request starts here (until M3-6
+  answers it); past its deadline it is overdue (``is_overdue``), which the DataRequestOverdue
+  alert pages on, since only the operator can answer it.
+- ``in_progress``: answered, and waiting on the tenant. An export is answered as soon as it is
+  made: identity assembles the bundle whenever it is downloaded, so it is offered at once. It
+  stays in progress until a download has had every service's part (``services_done`` names those
+  that have answered one).
+- ``completed``: every service it needs has answered a download, from the first download where
+  they all did.
+
+An offered export the tenant never downloads, or whose downloads always miss a service, is never
+overdue: the operator has answered it and only the tenant can complete it. Once its deadline has
+passed it expires quietly (``is_expired``): it no longer counts as open, nothing pages, and the
+tenant may still download it or make a new request.
 
 An export is assembled when it is downloaded and never stored: identity's own data and each
 ``ExportSource``'s, one section per service. A source that fails leaves the request in progress
@@ -25,6 +36,7 @@ from typing import Final, Protocol
 from domain_kernel._validation import require_aware, require_instance
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.ids import EntityId, TenantId
+from identity.domain.pages import ExportAfter
 
 DEADLINE: Final = timedelta(days=30)
 """How long a tenant waits at most for its request (data map; counsel to confirm)."""
@@ -114,8 +126,11 @@ class DataRequest:
         reason: str,
         at: datetime,
     ) -> "DataRequest":
-        """A request received ``at``, due ``DEADLINE`` later."""
+        """A request received ``at``, due ``DEADLINE`` later; an export is offered at once
+        (``in_progress``), anything else waits ``received``."""
+        offered = kind is DataRequestKind.EXPORT
         return cls(
+            status=DataRequestStatus.IN_PROGRESS if offered else DataRequestStatus.RECEIVED,
             id=DataRequestId.new(),
             tenant_id=tenant_id,
             kind=kind,
@@ -131,8 +146,20 @@ class DataRequest:
         return self.status is DataRequestStatus.COMPLETED
 
     def is_overdue(self, now: datetime) -> bool:
-        """Past its deadline and not completed."""
-        return not self.is_completed and require_aware(now, "now") > self.deadline_at
+        """Past its deadline and never answered (still ``received``): what pages."""
+        return self.status is DataRequestStatus.RECEIVED and (
+            require_aware(now, "now") > self.deadline_at
+        )
+
+    def is_expired(self, now: datetime) -> bool:
+        """Offered, never completed by the tenant, and past its deadline: it expires quietly."""
+        return self.status is DataRequestStatus.IN_PROGRESS and (
+            require_aware(now, "now") > self.deadline_at
+        )
+
+    def is_open(self, now: datetime) -> bool:
+        """Neither completed nor expired: what the open gauge counts."""
+        return not self.is_completed and not self.is_expired(now)
 
     def pending(self, expected: Iterable[str]) -> tuple[str, ...]:
         """The services of ``expected`` that have not answered yet; none once completed."""
@@ -171,6 +198,16 @@ class DataRequestRepository(Protocol):
         """The unit of work's tenant's request with this id; None for another tenant's."""
         ...
 
+    def page(self, after: ExportAfter | None, limit: int) -> list[DataRequest]:
+        """The tenant's requests oldest first (by ``requested_at``, then id), at most ``limit``,
+        after ``after``: a page of its export."""
+        ...
+
+    def lock(self, request_id: DataRequestId) -> DataRequest | None:
+        """``get``, holding the row until the unit of work ends (``SELECT ... FOR UPDATE``), so
+        two downloads that record their answers at once do so one after the other."""
+        ...
+
     def list(self) -> list[DataRequest]:
         """The tenant's requests, newest first."""
         ...
@@ -178,8 +215,9 @@ class DataRequestRepository(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class OpenRequests:
-    """Every tenant's requests of one kind that are not completed, and how many of them are past
-    their deadline: counts only, which is all ``identity.data_requests_open()`` answers."""
+    """Every tenant's open requests of one kind (``DataRequest.is_open``), and how many of them
+    are overdue (``is_overdue``: never answered and past the deadline): counts only, which is all
+    ``identity.data_requests_open()`` answers."""
 
     kind: DataRequestKind
     open: int

@@ -29,6 +29,7 @@ from starlette.concurrency import run_in_threadpool
 from domain_kernel.access import Principal, Scope
 from domain_kernel.errors import DomainError
 from domain_kernel.events import utc_now
+from domain_kernel.ids import TenantId
 from identity import __version__
 from identity.api.audit import router as audit_router
 from identity.api.auth import router as auth_router
@@ -166,8 +167,10 @@ PROBLEM_STATUS: dict[type[DomainError], int] = {
     ExportNotReadyError: 409,
     DataRequestKindUnavailableError: 422,
 }
-EXPORT_SCOPES = frozenset({Scope.DATA_EXPORT, Scope.TENANT_ACT})
-"""What identity's own token carries when it asks a service for a tenant's data."""
+EXPORT_SCOPES = frozenset({Scope.DATA_EXPORT})
+"""What identity's own token carries when it asks a service for a tenant's data: data:export
+only, bound to that tenant and addressed to that service (no tenant:act, which would open every
+tenant route of every service)."""
 EXPORT_TOKEN_TTL = timedelta(minutes=2)
 
 log = get_logger(__name__)
@@ -221,15 +224,24 @@ def token_verifier(settings: IdentitySettings, keys: KeySet) -> TokenVerifier:
 
 def export_sources(settings: IdentitySettings, minter: IssuerMinter) -> list[ExportSource]:
     """One ``HttpExportSource`` per service of ``CW_IDENTITY_EXPORT_SOURCES``, each sending a
-    token identity mints for itself: data:export and tenant:act, for two minutes."""
-    principal = Principal.service(SERVICE_NAME, EXPORT_SCOPES)
+    token identity mints for itself per call: data:export only, bound to the tenant exported
+    and addressed to that service, for two minutes."""
 
-    def token() -> str:
-        return minter.mint(principal, EXPORT_TOKEN_TTL).token
+    def token_for(service: str) -> Callable[[TenantId], str]:
+        def token(tenant: TenantId) -> str:
+            principal = Principal.service(
+                SERVICE_NAME, EXPORT_SCOPES, acts_for=tenant, audience=service
+            )
+            return minter.mint(principal, EXPORT_TOKEN_TTL).token
+
+        return token
 
     return [
         HttpExportSource(
-            service, url, token=token, timeout_seconds=settings.identity_export_timeout_seconds
+            service,
+            url,
+            token=token_for(service),
+            timeout_seconds=settings.identity_export_timeout_seconds,
         )
         for service, url in settings.export_sources.items()
     ]
@@ -324,7 +336,10 @@ def wire(
         list_data_requests=ListDataRequests(unit_of_work),
         read_data_request=ReadDataRequest(unit_of_work),
         export_tenant_data=ExportTenantData(
-            unit_of_work, export_sources(settings, minter) if sources is None else sources
+            unit_of_work,
+            export_sources(settings, minter) if sources is None else sources,
+            concurrency=settings.identity_export_concurrency,
+            deadline_seconds=settings.identity_export_deadline_seconds,
         ),
         data_request_directory=directory,
     )

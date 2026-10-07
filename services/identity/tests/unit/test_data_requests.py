@@ -3,17 +3,19 @@ the export bundle with sources that answer and fail, the routes in header and to
 HTTP export source, the gauges and the sources setting."""
 
 import json
+import threading
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
 import httpx2
+import jwt as pyjwt
 import pytest
 from fastapi.testclient import TestClient
 from opentelemetry.metrics import CallbackOptions
 
-from domain_kernel.access import Principal, Role
+from domain_kernel.access import Principal, Role, Scope
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.ids import TenantId
 from identity.application.bootstrap import BootstrapInternalTenant
@@ -26,6 +28,7 @@ from identity.application.data_requests import (
 )
 from identity.application.sessions import user_principal
 from identity.application.tenancy import CreateTenant
+from identity.domain.billing import StoredBillingEvent
 from identity.domain.consent import ConsentPurpose, ConsentSource
 from identity.domain.data_requests import (
     DEADLINE,
@@ -50,7 +53,8 @@ from identity.infrastructure.export_sources import HttpExportSource
 from identity.infrastructure.memory import MemoryDataRequestDirectory, MemoryStore
 from identity.infrastructure.minter import IssuerMinter
 from identity.infrastructure.providers.fake import FakeIdentityProvider
-from identity.main import build_app
+from identity.main import build_app, export_sources
+from identity.settings import DEFAULT_EXPORT_SOURCES
 from identity.testing import identity_settings
 from py_common.auth import TokenIssuer
 from py_common.auth.errors import AuthForbiddenError
@@ -71,22 +75,39 @@ def request_at(at: datetime = NOW, **changes: Any) -> DataRequest:
         "at": at,
     }
     values.update(changes)
-    return DataRequest.new(
-        TenantId.new(), DataRequestKind.EXPORT, DataRequestSource.SELF_SERVICE, **values
-    )
+    kind = values.pop("kind", DataRequestKind.EXPORT)
+    return DataRequest.new(TenantId.new(), kind, DataRequestSource.SELF_SERVICE, **values)
 
 
 # ---------------------------------------------------------------- the request
 
 
-def test_a_request_is_due_thirty_days_later_and_overdue_after_that() -> None:
-    request = request_at()
+def test_an_unanswered_request_is_due_thirty_days_later_and_overdue_after_that() -> None:
+    request = request_at(kind=DataRequestKind.DELETION)
     assert request.deadline_at - request.requested_at == DEADLINE == timedelta(days=30)
-    assert request.status is DataRequestStatus.RECEIVED
+    assert request.status is DataRequestStatus.RECEIVED, "nothing answers a deletion yet"
     assert not request.is_overdue(request.deadline_at)
-    assert request.is_overdue(request.deadline_at + timedelta(seconds=1))
+    late = request.deadline_at + timedelta(seconds=1)
+    assert request.is_overdue(late)
+    assert request.is_open(late), "an overdue request stays open until it is answered"
     done = request.record_answers(["identity"], ["identity"], NOW)
     assert not done.is_overdue(NOW + timedelta(days=90))
+
+
+def test_an_export_is_offered_at_once_and_expires_quietly_when_never_completed() -> None:
+    request = request_at()
+    assert request.status is DataRequestStatus.IN_PROGRESS, "the bundle can be downloaded now"
+    late = request.deadline_at + timedelta(seconds=1)
+    assert request.is_open(request.deadline_at)
+    assert not request.is_overdue(late), "the tenant did not download it: nothing to page"
+    assert request.is_expired(late)
+    assert not request.is_open(late)
+    partly = request.record_answers(["identity"], ["identity", "profile"], NOW)
+    assert not partly.is_overdue(late)
+    assert partly.is_expired(late)
+    done = request.record_answers(["identity", "profile"], ["identity", "profile"], late)
+    assert done.is_completed
+    assert not done.is_expired(late + timedelta(days=1))
 
 
 def test_answers_accumulate_until_every_service_has_answered() -> None:
@@ -348,6 +369,91 @@ def test_a_support_request_does_not_show_the_admin_in_the_export(setup: Setup) -
     assert str(setup.admin.user_id) not in json.dumps(document)
 
 
+def test_the_bundle_streams_as_the_same_document(setup: Setup) -> None:
+    made = setup.request.run(setup.owner, setup.tenant, DataRequestKind.EXPORT)
+    bundle = setup.export.run(setup.owner, setup.tenant, made.id)
+    streamed = b"".join(bundle.chunks())
+    assert json.loads(streamed) == json.loads(json.dumps(bundle.document()))
+
+
+def test_identity_s_own_data_is_read_a_page_at_a_time(setup: Setup) -> None:
+    for _ in range(3):
+        RecordConsent(setup.store, clock=lambda: NOW).run(
+            setup.tenant,
+            str(setup.owner.user_id),
+            ConsentPurpose.EMAIL_REMINDERS,
+            granted=True,
+            source=ConsentSource.WEB_SETTINGS,
+            notice_version="2000-01",
+        )
+    setup.staff()
+    made = [setup.request.run(setup.owner, setup.tenant, DataRequestKind.EXPORT) for _ in range(3)]
+    whole = ExportTenantData(setup.store, clock=lambda: NOW)
+    paged = ExportTenantData(setup.store, clock=lambda: NOW, page_size=1)
+    expected = whole.run(setup.owner, setup.tenant, made[0].id).document()
+    sections = paged.run(setup.owner, setup.tenant, made[0].id).document()["services"]
+    found = sections["identity"]["sections"]
+    assert len(found["consents"]) == 4
+    assert len(found["users"]) == 2
+    assert [row["id"] for row in found["data_requests"]] == sorted(str(r.id) for r in made)
+    whole_sections = expected["services"]["identity"]["sections"]
+    for name in ("tenant", "users", "consents", "billing_events"):
+        assert found[name] == whole_sections[name], name
+
+
+class SlowSource(FakeSource):
+    def __init__(self, service: str, wait: threading.Event) -> None:
+        super().__init__(service)
+        self._wait = wait
+
+    def export(self, tenant_id: TenantId) -> SourceSection:
+        self._wait.wait(5)
+        return super().export(tenant_id)
+
+
+def test_the_sources_are_asked_together_and_a_late_one_is_pending(setup: Setup) -> None:
+    released = threading.Event()
+    slow = SlowSource("obligation", released)
+    export = ExportTenantData(
+        setup.store,
+        [setup.profile, slow, FakeSource("notification")],
+        clock=lambda: NOW,
+        concurrency=2,
+        deadline_seconds=0.2,
+    )
+    made = setup.request.run(setup.owner, setup.tenant, DataRequestKind.EXPORT)
+    try:
+        bundle = export.run(setup.owner, setup.tenant, made.id)
+    finally:
+        released.set()
+    document = bundle.document()
+    assert document["services_pending"] == ["obligation"]
+    assert document["services"]["obligation"]["error"] == "no answer within the export's 0.2 s"
+    assert document["services"]["notification"]["sections"] == {"things": [{"id": "1"}]}
+    assert bundle.request.services_done == ("identity", "notification", "profile")
+
+
+def test_the_platform_s_payment_account_stays_out_of_the_billing_events(setup: Setup) -> None:
+    event = StoredBillingEvent(
+        id=uuid4(),
+        tenant_id=setup.tenant,
+        provider_subscription_id="sub_example",
+        kind="subscription.activated",
+        status=None,
+        occurred_at=NOW,
+        received_at=NOW,
+        body_sha256="0" * 64,
+        raw_event={"account_id": "acc_example", "event": "subscription.activated"},
+    )
+    with setup.store(setup.tenant) as uow:
+        assert uow.billing.append_event(event)
+    made = setup.request.run(setup.owner, setup.tenant, DataRequestKind.EXPORT)
+    document = setup.export.run(setup.owner, setup.tenant, made.id).document()
+    (row,) = document["services"]["identity"]["sections"]["billing_events"]
+    assert row["payload"] == {"event": "subscription.activated"}
+    assert "acc_example" not in json.dumps(document)
+
+
 def test_the_directory_counts_every_tenant_s_open_requests(setup: Setup) -> None:
     now = [NOW]
     directory = MemoryDataRequestDirectory(setup.store, lambda: now[0])
@@ -357,10 +463,27 @@ def test_the_directory_counts_every_tenant_s_open_requests(setup: Setup) -> None
     ]
     first = setup.request.run(setup.owner, setup.tenant, DataRequestKind.EXPORT)
     setup.request.run(setup.firm_admin, setup.firm, DataRequestKind.EXPORT)
-    now[0] = NOW + timedelta(days=31)
-    assert directory.open_counts()[0] == OpenRequests(DataRequestKind.EXPORT, 2, 2)
+    unanswered = DataRequest.new(
+        setup.firm,
+        DataRequestKind.DELETION,
+        DataRequestSource.SELF_SERVICE,
+        requested_by="",
+        reason="",
+        at=NOW,
+    )
+    with setup.store(setup.firm) as uow:
+        uow.data_requests.add(unanswered)
+    assert directory.open_counts() == [
+        OpenRequests(DataRequestKind.EXPORT, 2, 0),
+        OpenRequests(DataRequestKind.DELETION, 1, 0),
+    ]
     ExportTenantData(setup.store).run(setup.owner, setup.tenant, first.id)
-    assert directory.open_counts()[0] == OpenRequests(DataRequestKind.EXPORT, 1, 1)
+    assert directory.open_counts()[0] == OpenRequests(DataRequestKind.EXPORT, 1, 0)
+    now[0] = NOW + timedelta(days=31)
+    assert directory.open_counts() == [
+        OpenRequests(DataRequestKind.EXPORT, 0, 0),
+        OpenRequests(DataRequestKind.DELETION, 1, 1),
+    ], "an offered export the tenant never downloaded expires; an unanswered request pages"
 
 
 # ---------------------------------------------------------------- the gauges
@@ -418,14 +541,49 @@ def test_the_http_source_asks_for_the_tenant_with_identity_s_token() -> None:
         "sections": {"nodes": []},
     }
     source = HttpExportSource(
-        "profile", "http://unused", token=lambda: "minted", client=answering(200, body, seen)
+        "profile",
+        "http://unused",
+        token=lambda asked: f"minted-for-{asked}",
+        client=answering(200, body, seen),
     )
     section = source.export(tenant)
     assert section.data == body
     (request,) = seen
     assert request.url.path == "/v1/profile/data-export"
     assert request.headers["x-tenant-id"] == str(tenant)
-    assert request.headers["authorization"] == "Bearer minted"
+    assert request.headers["authorization"] == f"Bearer minted-for-{tenant}"
+
+
+def test_identity_mints_each_source_a_token_bound_to_the_tenant_and_addressed_to_it() -> None:
+    issuer = TestIssuer()
+    minter = IssuerMinter(
+        TokenIssuer(issuer.keys, issuer=issuer.issuer_name, audience=issuer.audience)
+    )
+    settings = identity_settings(
+        identity_export_sources="profile=http://profile.test,obligation=http://obligation.test"
+    )
+    tenant = TenantId.new()
+    seen: list[httpx2.Request] = []
+    sources = export_sources(settings, minter)
+    assert [source.service for source in sources] == ["profile", "obligation"]
+    for source in sources:
+        source._client = answering(503, {}, seen)  # type: ignore[attr-defined]
+        source.export(tenant)
+    verifier = issuer.verifier()
+    principals = [
+        verifier.verify(request.headers["authorization"].removeprefix("Bearer "))
+        for request in seen
+    ]
+    assert [(p.subject, p.acts_for, p.audience) for p in principals] == [
+        ("identity", tenant, "profile"),
+        ("identity", tenant, "obligation"),
+    ]
+    assert all(p.scopes == {Scope.DATA_EXPORT} for p in principals), "no tenant:act"
+    claims = [
+        pyjwt.decode(r.headers["authorization"][7:], options={"verify_signature": False})
+        for r in seen
+    ]
+    assert all(claim["exp"] - claim["iat"] == 120 for claim in claims)
 
 
 @pytest.mark.parametrize(
@@ -453,6 +611,23 @@ def test_the_http_source_survives_an_unreachable_service() -> None:
     client = httpx2.Client(transport=httpx2.MockTransport(refuse), base_url="http://x.test")
     section = HttpExportSource("profile", "http://unused", client=client).export(TenantId.new())
     assert (section.data, section.error) == (None, "unreachable (ConnectError)")
+
+
+def test_outside_local_and_test_the_sources_are_required_and_never_plain_http() -> None:
+    staging: dict[str, Any] = {"env": "staging", "identity_dev_client_secret": None}
+    with pytest.raises(ValueError, match="needs CW_IDENTITY_EXPORT_SOURCES"):
+        identity_settings(**staging, identity_export_sources=DEFAULT_EXPORT_SOURCES)
+    with pytest.raises(ValueError, match="plain http"):
+        identity_settings(**staging, identity_export_sources="profile=http://profile.internal")
+    allowed = identity_settings(
+        **staging,
+        identity_export_sources=(
+            "profile=https://profile.example.org,obligation=http://127.0.0.1:8080,"
+            "notification=http://localhost:8080,applicability-engine=http://[::1]:8080"
+        ),
+    )
+    assert len(allowed.export_sources) == 4
+    assert identity_settings(identity_export_sources=DEFAULT_EXPORT_SOURCES).export_sources
 
 
 def test_the_sources_setting_names_services_and_their_urls() -> None:
@@ -508,7 +683,7 @@ def test_the_routes_in_header_mode(header_mode: tuple[TestClient, FakeSource]) -
     assert made.status_code == 201, made.text
     request = made.json()
     assert (request["status"], request["overdue"], request["services_pending"]) == (
-        "received",
+        "in_progress",
         False,
         ["identity", "profile"],
     )
