@@ -401,14 +401,20 @@ extraction is run again by ingesting the stored document again (the pipeline's b
 
 ## Erasure
 
-The worker always hosts the consumer of tenant.deletion.requested in group `rulebook.erasure`.
-While the flag `identity.tenant_erasure` (`CW_TENANT_ERASURE_ENABLED`, per tenant with `CW_TENANT_ERASURE_TENANTS`; off by default) is off for the tenant, it only logs `erasure.off`. On, it erases nothing: the
-rulebook holds regulatory data of no tenant (documents, rules and their versions, citations,
-candidates and the review of all of them), and none of its tables references a tenant today. It
-answers tenant.data.erased (service rulebook) with an empty `tables` and the tables it keeps,
-each with its reason, and writes a `tenant.erased` audit row, so the deletion request can
-complete (`infrastructure.erasure`). When a table gains a tenant reference (error reports,
-M3-7), its erasure nulls it there.
+The worker always hosts the consumer of tenant.deletion.requested in group `rulebook.erasure`. While
+the flag `identity.tenant_erasure` (`CW_TENANT_ERASURE_ENABLED`, per tenant with
+`CW_TENANT_ERASURE_TENANTS`; off by default) is off for the tenant, it only logs `erasure.off`. On,
+it first checks the event with identity (`GET /v1/identity/erasures/{tenant_id}` at
+`CW_IDENTITY_URL`, the service client with `erasure:verify`, 5 s): one identity did not send for the
+tenant's open deletion request, or one for the internal tenant, erases nothing and is refused (a
+`tenant.erasure_refused` audit row, dead-lettered at once); identity unreachable is retried, then
+dead-lettered. Otherwise it erases nothing: the rulebook holds regulatory data of no tenant
+(documents, rules and their versions, citations, candidates and the review of all of them), and none
+of its tables references a tenant today. It answers tenant.data.erased (service rulebook) with an
+empty `tables` and the tables it keeps, each with its reason, and writes a `tenant.erased` audit row
+and its erased marker (`erased_tenant`, migration 0012), so the deletion request can complete
+(`infrastructure.erasure`). When a table gains a tenant reference (error reports, M3-7), its erasure
+nulls it there; `tests/integration/test_erasure_postgres.py` fails until it does.
 
 ## Changes feed
 

@@ -3,16 +3,18 @@
 The rulebook holds regulatory data, the same for every tenant: documents, clauses, rules and
 their versions, citations, candidates and the review of all of them. None of its tables has a
 tenant column or a reference to a tenant's rows today, so there is nothing to delete and no
-tenant reference to null: the eraser deletes nothing, lists what it keeps and why, and answers
-``tenant.data.erased`` (service rulebook) with an empty ``tables``, so the deletion request can
-complete. When a table gains a tenant reference (error reports, M3-7), its erasure nulls it here.
+tenant reference to null: the eraser deletes nothing, lists what it keeps and why, writes its
+erased marker (``erased_tenant``) and answers ``tenant.data.erased`` (service rulebook) with an
+empty ``tables``, so the deletion request can complete. When a table gains a tenant reference
+(error reports, M3-7), its erasure nulls it here and its writers check the marker.
 
 The reviewers and approvers the rulebook names are the regulatory team's users, of the internal
 tenant, which is never erased.
 
-``PostgresRulebookEraser`` writes the answer to the rulebook's outbox and the audit entry on the
-consumer's connection; ``MemoryRulebookEraser`` does the same to a ``MemoryKnowledgeStore``'s
-audit log and a list of its own (tests and the in-process journey).
+``PostgresRulebookEraser`` writes the answer to the rulebook's outbox, the audit entry and the
+marker on the consumer's connection; ``MemoryRulebookEraser`` does the same to a
+``MemoryKnowledgeStore``'s audit log, a list and markers of its own (tests and the in-process
+journey).
 """
 
 from typing import Final
@@ -21,7 +23,13 @@ from domain_kernel.audit import AuditEntry
 from domain_kernel.erasure import Erased, TenantDataErased, retained
 from domain_kernel.events import DomainEvent
 from domain_kernel.ids import TenantId
-from py_common.erasure import OUTBOX_RETAINED, PostgresTenantEraser, begin_erasure
+from py_common.erasure import (
+    ERASED_RETAINED,
+    OUTBOX_RETAINED,
+    MemoryErasedTenants,
+    PostgresTenantEraser,
+    begin_erasure,
+)
 from rulebook.infrastructure.memory import MemoryKnowledgeStore
 
 REGULATORY = "regulatory data of no tenant"
@@ -35,6 +43,7 @@ RETAINED: Final = (
         ("entity_review", f"{REGULATORY}: the review of the entities the documents name"),
         ("relation_candidate", f"{REGULATORY}: proposed relations between rules"),
     ),
+    ERASED_RETAINED,
     OUTBOX_RETAINED,
 )
 
@@ -51,11 +60,17 @@ class PostgresRulebookEraser(PostgresTenantEraser):
 
 class MemoryRulebookEraser:
     """The eraser on a memory store: the audit entry in the store's log, the answer in
-    ``outbox``."""
+    ``outbox``, the marker in ``erased``."""
 
-    def __init__(self, store: MemoryKnowledgeStore, outbox: list[DomainEvent]) -> None:
+    def __init__(
+        self,
+        store: MemoryKnowledgeStore,
+        outbox: list[DomainEvent],
+        erased: MemoryErasedTenants | None = None,
+    ) -> None:
         self._store = store
         self._outbox = outbox
+        self.erased = erased or MemoryErasedTenants()
 
     def erase(self, tenant_id: TenantId) -> Erased:
         return erased()
@@ -63,3 +78,7 @@ class MemoryRulebookEraser:
     def record(self, event: TenantDataErased, entry: AuditEntry) -> None:
         self._store.write_audit(entry)
         self._outbox.append(event)
+        self.erased.mark(event)
+
+    def write_audit(self, entry: AuditEntry) -> None:
+        self._store.write_audit(entry)
