@@ -13,12 +13,15 @@ with, a service client, or `system:<service>`; never a name), the reason a perso
 before and after (the changed keys only), the time and the correlation id of the request or
 event. Personal identifiers in the reason and the state are masked (`[PAN]`, `[GSTIN]`,
 `[PHONE]`, `[EMAIL]`, `[AADHAAR]`). Rows are append-only: a trigger refuses UPDATE and DELETE,
-a tenant's erasure included (pseudonymising them on erasure is not built yet).
+a tenant's erasure included: the rows outlive it, already masked, for their seven years (the
+data map's exception), and each service's erasure adds its own `tenant.erased` row.
 
 | Service | Actions | Tenant |
 | --- | --- | --- |
 | identity | `tenant.created`, `user.invited`, `user.roles_changed`, `user.disabled`, `consent.recorded`, `subscription.started`, `subscription.status_changed`, `subscription.event_ignored` and `subscription.unmatched` (`system:billing-webhook`) | the tenant |
 | identity (`identity-admin`) | `service_client.created`, `service_client.revoked`, `audit.exported` (`system:identity-admin`) | none |
+| identity (data requests) | `data_request.created`, `data_request.exported`; for a deletion `data_request.erased` per service that answered and `data_request.completed` (`system:identity`), and `data_request.resent` (`system:identity-admin`) | the tenant |
+| identity, profile, obligation, notification, applicability engine, rulebook | `tenant.erased`, one per service that erased the tenant (`system:<service>`), with the row counts and the tables kept | the tenant |
 | profile | `profile_node.registered`, `profile_node.attributes_changed`, `profile_node.prefilled` | the tenant |
 | obligation | `obligation.created`, `obligation.rescheduled` (one per obligation, with its cause), `obligation.closed`, `obligation.status.start`, `.complete`, `.waive`, `obligation.assign`, `obligation.comment` | the tenant |
 | rulebook | `entity_review.decided`, `relation_candidate.approved`, `.rejected`, `rule_version.submitted`, `.approved`, `.returned`, `.published`, `.withdrawn`, `review_task.claimed`, `.drafted`, `.decided` | none |
