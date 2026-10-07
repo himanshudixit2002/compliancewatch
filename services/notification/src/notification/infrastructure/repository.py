@@ -20,7 +20,19 @@ from datetime import UTC, datetime
 from typing import Any, Self
 from uuid import UUID
 
-from sqlalchemy import Connection, Engine, Select, create_engine, delete, func, select, text, update
+from sqlalchemy import (
+    Connection,
+    Engine,
+    Select,
+    create_engine,
+    delete,
+    exists,
+    func,
+    select,
+    text,
+    tuple_,
+    update,
+)
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
@@ -48,7 +60,9 @@ from notification.domain.recipients import (
 )
 from notification.domain.repository import (
     DirectoryEntry,
+    ExportAfter,
     PageAfter,
+    PreferenceRecord,
     SharedUnitOfWork,
     UnitOfWork,
     WorkEntry,
@@ -87,6 +101,9 @@ class SqlAlchemyPreferenceRepository:
             updated_at=row.updated_at.astimezone(UTC),
             language=row.language,
             quiet_hours=QuietHours(row.quiet_hours_start, row.quiet_hours_end),
+            set_for_tenant=None
+            if row.set_for_tenant_id is None
+            else TenantId(row.set_for_tenant_id),
         )
 
     def save(self, preference: ChannelPreference) -> None:
@@ -97,6 +114,9 @@ class SqlAlchemyPreferenceRepository:
             "quiet_hours_start": preference.quiet_hours.start,
             "quiet_hours_end": preference.quiet_hours.end,
             "updated_at": preference.updated_at,
+            "set_for_tenant_id": None
+            if preference.set_for_tenant is None
+            else preference.set_for_tenant.value,
         }
         statement = insert(ChannelPreferenceRow).values(
             channel=preference.channel.value, address=preference.address, **values
@@ -263,6 +283,66 @@ class SqlAlchemyRecipientRepository:
         if after is not None:
             statement = statement.where(RecipientRow.id > after.value)
         return self._load(statement)
+
+    def export_recipients(self, after: ExportAfter | None, limit: int) -> Sequence[Recipient]:
+        """The page's ids oldest first, then the recipients ``_load`` reads, put back in that
+        order."""
+        statement = (
+            select(RecipientRow.id)
+            .where(RecipientRow.tenant_id == self._tenant)
+            .order_by(RecipientRow.created_at, RecipientRow.id)
+            .limit(limit)
+        )
+        if after is not None:
+            statement = statement.where(
+                tuple_(RecipientRow.created_at, RecipientRow.id)
+                > tuple_(after.created_at, after.id)
+            )
+        ids = list(self._session.scalars(statement))
+        if not ids:
+            return []
+        by_id = {
+            recipient.id.value: recipient
+            for recipient in self._load(
+                select(RecipientRow).where(
+                    RecipientRow.tenant_id == self._tenant, RecipientRow.id.in_(ids)
+                )
+            )
+        }
+        return [by_id[recipient_id] for recipient_id in ids]
+
+    def export_preferences(
+        self, after: tuple[Channel, str] | None, limit: int
+    ) -> Sequence[PreferenceRecord]:
+        """channel_preference has no row-level security, so the statement names the tenant twice:
+        the rows its users set on the web (``set_for_tenant_id``), of the addresses in its
+        recipient_address rows (which row-level security scopes too)."""
+        held = exists().where(
+            RecipientAddressRow.tenant_id == self._tenant,
+            RecipientAddressRow.channel == ChannelPreferenceRow.channel,
+            RecipientAddressRow.address == ChannelPreferenceRow.address,
+        )
+        statement = (
+            select(ChannelPreferenceRow)
+            .where(held, ChannelPreferenceRow.set_for_tenant_id == self._tenant)
+            .order_by(ChannelPreferenceRow.channel, ChannelPreferenceRow.address)
+            .limit(limit)
+        )
+        if after is not None:
+            statement = statement.where(
+                tuple_(ChannelPreferenceRow.channel, ChannelPreferenceRow.address)
+                > tuple_(after[0].value, after[1])
+            )
+        return [
+            PreferenceRecord(
+                channel=Channel(row.channel),
+                address=row.address,
+                opted_in=bool(row.opted_in),
+                language=row.language,
+                quiet_hours=QuietHours(row.quiet_hours_start, row.quiet_hours_end),
+            )
+            for row in self._session.scalars(statement)
+        ]
 
     def _following(self, business_id: BusinessId) -> Select[RecipientRow]:
         """The recipients that follow the business; ``_load`` orders them by id."""
@@ -465,6 +545,19 @@ class SqlAlchemyNotificationRepository:
                     (NotificationRow.created_at == after.created_at)
                     & (NotificationRow.id < after.notification_id.value)
                 )
+            )
+        return self._many(statement)
+
+    def export_notifications(self, after: ExportAfter | None, limit: int) -> Sequence[Notification]:
+        statement = (
+            select(NotificationRow)
+            .order_by(NotificationRow.created_at, NotificationRow.id)
+            .limit(limit)
+        )
+        if after is not None:
+            statement = statement.where(
+                tuple_(NotificationRow.created_at, NotificationRow.id)
+                > tuple_(after.created_at, after.id)
             )
         return self._many(statement)
 

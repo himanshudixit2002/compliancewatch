@@ -1,6 +1,7 @@
 """The Postgres units of work: one transaction with the tenant setting for row-level security
-(or none, for the subject index), with the billing ledger, the outbox writer as the event sink and
-``py_common.audit``'s writer as the audit sink, and one without a tenant for channel consents.
+(or none, for the subject index), with the billing ledger, the data requests, the outbox writer
+as the event sink and ``py_common.audit``'s writer as the audit sink, and one without a tenant
+for channel consents.
 
 Tenant, user and consent reads also name the unit of work's tenant in the query. Row-level
 security applies only to a role that does not bypass it, and the dev stack connects as the
@@ -10,9 +11,19 @@ as row-level security would."""
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager
 from datetime import datetime
-from typing import Self
+from typing import Any, Self
 
-from sqlalchemy import Connection, Engine, create_engine, delete, select, text, update
+from sqlalchemy import (
+    Connection,
+    Engine,
+    Select,
+    create_engine,
+    delete,
+    select,
+    text,
+    tuple_,
+    update,
+)
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -34,7 +45,17 @@ from identity.domain.channel_consent import (
     ConsentChannel,
 )
 from identity.domain.consent import ConsentPurpose, ConsentRecord, ConsentSource
+from identity.domain.data_requests import (
+    DataRequest,
+    DataRequestId,
+    DataRequestKind,
+    DataRequestSource,
+    DataRequestStatus,
+    OpenRequests,
+    counts_by_kind,
+)
 from identity.domain.errors import InternalTenantExistsError, SubjectRegisteredError
+from identity.domain.pages import ExportAfter
 from identity.domain.repository import UnitOfWork
 from identity.domain.service_clients import ServiceClient
 from identity.domain.tenancy import (
@@ -55,6 +76,7 @@ from identity.infrastructure.models import (
     BillingSubscriptionRow,
     ChannelConsentRow,
     ConsentRow,
+    DataRequestRow,
     ServiceClientRow,
     TenantRow,
     UserRow,
@@ -97,6 +119,160 @@ class SqlAlchemyConsentRepository:
         if purpose is not None:
             statement = statement.where(ConsentRow.purpose == purpose.value)
         return [_to_record(row) for row in self._session.scalars(statement).all()]
+
+    def page(self, after: ExportAfter | None, limit: int) -> list[ConsentRecord]:
+        if self._tenant is None:
+            return []
+        statement = _paged(
+            select(ConsentRow).where(ConsentRow.tenant_id == self._tenant.value),
+            (ConsentRow.recorded_at, ConsentRow.id),
+            after,
+            limit,
+        )
+        return [_to_record(row) for row in self._session.scalars(statement).all()]
+
+
+def _paged[R](
+    statement: Select[R],
+    order: tuple[Any, Any],
+    after: ExportAfter | None,
+    limit: int,
+) -> Select[R]:
+    """``statement`` oldest first by ``order`` (a time column, then the id), at most ``limit``
+    rows, after ``after``: one page of an export."""
+    if after is not None:
+        statement = statement.where(tuple_(*order) > tuple_(after.at, after.id))
+    return statement.order_by(*order).limit(limit)
+
+
+class SqlAlchemyDataRequestRepository:
+    """The tenant's data requests. Reads name the tenant too, as the other repositories do;
+    with no tenant they find nothing and writes are refused by the policy."""
+
+    def __init__(self, session: Session, tenant_id: TenantId | None) -> None:
+        self._session = session
+        self._tenant = tenant_id
+
+    def add(self, request: DataRequest) -> None:
+        self._session.add(_data_request_row(request))
+        self._session.flush()
+
+    def save(self, request: DataRequest) -> None:
+        if self._tenant is None:
+            return
+        self._session.execute(
+            update(DataRequestRow)
+            .where(
+                DataRequestRow.id == request.id.value,
+                DataRequestRow.tenant_id == self._tenant.value,
+                DataRequestRow.tenant_id == request.tenant_id.value,
+            )
+            .values(
+                status=request.status.value,
+                services_done=list(request.services_done),
+                completed_at=request.completed_at,
+            )
+            .execution_options(synchronize_session=False)
+        )
+
+    def get(self, request_id: DataRequestId) -> DataRequest | None:
+        return self._one(request_id, lock=False)
+
+    def lock(self, request_id: DataRequestId) -> DataRequest | None:
+        return self._one(request_id, lock=True)
+
+    def _one(self, request_id: DataRequestId, *, lock: bool) -> DataRequest | None:
+        if self._tenant is None:
+            return None
+        statement = (
+            select(DataRequestRow)
+            .where(
+                DataRequestRow.id == request_id.value,
+                DataRequestRow.tenant_id == self._tenant.value,
+            )
+            .execution_options(populate_existing=True)
+        )
+        if lock:
+            statement = statement.with_for_update()
+        row = self._session.scalars(statement).one_or_none()
+        return None if row is None else _to_data_request(row)
+
+    def page(self, after: ExportAfter | None, limit: int) -> list[DataRequest]:
+        if self._tenant is None:
+            return []
+        statement = _paged(
+            select(DataRequestRow).where(DataRequestRow.tenant_id == self._tenant.value),
+            (DataRequestRow.requested_at, DataRequestRow.id),
+            after,
+            limit,
+        )
+        return [_to_data_request(row) for row in self._session.scalars(statement)]
+
+    def list(self) -> list[DataRequest]:
+        if self._tenant is None:
+            return []
+        rows = self._session.scalars(
+            select(DataRequestRow)
+            .where(DataRequestRow.tenant_id == self._tenant.value)
+            .order_by(DataRequestRow.requested_at.desc(), DataRequestRow.id.desc())
+            .execution_options(populate_existing=True)
+        )
+        return [_to_data_request(row) for row in rows]
+
+
+def _data_request_row(request: DataRequest) -> DataRequestRow:
+    return DataRequestRow(
+        id=request.id.value,
+        tenant_id=request.tenant_id.value,
+        kind=request.kind.value,
+        source=request.source.value,
+        requested_by=request.requested_by,
+        reason=request.reason,
+        requested_at=request.requested_at,
+        deadline_at=request.deadline_at,
+        status=request.status.value,
+        services_done=list(request.services_done),
+        completed_at=request.completed_at,
+    )
+
+
+def _to_data_request(row: DataRequestRow) -> DataRequest:
+    return DataRequest(
+        id=DataRequestId(row.id),
+        tenant_id=TenantId(row.tenant_id),
+        kind=DataRequestKind(row.kind),
+        source=DataRequestSource(row.source),
+        requested_by=row.requested_by,
+        reason=row.reason,
+        requested_at=row.requested_at,
+        deadline_at=row.deadline_at,
+        status=DataRequestStatus(row.status),
+        services_done=tuple(sorted(set(row.services_done))),
+        completed_at=row.completed_at,
+    )
+
+
+OPEN_REQUESTS_SQL = "SELECT kind, open, overdue FROM identity.data_requests_open()"
+"""The directory function infra/dev/postgres/roles.sql makes: counts of every tenant's open
+requests, which row-level security would hide from this service's own role."""
+
+
+class PostgresDataRequestDirectory:
+    """``DataRequestDirectory`` through ``identity.data_requests_open()``, which runs as the
+    NOLOGIN role cw_identity_directory and answers counts only. Until the role step has made the
+    function, the read fails and the gauges report nothing."""
+
+    def __init__(self, engine: Engine) -> None:
+        self._engine = engine
+
+    def open_counts(self) -> list[OpenRequests]:
+        with self._engine.connect() as connection:
+            rows = connection.execute(text(OPEN_REQUESTS_SQL)).all()
+        return counts_by_kind(
+            OpenRequests(DataRequestKind(row.kind), int(row.open), int(row.overdue))
+            for row in rows
+            if row.kind in {kind.value for kind in DataRequestKind}
+        )
 
 
 class SqlAlchemyTenantRepository:
@@ -165,6 +341,17 @@ class SqlAlchemyUserRepository:
             )
         ).one_or_none()
         return None if row is None else _to_user(row)
+
+    def page(self, after: ExportAfter | None, limit: int) -> list[User]:
+        if self._tenant is None:
+            return []
+        statement = _paged(
+            select(UserRow).where(UserRow.tenant_id == self._tenant.value),
+            (UserRow.created_at, UserRow.id),
+            after,
+            limit,
+        )
+        return [_to_user(row) for row in self._session.scalars(statement)]
 
     def list(self) -> list[User]:
         if self._tenant is None:
@@ -426,6 +613,32 @@ class SqlAlchemyBillingRepository:
         )
         return self._session.execute(statement).scalar_one_or_none() is not None
 
+    def events_page(self, after: ExportAfter | None, limit: int) -> list[StoredBillingEvent]:
+        if self._tenant is None:
+            return []
+        rows = self._session.scalars(
+            _paged(
+                select(BillingEventRow).where(BillingEventRow.tenant_id == self._tenant.value),
+                (BillingEventRow.received_at, BillingEventRow.id),
+                after,
+                limit,
+            )
+        )
+        return [
+            StoredBillingEvent(
+                id=row.id,
+                tenant_id=TenantId(row.tenant_id),
+                provider_subscription_id=row.provider_subscription_id,
+                kind=row.kind,
+                status=None if row.status is None else SubscriptionStatus(row.status),
+                occurred_at=row.occurred_at,
+                received_at=row.received_at,
+                body_sha256=row.body_sha256,
+                raw_event=dict(row.raw_event),
+            )
+            for row in rows
+        ]
+
 
 def _to_subscription(row: BillingSubscriptionRow) -> Subscription:
     return Subscription(
@@ -468,6 +681,7 @@ class SqlAlchemyUnitOfWork:
         self.subjects = SqlAlchemySubjectIndex(session)
         self.service_clients = SqlAlchemyServiceClientRepository(session)
         self.billing = SqlAlchemyBillingRepository(session, tenant_id)
+        self.data_requests = SqlAlchemyDataRequestRepository(session, tenant_id)
         self.events = OutboxSink(connection, writer)
         self.audit = PostgresAuditSink(connection)
 

@@ -111,6 +111,15 @@ class MemoryDecisionRepository:
         ]
         return sorted(found, key=_order, reverse=True)[:limit]
 
+    def export_decisions(self, *, after: DecisionKey | None, limit: int) -> Sequence[Decision]:
+        bound = None if after is None else (after.decided_at, after.decision_id.value)
+        found = [
+            decision
+            for decision in self._all()
+            if decision.tenant_id == self._tenant_id and (bound is None or _order(decision) > bound)
+        ]
+        return sorted(found, key=_order)[:limit]
+
     def visible(self) -> list[Decision]:
         """The tenant's decisions, stored or written in this unit."""
         return [decision for decision in self._all() if decision.tenant_id == self._tenant_id]

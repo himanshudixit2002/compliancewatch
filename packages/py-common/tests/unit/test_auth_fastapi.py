@@ -30,6 +30,7 @@ from py_common.auth.fastapi import (
     CurrentPrincipal,
     authenticate,
     authenticator_of,
+    data_export_scope,
     require_roles,
     shared_token_or_roles,
     tenant_scope,
@@ -70,6 +71,7 @@ Members = Annotated[
     Principal, Depends(require_roles(TENANT_MEMBER_ROLES, scopes={Scope.TENANT_ACT}))
 ]
 Admins = Annotated[Principal, Depends(require_roles(*TENANT_ADMIN_ROLES))]
+ExportTenant = Annotated[TenantId, Depends(data_export_scope("demo", DemoTenantRequiredError))]
 AdminAccess = Annotated[
     Principal,
     Depends(
@@ -113,6 +115,10 @@ def _router() -> APIRouter:
     @router.get("/members")
     def members(principal: Members, tenant_id: Tenant) -> dict[str, str]:
         return {"actor": principal.actor_label, "tenant": str(tenant_id)}
+
+    @router.get("/data-export")
+    def data_export(tenant_id: ExportTenant) -> dict[str, str]:
+        return {"tenant": str(tenant_id)}
 
     @router.get("/admins")
     def admins(principal: Admins) -> dict[str, str]:
@@ -273,6 +279,55 @@ def test_a_service_acts_for_a_tenant_only_with_tenant_act(
     refused = token_client.get("/v1/demo/tenant", headers={**plain, **_tenant_header(_OTHER)})
     _problem(refused, 403, "auth-forbidden")
     assert "tenant:act" in refused.json()["detail"]
+
+
+def test_a_bound_service_token_acts_for_its_tenant_only(
+    token_client: TestClient, issuer: TestIssuer
+) -> None:
+    bound = bearer(issuer.service("identity", [Scope.DATA_EXPORT], acts_for=_TENANT, audience="x"))
+    alone = token_client.get("/v1/demo/tenant", headers=bound)
+    assert alone.json()["tenant"] == str(_TENANT), "no tenant:act needed for its own tenant"
+    same = token_client.get("/v1/demo/tenant", headers={**bound, **_tenant_header(_TENANT)})
+    assert same.json()["tenant"] == str(_TENANT)
+    other = token_client.get("/v1/demo/tenant", headers={**bound, **_tenant_header(_OTHER)})
+    _problem(other, 403, "auth-tenant-mismatch")
+    _problem(token_client.get("/v1/demo/members", headers=bound), 403, "auth-forbidden")
+
+
+def test_a_data_export_answers_admins_and_a_token_bound_to_the_tenant_and_service(
+    token_client: TestClient, issuer: TestIssuer
+) -> None:
+    def export(token: str, tenant: TenantId) -> httpx2.Response:
+        return token_client.get(
+            "/v1/demo/data-export", headers={**bearer(token), **_tenant_header(tenant)}
+        )
+
+    owner = issuer.user(_TENANT, [Role.OWNER])
+    assert export(owner, _TENANT).json() == {"tenant": str(_TENANT)}
+    _problem(export(owner, _OTHER), 403, "auth-tenant-mismatch")
+    _problem(export(issuer.user(_TENANT, [Role.STAFF]), _TENANT), 403, "auth-forbidden")
+
+    bound = issuer.service("identity", [Scope.DATA_EXPORT], acts_for=_TENANT, audience="demo")
+    assert export(bound, _TENANT).json() == {"tenant": str(_TENANT)}
+    _problem(export(bound, _OTHER), 403, "auth-tenant-mismatch")
+    elsewhere = issuer.service(
+        "identity", [Scope.DATA_EXPORT], acts_for=_TENANT, audience="profile"
+    )
+    refused = export(elsewhere, _TENANT)
+    _problem(refused, 403, "auth-forbidden")
+    assert "not addressed to demo" in refused.json()["detail"]
+    unbound = issuer.service("worker", [Scope.DATA_EXPORT, Scope.TENANT_ACT])
+    refused = export(unbound, _TENANT)
+    _problem(refused, 403, "auth-forbidden")
+    assert "bound to the tenant" in refused.json()["detail"]
+    scopeless = issuer.service("identity", [Scope.TENANT_ACT], acts_for=_TENANT, audience="demo")
+    _problem(export(scopeless, _TENANT), 403, "auth-forbidden")
+
+
+def test_a_data_export_in_header_mode_reads_the_header(header_client: TestClient) -> None:
+    response = header_client.get("/v1/demo/data-export", headers=_tenant_header(_OTHER))
+    assert response.json() == {"tenant": str(_OTHER)}
+    _problem(header_client.get("/v1/demo/data-export"), 400, "demo-tenant-required")
 
 
 def test_a_malformed_tenant_header_is_a_validation_problem(header_client: TestClient) -> None:

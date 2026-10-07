@@ -5,6 +5,7 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
+from uuid import UUID
 
 from domain_kernel._validation import require_aware, require_instance
 from domain_kernel.audit import AuditSink
@@ -30,6 +31,19 @@ class ListingAfter:
         if self.due_at is not None:
             require_aware(self.due_at, "due_at")
         require_instance(self.obligation_id, ObligationId, "obligation_id")
+
+
+@dataclass(frozen=True, slots=True)
+class ExportAfter:
+    """Where a page of a tenant's data export starts: after the row with this time and id, in
+    the order of time (an obligation's or a comment's creation, a change's occurrence) and id."""
+
+    at: datetime
+    id: UUID
+
+    def __post_init__(self) -> None:
+        require_aware(self.at, "at")
+        require_instance(self.id, UUID, "id")
 
 
 class ObligationRepository(Protocol):
@@ -91,6 +105,11 @@ class ObligationRepository(Protocol):
         most ``limit``: one page of the public list."""
         ...
 
+    def export_page(self, after: ExportAfter | None, limit: int) -> Sequence[Obligation]:
+        """The tenant's obligations in any status, by creation and id, starting after
+        ``after``, at most ``limit``: one page of the tenant's data export."""
+        ...
+
     def add(self, obligation: Obligation) -> None: ...
 
     def save(self, obligation: Obligation) -> None: ...
@@ -111,6 +130,11 @@ class ChangeLog(Protocol):
         """The obligation's changes, oldest first."""
         ...
 
+    def export_page(self, after: ExportAfter | None, limit: int) -> Sequence[ObligationChange]:
+        """The tenant's changes, by when they happened and id, starting after ``after``, at most
+        ``limit``: one page of the tenant's data export."""
+        ...
+
 
 class CommentLog(Protocol):
     """The comments on the tenant's obligations; append-only."""
@@ -119,6 +143,11 @@ class CommentLog(Protocol):
 
     def for_obligation(self, obligation_id: ObligationId) -> Sequence[ObligationComment]:
         """The obligation's comments, oldest first."""
+        ...
+
+    def export_page(self, after: ExportAfter | None, limit: int) -> Sequence[ObligationComment]:
+        """The tenant's comments, by creation and id, starting after ``after``, at most
+        ``limit``: one page of the tenant's data export."""
         ...
 
 

@@ -33,3 +33,17 @@ SELECT format('GRANT USAGE ON SCHEMA %I TO %I', nspname, :'app_user'),
 FROM pg_namespace
 WHERE nspname IN ('identity', 'profile', 'rulebook', 'applicability', 'obligation',
                   'notification', 'qa', 'llm_gateway', 'eval', 'pipeline', 'audit') \gexec
+
+-- The count of every tenant's open data requests (roles.sql, the identity directory), once
+-- identity's migrations and make db-roles have made it. Granted as the function's owner,
+-- cw_identity_directory: an owner that is not a superuser holds no grant option on it in its own
+-- role (roles.sql made it a member WITH INHERIT FALSE, SET TRUE), so its own GRANT would only
+-- warn. The three statements run in order, the role reset last.
+SELECT statement
+FROM unnest(ARRAY[
+       'SET ROLE cw_identity_directory',
+       format('GRANT EXECUTE ON FUNCTION identity.data_requests_open() TO %I', :'app_user'),
+       'RESET ROLE'
+     ]) WITH ORDINALITY AS steps(statement, step)
+WHERE to_regprocedure('identity.data_requests_open()') IS NOT NULL
+ORDER BY step \gexec

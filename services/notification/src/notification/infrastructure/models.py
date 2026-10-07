@@ -244,6 +244,10 @@ class ChannelPreferenceRow(Base):
             "opted_in IS NOT NULL OR last_inbound_at IS NOT NULL",
             name="ck_channel_preference_not_empty",
         ),
+        CheckConstraint(
+            "set_for_tenant_id IS NULL OR source IN ('web_onboarding', 'web_settings')",
+            name="ck_channel_preference_set_for_tenant",
+        ),
         {"comment": PREFERENCE_COMMENT},
     )
 
@@ -260,6 +264,8 @@ class ChannelPreferenceRow(Base):
     )
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_inbound_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    set_for_tenant_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    """The tenant whose user gave this consent on the web (migration 0004); NULL otherwise."""
 
 
 class SuppressionRow(Base):

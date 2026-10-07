@@ -14,6 +14,7 @@ from applicability_engine.application.dry_run import (
     DryRunReport,
     DryRunSample,
 )
+from applicability_engine.application.export import TenantDataExport
 from applicability_engine.application.review import ReviewEntry
 from applicability_engine.domain.fanout import (
     MAX_REASON_CHARS,
@@ -567,4 +568,24 @@ class DryRunOut(BaseModel):
             samples=[DryRunSampleOut.from_sample(sample) for sample in report.samples],
             max_businesses=report.max_businesses,
             ran_at=report.ran_at.astimezone(UTC),
+        )
+
+
+class DataExportOut(BaseModel):
+    """The engine's part of a tenant's data export: ``decisions`` (every decision, superseded
+    ones included, with each predicate's outcome) and ``review_items`` (the review queue's items,
+    open and resolved), each oldest first and always present."""
+
+    service: str
+    tenant_id: UUID
+    generated_at: AwareDatetime
+    sections: dict[str, list[dict[str, Any]]]
+
+    @classmethod
+    def from_export(cls, export: TenantDataExport) -> Self:
+        return cls(
+            service=export.service,
+            tenant_id=export.tenant_id.value,
+            generated_at=export.generated_at.astimezone(UTC),
+            sections={name: [dict(row) for row in rows] for name, rows in export.sections.items()},
         )

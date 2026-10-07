@@ -454,6 +454,46 @@
         "title": "BusinessSummaryOut",
         "type": "object"
       },
+      "DataExportOut": {
+        "description": "What the profile service holds for one tenant, for the tenant's data export. Every\nsection is present, empty when the tenant has no rows in it.",
+        "properties": {
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "sections": {
+            "additionalProperties": {
+              "items": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "description": "nodes, attributes, versions and review_tasks: JSON rows, oldest first, then the key",
+            "title": "Sections",
+            "type": "object"
+          },
+          "service": {
+            "description": "The service the sections come from: profile",
+            "title": "Service",
+            "type": "string"
+          },
+          "tenant_id": {
+            "format": "uuid",
+            "title": "Tenant Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "service",
+          "tenant_id",
+          "generated_at",
+          "sections"
+        ],
+        "title": "DataExportOut",
+        "type": "object"
+      },
       "EntityIn": {
         "additionalProperties": false,
         "properties": {
@@ -2584,6 +2624,84 @@
           "ca_admin",
           "ca_staff",
           "compliance_lead"
+        ]
+      }
+    },
+    "/v1/profile/data-export": {
+      "get": {
+        "description": "The tenant's nodes (PAN and GSTIN included), attribute values, history and review tasks,\nread a page at a time. Identity calls it when the tenant downloads its export.",
+        "operationId": "data_export_v1_profile_data_export_get",
+        "parameters": [
+          {
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
+            "in": "header",
+            "name": "x-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataExportOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Everything the profile holds for the tenant, for its data export",
+        "tags": [
+          "profile"
         ]
       }
     },

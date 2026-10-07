@@ -29,6 +29,7 @@ from uuid import UUID
 from domain_kernel._validation import require_aware, require_instance, require_int, require_text
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.ids import TenantId
+from identity.domain.pages import ExportAfter
 
 REGISTRATIONS: Final = "registrations"
 """GSTIN registrations a tenant may hold across its businesses."""
@@ -298,6 +299,11 @@ class BillingRepository(Protocol):
     def append_event(self, event: StoredBillingEvent) -> bool:
         """Append ``event``; False, and nothing stored, when the tenant already has an event
         with the same ``body_sha256`` (a redelivery)."""
+        ...
+
+    def events_page(self, after: ExportAfter | None, limit: int) -> list[StoredBillingEvent]:
+        """The tenant's stored webhooks oldest first (by ``received_at``, then id), at most
+        ``limit``, after ``after``: a page of its export."""
         ...
 
 

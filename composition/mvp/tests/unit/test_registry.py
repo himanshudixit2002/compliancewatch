@@ -18,6 +18,7 @@ from applicability_engine.infrastructure.profile_client import (
 from cw_mvp.app import build_app
 from cw_mvp.exposure import EXPOSURE
 from cw_mvp.registry import (
+    EXPORT_SOURCES,
     JWKS_PATH,
     PLAN_LIMITS_FLAG,
     RAW_STORE_SUFFIX,
@@ -111,6 +112,7 @@ def test_routes_that_call_other_services_go_one_level_deep() -> None:
     """With every flag on, as the deepest the calls can go."""
     callers = [entry for entry in REGISTRY if entry.loopback_routes_for(all_flags)]
     assert [entry.name for entry in callers] == [
+        "identity",
         "profile",
         "applicability-engine",
         "obligation",
@@ -131,7 +133,10 @@ def test_routes_that_call_other_services_go_one_level_deep() -> None:
             assert not set(target.called_routes) & set(target.loopback_routes_for(all_flags)), (
                 f"{entry.name} calls a route of {called} that makes calls of its own"
             )
-    assert not BY_NAME["identity"].loopback_routes_for(all_flags), "every service may call identity"
+    identity = BY_NAME["identity"]
+    assert identity.loopback_routes_for(all_flags) == (
+        "GET /v1/identity/data-requests/{request_id}/export",
+    ), "identity calls out only to assemble an export"
 
 
 def test_profile_registrations_count_against_the_loopback_limit_only_with_the_flag(
@@ -159,7 +164,17 @@ def test_the_routes_a_caller_reaches_are_the_ones_listed() -> None:
     assert set(obligation.called_routes) <= set(EXPOSURE["obligation"])
     assert f"GET {QA_OBLIGATIONS_PATH}" in obligation.called_routes, "qa reads the list"
     assert f"GET {NOTIFICATION_OBLIGATIONS_PATH}" in obligation.called_routes, "so does bulk"
-    assert [entry.name for entry in REGISTRY if entry.called_routes] == ["profile", "obligation"]
+    assert [entry.name for entry in REGISTRY if entry.called_routes] == [
+        "identity",
+        "profile",
+        "applicability-engine",
+        "obligation",
+        "notification",
+    ]
+    for name in EXPORT_SOURCES:
+        prefix = "/v1/applicability-engine" if name == "applicability-engine" else f"/v1/{name}"
+        assert f"GET {prefix}/data-export" in BY_NAME[name].called_routes, name
+    assert set(BY_NAME["identity"].called_routes) <= set(EXPOSURE["identity"])
     profile = BY_NAME["profile"]
     assert set(profile.called_routes) <= set(EXPOSURE["profile"])
     assert f"GET {ENGINE_SNAPSHOT_PATH}" in profile.called_routes, "the engine reads snapshots"
@@ -222,3 +237,9 @@ def test_lookups_refuse_unknown_services() -> None:
     with pytest.raises(KeyError, match="nowhere"):
         check_overrides({"nowhere": {}})
     check_overrides({"qa": {}})
+
+
+def test_identity_s_export_sources_point_at_the_internal_listener() -> None:
+    identity = service_settings(entry_named("identity"), mvp_settings(), internal_url=INTERNAL)
+    assert dict(identity.export_sources) == dict.fromkeys(EXPORT_SOURCES, INTERNAL)
+    assert set(BY_NAME["identity"].calls) == set(EXPORT_SOURCES)

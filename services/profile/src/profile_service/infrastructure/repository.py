@@ -27,18 +27,26 @@ from sqlalchemy.pool import NullPool
 
 from domain_kernel.events import DomainEvent
 from domain_kernel.financial_year import FinancialYear
-from domain_kernel.ids import BusinessId, TenantId
+from domain_kernel.ids import BusinessId, TenantId, UserId
 from domain_kernel.ontology import AttributeLevel, AttributeSource
 from profile_service.domain.errors import ProfileNodeNotFoundError
 from profile_service.domain.model import (
     AttributeKey,
     AttributeRecord,
+    NodeAttribute,
     ProfileNode,
+    ProfileVersion,
     ReviewReason,
     ReviewTask,
     ValueState,
 )
-from profile_service.domain.repository import EvalCaseRecorder, UnitOfWork
+from profile_service.domain.repository import (
+    AttributeCursor,
+    EvalCaseRecorder,
+    NodeCursor,
+    UnitOfWork,
+    VersionCursor,
+)
 from profile_service.infrastructure.models import (
     TENANT_SETTING,
     ProfileAttributeRow,
@@ -163,20 +171,17 @@ class SqlAlchemyProfileRepository:
         self._session.merge(_node_row(node))
         for record in node.attributes.values():
             self._session.merge(_attribute_row(node, record))
+        history = ProfileVersion.of(node)
         self._session.add(
             ProfileVersionRow(
-                node_id=node.id.value,
-                tenant_id=node.tenant_id.value,
-                version=node.version,
-                changed_attributes=[],
-                attributes={
-                    f"{key}@{fy or ''}": _json(record.value)
-                    for (key, fy), record in node.attributes.items()
-                    if record.state is ValueState.KNOWN
-                },
-                source="user_input",
-                changed_by=None,
-                at=node.updated_at,
+                node_id=history.node_id.value,
+                tenant_id=history.tenant_id.value,
+                version=history.version,
+                changed_attributes=list(history.changed_attributes),
+                attributes={key: _json(value) for key, value in history.attributes.items()},
+                source=history.source,
+                changed_by=None if history.changed_by is None else history.changed_by.value,
+                at=history.at,
             )
         )
         self._session.flush()
@@ -201,39 +206,92 @@ class SqlAlchemyProfileRepository:
         if node_id is not None:
             statement = statement.where(ReviewTaskRow.node_id == node_id.value)
         rows = self._session.scalars(statement.order_by(ReviewTaskRow.created_at)).all()
+        return [_review_task(row) for row in rows]
+
+    def export_nodes(self, after: NodeCursor | None, limit: int) -> Sequence[ProfileNode]:
+        node = ProfileNodeRow
+        statement = select(node)
+        if after is not None:
+            statement = statement.where(
+                tuple_(node.created_at, node.id) > tuple_(after[0], after[1].value)
+            )
+        rows = self._session.scalars(
+            statement.order_by(node.created_at, node.id).limit(limit)
+        ).all()
+        return self._to_nodes(rows, with_attributes=False)
+
+    def export_attributes(
+        self, after: AttributeCursor | None, limit: int
+    ) -> Sequence[NodeAttribute]:
+        """Keys and years compare byte by byte (collation C), as the memory store compares them."""
+        item = ProfileAttributeRow
+        position = (
+            item.updated_at,
+            item.node_id,
+            item.key.collate("C"),
+            item.fy_label.collate("C"),
+        )
+        statement = select(item)
+        if after is not None:
+            updated_at, node_id, key, fy_label = after
+            statement = statement.where(
+                tuple_(*position) > tuple_(updated_at, node_id.value, key, fy_label)
+            )
+        rows = self._session.scalars(statement.order_by(*position).limit(limit)).all()
+        return [NodeAttribute(BusinessId(row.node_id), _attribute_record(row)) for row in rows]
+
+    def export_versions(self, after: VersionCursor | None, limit: int) -> Sequence[ProfileVersion]:
+        row_type = ProfileVersionRow
+        position = (row_type.at, row_type.node_id, row_type.version)
+        statement = select(row_type)
+        if after is not None:
+            statement = statement.where(
+                tuple_(*position) > tuple_(after[0], after[1].value, after[2])
+            )
+        rows = self._session.scalars(statement.order_by(*position).limit(limit)).all()
         return [
-            ReviewTask(
-                id=BusinessId(row.id),
-                tenant_id=TenantId(row.tenant_id),
+            ProfileVersion(
                 node_id=BusinessId(row.node_id),
-                attribute_key=row.attribute_key,
-                reason=ReviewReason(row.reason),
-                as_of_fy=None if row.fy_label == "" else FinancialYear.parse(row.fy_label),
-                open=row.open,
-                created_at=row.created_at.astimezone(UTC),
+                tenant_id=TenantId(row.tenant_id),
+                version=row.version,
+                changed_attributes=tuple(str(key) for key in row.changed_attributes),
+                attributes=row.attributes,
+                source=row.source,
+                changed_by=None if row.changed_by is None else UserId(row.changed_by),
+                at=row.at.astimezone(UTC),
             )
             for row in rows
         ]
 
-    def _to_nodes(self, rows: Sequence[ProfileNodeRow]) -> list[ProfileNode]:
-        """The nodes of ``rows`` with their attribute values, read in one query."""
+    def export_review_tasks(self, after: NodeCursor | None, limit: int) -> Sequence[ReviewTask]:
+        task = ReviewTaskRow
+        statement = select(task)
+        if after is not None:
+            statement = statement.where(
+                tuple_(task.created_at, task.id) > tuple_(after[0], after[1].value)
+            )
+        rows = self._session.scalars(
+            statement.order_by(task.created_at, task.id).limit(limit)
+        ).all()
+        return [_review_task(row) for row in rows]
+
+    def _to_nodes(
+        self, rows: Sequence[ProfileNodeRow], *, with_attributes: bool = True
+    ) -> list[ProfileNode]:
+        """The nodes of ``rows`` with their attribute values, read in one query, or with none
+        (``with_attributes=False``: the export reads the values in a section of their own)."""
         if not rows:
             return []
-        attribute_rows = self._session.scalars(
-            select(ProfileAttributeRow).where(
-                ProfileAttributeRow.node_id.in_([row.id for row in rows])
-            )
-        ).all()
+        attribute_rows: Sequence[ProfileAttributeRow] = ()
+        if with_attributes:
+            attribute_rows = self._session.scalars(
+                select(ProfileAttributeRow).where(
+                    ProfileAttributeRow.node_id.in_([row.id for row in rows])
+                )
+            ).all()
         records: dict[uuid.UUID, dict[AttributeKey, AttributeRecord]] = {row.id: {} for row in rows}
         for item in attribute_rows:
-            record = AttributeRecord(
-                key=item.key,
-                state=ValueState(item.state),
-                value=None if item.value is None else _from_json(item.value),
-                as_of_fy=None if item.fy_label == "" else FinancialYear.parse(item.fy_label),
-                source=AttributeSource(item.source),
-                updated_at=item.updated_at.astimezone(UTC),
-            )
+            record = _attribute_record(item)
             records[item.node_id][record.storage_key] = record
         return [
             ProfileNode(
@@ -250,6 +308,30 @@ class SqlAlchemyProfileRepository:
             )
             for row in rows
         ]
+
+
+def _attribute_record(item: ProfileAttributeRow) -> AttributeRecord:
+    return AttributeRecord(
+        key=item.key,
+        state=ValueState(item.state),
+        value=None if item.value is None else _from_json(item.value),
+        as_of_fy=None if item.fy_label == "" else FinancialYear.parse(item.fy_label),
+        source=AttributeSource(item.source),
+        updated_at=item.updated_at.astimezone(UTC),
+    )
+
+
+def _review_task(row: ReviewTaskRow) -> ReviewTask:
+    return ReviewTask(
+        id=BusinessId(row.id),
+        tenant_id=TenantId(row.tenant_id),
+        node_id=BusinessId(row.node_id),
+        attribute_key=row.attribute_key,
+        reason=ReviewReason(row.reason),
+        as_of_fy=None if row.fy_label == "" else FinancialYear.parse(row.fy_label),
+        open=row.open,
+        created_at=row.created_at.astimezone(UTC),
+    )
 
 
 LIKE_ESCAPE = "\\"

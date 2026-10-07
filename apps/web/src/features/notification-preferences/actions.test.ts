@@ -171,6 +171,7 @@ describe("savePreference", () => {
       language: "hi",
       quiet_hours_start: "22:00",
       quiet_hours_end: "07:00",
+      subject: OWNER_ID,
     });
     expect(state).toEqual({
       status: "ok",

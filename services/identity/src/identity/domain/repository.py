@@ -1,5 +1,6 @@
 """The identity service's unit of work: consents, tenants, users, the subject index, service
-clients, the billing ledger, the events and the audit entries, in one transaction.
+clients, the billing ledger, the data requests, the events and the audit entries, in one
+transaction.
 
 ``UnitOfWorkFactory(tenant_id)`` opens a transaction for one tenant: row-level security admits
 that tenant's rows only (and, on the tenant table, the tenant itself). ``tenant_id=None`` opens
@@ -16,6 +17,8 @@ from domain_kernel.events import DomainEvent
 from domain_kernel.ids import TenantId, UserId
 from identity.domain.billing import BillingRepository
 from identity.domain.consent import ConsentRepository
+from identity.domain.data_requests import DataRequestRepository
+from identity.domain.pages import ExportAfter
 from identity.domain.service_clients import ServiceClientRepository
 from identity.domain.tenancy import SubjectEntry, Tenant, User
 
@@ -42,6 +45,11 @@ class UserRepository(Protocol):
 
     def get(self, user_id: UserId) -> User | None:
         """The user with this id in the unit of work's tenant; None for another tenant's."""
+        ...
+
+    def page(self, after: ExportAfter | None, limit: int) -> list[User]:
+        """The tenant's users oldest first (by ``created_at``, then id), at most ``limit``,
+        after ``after``: a page of its export."""
         ...
 
     def list(self) -> list[User]:
@@ -82,6 +90,11 @@ class UnitOfWork(Protocol):
     @property
     def billing(self) -> BillingRepository:
         """The tenant's billing ledger; with no tenant it holds nothing and refuses writes."""
+        ...
+
+    @property
+    def data_requests(self) -> DataRequestRepository:
+        """The tenant's data requests; with no tenant it holds nothing and refuses writes."""
         ...
 
     @property

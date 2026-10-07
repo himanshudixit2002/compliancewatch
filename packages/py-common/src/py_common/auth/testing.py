@@ -71,10 +71,18 @@ class TestIssuer:
         return self.issue(principal, ttl).token
 
     def service(
-        self, client_id: str, scopes: Iterable[Scope], *, ttl: timedelta = DEFAULT_TTL
+        self,
+        client_id: str,
+        scopes: Iterable[Scope],
+        *,
+        acts_for: TenantId | None = None,
+        audience: str = "",
+        ttl: timedelta = DEFAULT_TTL,
     ) -> str:
-        """A service client's token holding ``scopes``."""
-        return self.issue(Principal.service(client_id, scopes), ttl).token
+        """A service client's token holding ``scopes``; with ``acts_for`` and ``audience``, bound
+        to that tenant and addressed to that service, as identity's export tokens are."""
+        principal = Principal.service(client_id, scopes, acts_for=acts_for, audience=audience)
+        return self.issue(principal, ttl).token
 
     def jwks(self) -> dict[str, Any]:
         return self.keys.public_jwks()

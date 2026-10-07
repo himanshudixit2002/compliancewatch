@@ -15,6 +15,7 @@ from pydantic import (
 
 from domain_kernel.ids import EntityId
 from domain_kernel.status import ClosureReason, ObligationStatus, RuleVersionStatus
+from obligation.application.export import TenantDataExport
 from obligation.application.queries import ListedObligation
 from obligation.application.tracking import MIN_WAIVER_CHARS, ObligationDetail, StatusAction
 from obligation.domain.comments import MAX_COMMENT_CHARS, ObligationComment
@@ -269,6 +270,28 @@ class CommentIn(BaseModel):
         StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_COMMENT_CHARS),
         Field(description=f"The comment, 1 to {MAX_COMMENT_CHARS} characters once trimmed"),
     ]
+
+
+class DataExportOut(BaseModel):
+    """The obligation service's part of a tenant's data export. ``sections`` holds every section,
+    an empty list when the tenant has nothing in it: ``obligations`` (every obligation, in any
+    status), ``changes`` (the change log of each) and ``comments``, each oldest first and then by
+    id. Rows carry the fields of the records under their own names, ids as strings, instants and
+    days in ISO 8601, enums as their values."""
+
+    service: str
+    tenant_id: UUID
+    generated_at: AwareDatetime
+    sections: dict[str, list[dict[str, Any]]]
+
+    @classmethod
+    def from_export(cls, export: TenantDataExport) -> "DataExportOut":
+        return cls(
+            service=export.service,
+            tenant_id=export.tenant_id.value,
+            generated_at=export.generated_at.astimezone(UTC),
+            sections={name: [dict(row) for row in rows] for name, rows in export.sections.items()},
+        )
 
 
 def _obligation_fields(obligation: Obligation) -> dict[str, Any]:

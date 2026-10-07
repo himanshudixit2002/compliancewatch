@@ -1,8 +1,9 @@
 """The notification service's HTTP app.
 
-``build_app(settings, channels=..., rules=..., email_feedback=..., obligations=...)`` wires the
-service (``notification.composition``) and serves its routes; the channels, the rulebook reader,
-the SES feedback reader and the obligation reader it takes replace the configured ones, which is
+``build_app(settings, channels=..., rules=..., email_feedback=..., obligations=...,
+consents=...)`` wires the service (``notification.composition``) and serves its routes; the
+channels, the rulebook reader, the SES feedback reader, the obligation reader and the consent
+reader it takes replace the configured ones, which is
 how the demo and the tests send and receive through fakes. A process that hosts identity next to
 this service passes identity's ``authenticator`` and a ``token_source`` of service tokens minted in
 the process. With telemetry on, the app also reports the age of the oldest pending work
@@ -27,6 +28,9 @@ from notification.composition import wire
 from notification.domain.channels import ChannelAdapter
 from notification.domain.errors import (
     BulkNotificationsDisabledError,
+    ConsentAddressNotTheirsError,
+    ConsentNotRecordedError,
+    ConsentSubjectRequiredError,
     DependencyUnavailableError,
     EmailFeedbackInvalidError,
     EmailFeedbackUnauthorizedError,
@@ -41,7 +45,12 @@ from notification.domain.errors import (
     UnknownChannelError,
     UnknownTemplateError,
 )
-from notification.domain.ports import EmailFeedbackReader, ObligationReader, RuleVersionReader
+from notification.domain.ports import (
+    ConsentReader,
+    EmailFeedbackReader,
+    ObligationReader,
+    RuleVersionReader,
+)
 from notification.infrastructure.metrics import register_pending_age_gauge
 from notification.settings import NotificationSettings
 from notification.wiring import Wiring
@@ -66,6 +75,9 @@ PROBLEM_STATUS: dict[type[DomainError], int] = {
     EmailFeedbackInvalidError: 422,
     EmailFeedbackUnauthorizedError: 401,
     BulkNotificationsDisabledError: 503,
+    ConsentNotRecordedError: 409,
+    ConsentAddressNotTheirsError: 409,
+    ConsentSubjectRequiredError: 422,
 }
 
 
@@ -89,6 +101,7 @@ def build_app(
     rules: RuleVersionReader | None = None,
     email_feedback: EmailFeedbackReader | None = None,
     obligations: ObligationReader | None = None,
+    consents: ConsentReader | None = None,
     authenticator: Authenticator | None = None,
     token_source: TokenSource | None = None,
 ) -> FastAPI:
@@ -99,6 +112,7 @@ def build_app(
         rules=rules,
         email_feedback=email_feedback,
         obligations=obligations,
+        consents=consents,
         token_source=token_source,
     )
     app = create_app(

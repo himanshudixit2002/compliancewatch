@@ -10,6 +10,10 @@ rule version, a business's open obligations of one, and a place to count deliver
   obligations of a rule version, as the obligation service lists them for the tenant: what a CA
   firm's bulk change card is about. One that cannot answer raises
   ``DependencyUnavailableError``.
+- ``ConsentReader.check(tenant, subject, purpose, channel=..., address=...)``: whether identity
+  holds a granted consent of the subject for the purpose in the tenant, which an opt-in given on
+  the web needs, and whether the address is the subject's own contact where identity knows one
+  (``ConsentAnswer``). One that cannot answer raises ``DependencyUnavailableError``.
 - ``EmailFeedbackReader.read(body)``: the verified report in an SNS message from SES.
 - ``DeliveryMetrics``: the counters and the lag the alerts read, and the provider reports.
   ``NO_METRICS`` counts nothing.
@@ -83,6 +87,27 @@ class ObligationReader(Protocol):
         """The business's open obligations of the rule version, by due date (none last), as the
         tenant reads them: none for a business of another tenant. Raises
         ``DependencyUnavailableError`` when the obligation service cannot answer."""
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class ConsentAnswer:
+    """What identity says of a web opt-in: ``granted``, whether the subject's consent for the
+    purpose is recorded in the tenant and granted now (False when never recorded or withdrawn);
+    ``address_is_theirs``, whether the address is the subject's contact on the channel, or None
+    when identity knows no such contact."""
+
+    granted: bool
+    address_is_theirs: bool | None = None
+
+
+class ConsentReader(Protocol):
+    def check(
+        self, tenant_id: TenantId, subject: str, purpose: str, *, channel: Channel, address: str
+    ) -> ConsentAnswer:
+        """The subject's consent for ``purpose`` (an identity ``ConsentPurpose`` value) and
+        whether ``address`` (normalised) is theirs. Raises ``DependencyUnavailableError`` when
+        identity cannot answer."""
         ...
 
 

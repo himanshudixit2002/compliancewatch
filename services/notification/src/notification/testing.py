@@ -20,6 +20,7 @@ from notification.domain.channels import OutboundMessage
 from notification.domain.errors import DependencyUnavailableError
 from notification.domain.ports import (
     AttemptResult,
+    ConsentAnswer,
     OpenObligation,
     QueueResult,
     ReceiptResult,
@@ -137,6 +138,38 @@ class FakeObligationReader:
         return sorted(
             found,
             key=lambda o: (o.due_at is None, o.due_at, o.obligation_id.value),
+        )
+
+
+class FakeConsentReader:
+    """Identity's consents as a set of granted (tenant, subject, purpose) triples: ``grant``
+    adds one and ``withdraw`` takes it away; ``contacts`` maps (tenant, subject, channel) to the
+    address identity holds for the person (none known when missing). ``down`` makes every read
+    fail as an outage would; ``asked`` lists every read, so a test can tell identity was not asked
+    at all."""
+
+    def __init__(self, granted: Iterable[tuple[TenantId, str, str]] = ()) -> None:
+        self.consents: set[tuple[TenantId, str, str]] = set(granted)
+        self.contacts: dict[tuple[TenantId, str, Channel], str] = {}
+        self.down = False
+        self.asked: list[tuple[TenantId, str, str]] = []
+
+    def grant(self, tenant_id: TenantId, subject: str, purpose: str) -> None:
+        self.consents.add((tenant_id, subject, purpose))
+
+    def withdraw(self, tenant_id: TenantId, subject: str, purpose: str) -> None:
+        self.consents.discard((tenant_id, subject, purpose))
+
+    def check(
+        self, tenant_id: TenantId, subject: str, purpose: str, *, channel: Channel, address: str
+    ) -> ConsentAnswer:
+        self.asked.append((tenant_id, subject, purpose))
+        if self.down:
+            raise DependencyUnavailableError("identity unreachable (fake)")
+        known = self.contacts.get((tenant_id, subject, channel))
+        return ConsentAnswer(
+            granted=(tenant_id, subject, purpose) in self.consents,
+            address_is_theirs=None if known is None else known == address,
         )
 
 

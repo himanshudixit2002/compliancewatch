@@ -10,6 +10,12 @@ member of it reads obligations for:
 - without a token (``header`` mode, or ``dual`` mode without one) the header names the tenant, as
   before tokens existed.
 
+``ExportTenant`` is the tenant whose data is exported
+(``py_common.auth.fastapi.data_export_scope``): a user with one of the tenant admin roles (owner,
+ca_admin) for their own tenant, a service only with a data:export token bound to that tenant and
+addressed to this service, as identity mints one when it assembles the export, or without a token
+the header's.
+
 ``Writer`` is who changes an obligation: a user with one of the tenant member roles, never a
 service, or, without a token, the header's tenant as before. It carries what the use cases record
 of the caller: the audit actor (``py_common.audit.audit_actor``: the user's roles, else the
@@ -24,13 +30,18 @@ from typing import Annotated, Any, Final
 
 from fastapi import Depends, Request
 
-from domain_kernel.access import TENANT_MEMBER_ROLES, Principal, Role, Scope
+from domain_kernel.access import (
+    TENANT_MEMBER_ROLES,
+    Principal,
+    Role,
+    Scope,
+)
 from domain_kernel.ids import TenantId
 from obligation.application.tracking import Acting
 from obligation.domain.errors import ObligationTenantRequiredError
 from obligation.wiring import Wiring
 from py_common.audit import audit_actor, current_correlation_id
-from py_common.auth.fastapi import require_roles, tenant_scope
+from py_common.auth.fastapi import data_export_scope, require_roles, tenant_scope
 
 SERVICE_NAME: Final = "obligation"
 
@@ -78,4 +89,7 @@ def wiring(request: Request) -> Wiring:
 
 Tenant = Annotated[TenantId, Depends(member_tenant)]
 Writer = Annotated[Acting, Depends(acting_member)]
+ExportTenant = Annotated[
+    TenantId, Depends(data_export_scope(SERVICE_NAME, ObligationTenantRequiredError))
+]
 Wired = Annotated[Wiring, Depends(wiring)]

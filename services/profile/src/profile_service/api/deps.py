@@ -24,12 +24,24 @@ from domain_kernel.events import utc_now
 from domain_kernel.ids import TenantId, UserId
 from profile_service.domain.errors import TenantRequiredError
 from profile_service.wiring import Wiring
-from py_common.auth.fastapi import CurrentPrincipal, require_roles, tenant_scope
+from py_common.auth.fastapi import (
+    CurrentPrincipal,
+    data_export_scope,
+    require_roles,
+    tenant_scope,
+)
+
+SERVICE_NAME: Final = "profile"
+"""The service an export token for this service is addressed to."""
 
 member = require_roles(TENANT_MEMBER_ROLES, scopes={Scope.TENANT_ACT})
 """A user with a tenant member role or a service with tenant:act; the anonymous principal of
 ``header`` mode passes."""
 tenant_of_request = tenant_scope(True, TenantRequiredError)
+export_tenant = data_export_scope(SERVICE_NAME, TenantRequiredError)
+"""The tenant whose data export is read: an owner or ca_admin of the tenant, or a service only
+with a data:export token bound to the tenant and addressed to the profile service, as identity
+mints one per export; the anonymous principal of ``header`` mode for the header's tenant."""
 
 
 async def member_tenant(
@@ -60,6 +72,7 @@ PUBLIC_ROUTE: Final[dict[str, Any]] = {"x-roles": list(PUBLIC_ROLES)}
 """``openapi_extra`` of a public route every member of the tenant may call."""
 
 Tenant = Annotated[TenantId, Depends(member_tenant)]
+ExportTenant = Annotated[TenantId, Depends(export_tenant)]
 Caller = CurrentPrincipal
 Wired = Annotated[Wiring, Depends(wiring)]
 

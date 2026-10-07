@@ -19,6 +19,9 @@ unit of work of that tenant sees only its own (row-level security in Postgres).
   notification. Each entry keeps the moment it was planned to go out (``planned_at``), which a
   retry or a rulebook outage does not move, so how long pending work has waited past it can be
   read across tenants (``WorkIndex.oldest_due``).
+- A tenant's data export reads its recipients, its notifications and the preferences the
+  tenant's own users set on the web for the addresses its recipients hold, each a page at a time
+  (``export_*``), in a tenant unit.
 """
 
 from collections.abc import Mapping, Sequence
@@ -27,8 +30,9 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Protocol
+from uuid import UUID
 
-from domain_kernel._validation import require_aware, require_instance
+from domain_kernel._validation import require_aware, require_instance, require_text
 from domain_kernel.audit import AuditSink
 from domain_kernel.channels import Channel
 from domain_kernel.dedupe import DedupeKey
@@ -36,7 +40,11 @@ from domain_kernel.events import DomainEvent
 from domain_kernel.ids import BusinessId, NotificationId, ObligationId, TenantId
 from notification.domain.ids import DispatchId, RecipientId
 from notification.domain.notification import DeliveryState, Notification
-from notification.domain.preferences import ChannelPreference, Suppression
+from notification.domain.preferences import (
+    ChannelPreference,
+    QuietHours,
+    Suppression,
+)
 from notification.domain.recipients import Recipient, RecipientAddress
 
 
@@ -91,6 +99,45 @@ class PageAfter:
         require_instance(self.notification_id, NotificationId, "notification_id")
 
 
+@dataclass(frozen=True, slots=True)
+class ExportAfter:
+    """Where a page of a data export starts: after the row created at ``created_at`` with the id
+    ``id``, oldest first."""
+
+    created_at: datetime
+    id: UUID
+
+    def __post_init__(self) -> None:
+        require_aware(self.created_at, "created_at")
+        require_instance(self.id, UUID, "id")
+
+
+@dataclass(frozen=True, slots=True)
+class PreferenceRecord:
+    """A channel_preference row as the data export of the tenant that set it shows it: only what
+    the tenant's own opt-in or opt-out on the web wrote (the consent, the language and the quiet
+    hours). How and when it was given and when the address last wrote to us are left out: the row
+    is global, and those may come from anyone's action."""
+
+    channel: Channel
+    address: str
+    opted_in: bool
+    language: str
+    quiet_hours: QuietHours
+
+    def __post_init__(self) -> None:
+        require_instance(self.channel, Channel, "channel")
+        require_text(self.address, "address")
+        require_instance(self.opted_in, bool, "opted_in")
+        require_text(self.language, "language")
+        require_instance(self.quiet_hours, QuietHours, "quiet_hours")
+
+    @property
+    def key(self) -> tuple[Channel, str]:
+        """Where the next page starts: preferences are read by channel, then address."""
+        return (self.channel, self.address)
+
+
 class NotificationRepository(Protocol):
     """The notifications of the unit of work's tenant."""
 
@@ -138,6 +185,11 @@ class NotificationRepository(Protocol):
         ``limit``, starting after ``after``."""
         ...
 
+    def export_notifications(self, after: ExportAfter | None, limit: int) -> Sequence[Notification]:
+        """The tenant's notifications oldest first (by creation, then id), at most ``limit``,
+        starting after ``after``: a page of its data export."""
+        ...
+
     def purge(self, before: datetime) -> int:
         """Delete the notifications created before ``before``; returns how many."""
         ...
@@ -172,6 +224,20 @@ class RecipientRepository(Protocol):
     ) -> Sequence[Recipient]:
         """The recipients that follow the business, by id, at most ``limit``, starting after
         the id ``after`` (a recipient removed since still marks the place)."""
+        ...
+
+    def export_recipients(self, after: ExportAfter | None, limit: int) -> Sequence[Recipient]:
+        """The tenant's recipients oldest first (by creation, then id), with their addresses and
+        businesses, at most ``limit``, starting after ``after``: a page of its data export."""
+        ...
+
+    def export_preferences(
+        self, after: tuple[Channel, str] | None, limit: int
+    ) -> Sequence[PreferenceRecord]:
+        """The preferences set on the web for the unit's tenant (``set_for_tenant``) of the
+        addresses the tenant's recipients hold, by channel and address, at most ``limit``,
+        starting after the key ``after``. Preferences belong to no tenant: a row someone else
+        set, or that no tenant can be said to have set, is never read."""
         ...
 
 

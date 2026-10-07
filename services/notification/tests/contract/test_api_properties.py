@@ -3,14 +3,16 @@
 Schemathesis generates valid and invalid requests from the served schema, which
 ``test_openapi.py`` pins to the committed spec, and sends them in process with a tenant header,
 the bot token and the email feedback credentials of the test settings, so the receipt routes
-get past their checks. The SES feedback reader verifies against ``FakeSns``'s certificate, so no
-request leaves the process.
+get past their checks. The SES feedback reader verifies against ``FakeSns``'s certificate and a
+web opt-in asks a ``FakeConsentReader`` (which holds no consent, so it is a 409), so no request
+leaves the process.
 Each response must not be a server error, and its status code, content type and body must be
 the ones the spec documents.
 
 That app runs in header mode. The routes that read a token run again in token mode, with a
 service token from a ``TestIssuer`` that holds every scope they take (tenant:act,
-notification:preferences, notification:send and notification:receipts) and the tenant header.
+notification:preferences, notification:send, notification:receipts and data:export) and the
+tenant header.
 The SES feedback route reads SNS's basic credentials, not a token, and runs only in header mode.
 
 Only the operations in ``OPERATIONS`` run: those served when these tests arrived. A change that
@@ -37,6 +39,7 @@ from notification.main import build_app
 from notification.testing import (
     BOT_TOKEN,
     EMAIL_FEEDBACK_TOKEN,
+    FakeConsentReader,
     FakeObligationReader,
     FakeSns,
     notification_settings,
@@ -63,6 +66,7 @@ OPERATIONS = frozenset(
         "POST /v1/notification/receipts/whatsapp",
         "POST /v1/notification/receipts/email",
         "POST /v1/notification/bulk",
+        "GET /v1/notification/data-export",
     }
 )
 TOKEN_OPERATIONS = OPERATIONS - {
@@ -92,6 +96,7 @@ app = build_app(
     ),
     email_feedback=SnsFeedbackReader(FakeSns().certificates),
     obligations=FakeObligationReader(),
+    consents=FakeConsentReader(),
 )
 HEADERS = {
     "x-tenant-id": TENANT_ID,
@@ -111,9 +116,12 @@ SERVICE_TOKEN = ISSUER.service(
         Scope.NOTIFICATION_PREFERENCES,
         Scope.NOTIFICATION_SEND,
         Scope.NOTIFICATION_RECEIPTS,
+        Scope.DATA_EXPORT,
     ],
 )
-token_app = build_app(notification_settings(**ISSUER.settings_overrides("token")))
+token_app = build_app(
+    notification_settings(**ISSUER.settings_overrides("token")), consents=FakeConsentReader()
+)
 token_schema = schemathesis.openapi.from_asgi("/openapi.json", token_app).include(
     func=lambda ctx: ctx.operation.label in TOKEN_OPERATIONS
 )

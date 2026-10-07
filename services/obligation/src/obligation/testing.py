@@ -1,26 +1,37 @@
 """Builders for tests of this service and of services that consume its events: fixed ids, a
 fixed clock, a sample recurring rule version, the facts the cache keeps of it, a rulebook reader
 from a dict, the identity service's members from a set, and the profile service's nodes from a
-set."""
+set, and a tenant's records as the data export reads them."""
 
 from collections.abc import Callable, Iterable
-from dataclasses import replace
-from datetime import UTC, date, datetime
+from dataclasses import dataclass, replace
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from domain_kernel.ids import BusinessId, DecisionId, RuleId, RuleVersionId, TenantId, UserId
+from domain_kernel.ids import (
+    BusinessId,
+    DecisionId,
+    ObligationId,
+    RuleId,
+    RuleVersionId,
+    TenantId,
+    UserId,
+)
 from domain_kernel.operators import Operator
 from domain_kernel.periods import EffectivePeriod
 from domain_kernel.predicates import Predicate
-from domain_kernel.recurrence import Recurrence
+from domain_kernel.recurrence import Period, Recurrence
 from domain_kernel.rules import ObligationTemplate, RuleVersionSnapshot
-from domain_kernel.status import RuleVersionStatus
+from domain_kernel.status import ClosureReason, ObligationStatus, RuleVersionStatus
+from obligation.domain.comments import CommentId, ObligationComment
 from obligation.domain.errors import (
     IdentityUnavailableError,
     ProfileUnavailableError,
     RulebookUnavailableError,
 )
+from obligation.domain.history import ObligationChange, change_from_event
+from obligation.domain.model import Obligation
 from obligation.domain.ports import Membership
 from obligation.domain.rule_versions import Citation, RuleVersionRead, RuleVersionRef
 
@@ -181,3 +192,53 @@ class FakeProfileNodes:
         if self.down:
             raise ProfileUnavailableError("profile unreachable (fake)")
         return (tenant_id, business_id) in self.nodes
+
+
+@dataclass(frozen=True, slots=True)
+class TenantRecords:
+    """One obligation of a tenant as it is stored, its changes oldest first and a comment on it."""
+
+    obligation: Obligation
+    changes: tuple[ObligationChange, ...]
+    comment: ObligationComment
+
+
+def tenant_records(
+    tenant: TenantId, at: datetime, *, closed_by: UserId | None = None
+) -> TenantRecords:
+    """A synthetic monthly return of January 2000 for ``tenant``, made at ``at`` with its
+    ``created`` change and commented on at once; with ``closed_by`` that user completed it a
+    minute later, a ``closed`` change after the first."""
+    made = Obligation(
+        id=ObligationId.new(),
+        tenant_id=tenant,
+        business_id=BusinessId.new(),
+        rule_version_id=RuleVersionId.new(),
+        decision_id=DecisionId.new(),
+        title="Example return (synthetic)",
+        steps=("Reconcile", "File"),
+        evidence_type="filing_acknowledgement",
+        period=Period(date(2000, 1, 1), date(2000, 2, 1), "2000-01"),
+        due_at=datetime(2000, 2, 20, 18, 29, 59, tzinfo=UTC),
+        status=ObligationStatus.OPEN,
+        created_at=at,
+        updated_at=at,
+        profile_version=1,
+    )
+    changes = [change_from_event(made.created_event(), made)]
+    obligation = made
+    if closed_by is not None:
+        obligation, event = made.close(
+            ClosureReason.COMPLETED, at=at + timedelta(minutes=1), by=closed_by
+        )
+        changes.append(change_from_event(event, obligation))
+    comment = ObligationComment(
+        id=CommentId.new(),
+        tenant_id=tenant,
+        obligation_id=made.id,
+        author_id=closed_by,
+        author_label="system:obligation" if closed_by is None else "owner",
+        body="Example comment (synthetic)",
+        created_at=at,
+    )
+    return TenantRecords(obligation, tuple(changes), comment)

@@ -7,6 +7,12 @@ from identity.application.audit import ReadAuditTrail
 from identity.application.billing import ReceiveBillingWebhook, StartSubscription
 from identity.application.channel_consents import ChannelConsentStatus, RecordChannelConsent
 from identity.application.consents import ConsentStatus, RecordConsent
+from identity.application.data_requests import (
+    ExportTenantData,
+    ListDataRequests,
+    ReadDataRequest,
+    RequestExport,
+)
 from identity.application.entitlements import ReadEntitlements
 from identity.application.sessions import ExchangeSession, IssueServiceToken
 from identity.application.tenancy import (
@@ -19,6 +25,7 @@ from identity.application.tenancy import (
     ReadMembership,
 )
 from identity.domain.channel_consent import ChannelUnitOfWorkFactory
+from identity.domain.data_requests import DataRequestDirectory
 from identity.domain.provider import DevIdentityProvider, IdentityProvider
 from identity.domain.repository import UnitOfWorkFactory
 from identity.settings import IdentitySettings
@@ -55,3 +62,8 @@ class Wiring:
     read_audit_trail: ReadAuditTrail
     read_entitlements: ReadEntitlements
     idempotency: IdempotencyStore
+    request_export: RequestExport
+    list_data_requests: ListDataRequests
+    read_data_request: ReadDataRequest
+    export_tenant_data: ExportTenantData
+    data_request_directory: DataRequestDirectory

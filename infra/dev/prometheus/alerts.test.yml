@@ -1,5 +1,5 @@
 # promtool unit tests for alerts.yml (`make alerts-check`, the ops job in ci.yml). The api-slo,
-# workers, outbox, rulebook-review, notification and pipeline groups have cases; each package
+# workers, outbox, rulebook-review, notification, pipeline and privacy groups have cases; each package
 # appends the cases for the alert group it owns.
 rule_files:
   - alerts.yml
@@ -517,4 +517,30 @@ tests:
               runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/pipeline-triage.md
       - eval_time: 75m
         alertname: TriageQueueStale
+        exp_alerts: []
+
+  # DataRequestOverdue: one request turns overdue at 10m and stays so; two replicas report the
+  # same count. It fires only after an hour (not at 65m, at 75m), and resolves once the request
+  # completes (the count reads 0 from 90m).
+  - interval: 1m
+    input_series:
+      - series: 'identity_data_requests_overdue{service_instance_id="a"}'
+        values: "0x10 1x80 0x30"
+      - series: 'identity_data_requests_overdue{service_instance_id="b"}'
+        values: "0x10 1x80 0x30"
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: DataRequestOverdue
+        exp_alerts: []
+      - eval_time: 75m
+        alertname: DataRequestOverdue
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              team: identity-partner
+            exp_annotations:
+              summary: "A tenant's data request is past its 30-day deadline with no answer"
+              runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/data-requests.md
+      - eval_time: 100m
+        alertname: DataRequestOverdue
         exp_alerts: []

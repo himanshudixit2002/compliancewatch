@@ -28,7 +28,9 @@ from notification.domain.preferences import ChannelPreference, Suppression
 from notification.domain.recipients import Recipient, RecipientAddress
 from notification.domain.repository import (
     DirectoryEntry,
+    ExportAfter,
     PageAfter,
+    PreferenceRecord,
     SharedUnitOfWork,
     UnitOfWork,
     WorkEntry,
@@ -149,6 +151,59 @@ class MemoryRecipientRepository:
             found = [recipient for recipient in found if recipient.id.value > after.value]
         return found[:limit]
 
+    def _mine(self) -> list[Recipient]:
+        return [
+            recipient
+            for (tenant_id, _), recipient in self._state.recipients.items()
+            if tenant_id == self._tenant_id
+        ]
+
+    def export_recipients(self, after: ExportAfter | None, limit: int) -> Sequence[Recipient]:
+        found = sorted(self._mine(), key=_created_key)
+        if after is not None:
+            found = [r for r in found if _created_key(r) > (after.created_at, after.id)]
+        return found[:limit]
+
+    def export_preferences(
+        self, after: tuple[Channel, str] | None, limit: int
+    ) -> Sequence[PreferenceRecord]:
+        held = {
+            (address.channel, address.address)
+            for recipient in self._mine()
+            for address in recipient.addresses
+        }
+        keys = sorted(
+            (
+                key
+                for key in held
+                if (found := self._state.preferences.get(key)) is not None
+                and found.set_for_tenant == self._tenant_id
+            ),
+            key=_address_key,
+        )
+        if after is not None:
+            keys = [key for key in keys if _address_key(key) > _address_key(after)]
+        return [self._record(key) for key in keys[:limit]]
+
+    def _record(self, key: AddressKey) -> PreferenceRecord:
+        preference = self._state.preferences[key]
+        return PreferenceRecord(
+            channel=key[0],
+            address=key[1],
+            opted_in=preference.opted_in,
+            language=preference.language,
+            quiet_hours=preference.quiet_hours,
+        )
+
+
+def _created_key(recipient: Recipient) -> tuple[datetime, UUID]:
+    return (recipient.created_at, recipient.id.value)
+
+
+def _address_key(key: AddressKey) -> tuple[str, str]:
+    """Channel by its value, then address: the order Postgres reads them in."""
+    return (key[0].value, key[1])
+
 
 class MemoryAddressDirectory:
     def __init__(self, state: MemoryState) -> None:
@@ -251,6 +306,14 @@ class MemoryNotificationRepository:
             and (after is None or _newest_key(n) < (after.created_at, after.notification_id.value))
         ]
         return sorted(found, key=_newest_key, reverse=True)[:limit]
+
+    def export_notifications(self, after: ExportAfter | None, limit: int) -> Sequence[Notification]:
+        found = _oldest_first(
+            n
+            for n in self._mine()
+            if after is None or _newest_key(n) > (after.created_at, after.id)
+        )
+        return found[:limit]
 
     def purge(self, before: datetime) -> int:
         old = [n.id for n in self._mine() if n.created_at < before]

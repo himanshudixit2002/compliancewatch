@@ -61,6 +61,30 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  "/v1/applicability-engine/data-export": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Every decision and review item of the tenant, for its data export
+     * @description The engine's part of the tenant's data export, which identity assembles: section
+     *     decisions, every decision of the tenant (superseded ones included) with each predicate's
+     *     outcome, and section review_items, the review queue's items, open and resolved; each oldest
+     *     first, then by id, and present even when empty. Nothing of another tenant, and nothing the
+     *     engine keeps across tenants (the fan-outs, the hold, the business directory).
+     */
+    get: operations["export_data_v1_applicability_engine_data_export_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/applicability-engine/decisions/{decision_id}": {
     parameters: {
       query?: never;
@@ -384,6 +408,32 @@ export type components = {
        * Format: uuid
        */
       rule_version_id: string;
+    };
+    /**
+     * DataExportOut
+     * @description The engine's part of a tenant's data export: ``decisions`` (every decision, superseded
+     *     ones included, with each predicate's outcome) and ``review_items`` (the review queue's items,
+     *     open and resolved), each oldest first and always present.
+     */
+    DataExportOut: {
+      /**
+       * Generated At
+       * Format: date-time
+       */
+      generated_at: string;
+      /** Sections */
+      sections: {
+        [key: string]: {
+          [key: string]: unknown;
+        }[];
+      };
+      /** Service */
+      service: string;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
     };
     /**
      * DecisionOut
@@ -1166,6 +1216,56 @@ export interface operations {
       };
       /** @description Service Unavailable */
       503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  export_data_v1_applicability_engine_data_export_get: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
+        "x-tenant-id"?: string | null;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DataExportOut"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
         headers: {
           [name: string]: unknown;
         };

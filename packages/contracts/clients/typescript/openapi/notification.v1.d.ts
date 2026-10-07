@@ -63,6 +63,23 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  "/v1/notification/data-export": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The tenant's recipients, their addresses' preferences and its notifications */
+    get: operations["data_export_v1_notification_data_export_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/notification/notifications": {
     parameters: {
       query?: never;
@@ -392,6 +409,36 @@ export type components = {
      */
     ConsentSource: "whatsapp_keyword" | "web_onboarding" | "api" | "support" | "web_settings";
     /**
+     * DataExportOut
+     * @description The tenant's data as this service holds it, for the tenant's data export.
+     */
+    DataExportOut: {
+      /**
+       * Generated At
+       * Format: date-time
+       */
+      generated_at: string;
+      /**
+       * Sections
+       * @description recipients (with their addresses and businesses), preferences (of the addresses the tenant's recipients hold) and notifications, each oldest first; every section is present, empty when there is nothing
+       */
+      sections: {
+        [key: string]: {
+          [key: string]: unknown;
+        }[];
+      };
+      /**
+       * Service
+       * @description The service that holds the data: notification
+       */
+      service: string;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+    };
+    /**
      * DeliveryState
      * @enum {string}
      */
@@ -576,6 +623,11 @@ export type components = {
       /** Quiet Hours Start */
       quiet_hours_start?: string | null;
       source: components["schemas"]["ConsentSource"];
+      /**
+       * Subject
+       * @description The identity consent subject (the user id) whose consent covers a web opt-in (opted_in with source web_onboarding or web_settings), as the web app's server names its signed-in user; a web opt-in needs it. Ignored for anything else
+       */
+      subject?: string | null;
     };
     /** PreferenceOut */
     PreferenceOut: {
@@ -1038,6 +1090,56 @@ export interface operations {
       };
     };
   };
+  data_export_v1_notification_data_export_get: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
+        "x-tenant-id"?: string | null;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DataExportOut"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   list_notifications_v1_notification_notifications_get: {
     parameters: {
       query: {
@@ -1312,7 +1414,10 @@ export interface operations {
   set_preference_v1_notification_preferences__channel___recipient__put: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
+        "x-tenant-id"?: string | null;
+      };
       path: {
         channel: components["schemas"]["Channel"];
         recipient: string;
@@ -1361,8 +1466,26 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Unprocessable Entity */
       422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
         headers: {
           [name: string]: unknown;
         };

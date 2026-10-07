@@ -36,6 +36,12 @@ hold) the way a resolution is: an admin a token names; the anonymous caller only
 mode, and a 401 without a token in ``dual`` mode. ``DryRunAdmin`` guards a dry run the same way:
 it reads every tenant's profiles, so only an admin runs one.
 
+``ExportTenant`` guards the tenant's data export, which identity assembles on a download
+(``py_common.auth.fastapi.data_export_scope``): an owner or a CA admin of the tenant (a header
+naming another tenant is a 403), a service only with a data:export token bound to that tenant and
+addressed to this service, as identity mints one per export, or the anonymous caller of
+``header`` mode naming it; anyone else is a 403, and no tenant at all the service's own 401.
+
 ``PUBLIC_ROUTE`` is the ``openapi_extra`` of a route of the public API every member of the tenant
 may call (the impact of a change): the member roles as ``x-roles``.
 """
@@ -47,6 +53,7 @@ from uuid import UUID
 import structlog
 from fastapi import Depends, Header, Request
 
+from applicability_engine import SERVICE_NAME
 from applicability_engine.domain.errors import ApplicabilityTenantRequiredError
 from applicability_engine.wiring import Wiring
 from domain_kernel.access import (
@@ -63,6 +70,7 @@ from py_common.auth.errors import AuthForbiddenError, AuthTokenRequiredError
 from py_common.auth.fastapi import (
     CurrentPrincipal,
     authenticator_of,
+    data_export_scope,
     require_roles,
     tenant_scope,
 )
@@ -82,6 +90,8 @@ member = require_roles(TENANT_MEMBER_ROLES, scopes={Scope.TENANT_ACT})
 """A user with a tenant member role or a service with tenant:act; the anonymous principal of
 ``header`` mode passes."""
 tenant_of_request = tenant_scope(True, ApplicabilityTenantRequiredError)
+export_tenant = data_export_scope(SERVICE_NAME, ApplicabilityTenantRequiredError)
+"""The tenant whose data is exported, once the caller may export it."""
 
 
 async def member_tenant(
@@ -178,6 +188,7 @@ def wiring(request: Request) -> Wiring:
 
 
 Tenant = Annotated[TenantId, Depends(member_tenant)]
+ExportTenant = Annotated[TenantId, Depends(export_tenant)]
 ReviewTenant = Annotated[TenantId, Depends(review_tenant)]
 Resolver = Annotated[Principal, Depends(resolver)]
 FanOutReader = Annotated[Principal, Depends(fan_out_reader)]

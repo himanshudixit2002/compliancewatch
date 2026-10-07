@@ -15,6 +15,10 @@ runs and the global hold (``deps.FanOutReader``); an admin pauses, resumes and c
 sets and releases the hold (``deps.FanOutAdmin``). Every control is audited the same way, of no
 tenant, and then signals the run's workflow.
 
+The data export acts for the request's tenant too, for its owner or CA admin or for identity's
+data:export token bound to the tenant and addressed to this service (``deps.ExportTenant``): every
+decision and review item of the tenant, for identity to put in the tenant's export.
+
 A dry run names no tenant either, unless its scope does: an admin (``deps.DryRunAdmin``) asks
 what a version or a specification would decide for the directory's businesses, and only its
 audit entry is written.
@@ -29,6 +33,7 @@ from fastapi.responses import JSONResponse
 from applicability_engine import SERVICE_NAME
 from applicability_engine.api.deps import (
     DryRunAdmin,
+    ExportTenant,
     FanOutAdmin,
     FanOutReader,
     Resolver,
@@ -38,6 +43,7 @@ from applicability_engine.api.deps import (
     resolved_by,
 )
 from applicability_engine.api.schemas import (
+    DataExportOut,
     DecisionCursor,
     DecisionOut,
     DryRunIn,
@@ -160,6 +166,20 @@ def list_decisions(
 )
 def read_decision(decision_id: UUID, tenant: Tenant, wired: Wired) -> DecisionOut:
     return DecisionOut.from_decision(wired.read_decision.run(tenant, DecisionId(decision_id)))
+
+
+@router.get(
+    "/data-export",
+    summary="Every decision and review item of the tenant, for its data export",
+    responses=problem_responses(401, 403),
+)
+def export_data(tenant: ExportTenant, wired: Wired) -> DataExportOut:
+    """The engine's part of the tenant's data export, which identity assembles: section
+    decisions, every decision of the tenant (superseded ones included) with each predicate's
+    outcome, and section review_items, the review queue's items, open and resolved; each oldest
+    first, then by id, and present even when empty. Nothing of another tenant, and nothing the
+    engine keeps across tenants (the fan-outs, the hold, the business directory)."""
+    return DataExportOut.from_export(wired.export_data.run(tenant))
 
 
 @router.get(

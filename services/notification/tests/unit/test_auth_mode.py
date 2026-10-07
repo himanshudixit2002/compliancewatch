@@ -117,7 +117,12 @@ def test_header_mode_keeps_the_receipts_closed_without_a_bot_token() -> None:
 
 
 def test_dual_mode_needs_the_preferences_scope_from_a_bearer(dual_mode: TestClient) -> None:
-    assert dual_mode.put(PREFERENCE, json=OPT_IN).status_code == 200
+    keyword = {"opted_in": False, "source": "whatsapp_keyword"}
+    assert dual_mode.put(PREFERENCE, json=keyword).status_code == 200
+    anonymous = dual_mode.put(PREFERENCE, json=OPT_IN)
+    assert (anonymous.status_code, problem(anonymous)) == (401, "auth-token-required"), (
+        "an api source skips the consent check, so only a service's token records it"
+    )
     assert dual_mode.put(PREFERENCE, json=OPT_IN, headers=BOT_CLIENT).status_code == 200
     assert dual_mode.get(PREFERENCE, headers=BOT_CLIENT).json()["opted_in"] is True
     for caller in (OWNER, SENDER):

@@ -12,6 +12,7 @@ from typing import Protocol
 
 from domain_kernel._validation import require_aware, require_bool, require_instance, require_text
 from domain_kernel.ids import ConsentId, TenantId, UserId
+from identity.domain.pages import ExportAfter
 
 
 class ConsentPurpose(StrEnum):
@@ -76,4 +77,9 @@ class ConsentRepository(Protocol):
 
     def history(self, subject: str, purpose: ConsentPurpose | None = None) -> list[ConsentRecord]:
         """Oldest first."""
+        ...
+
+    def page(self, after: ExportAfter | None, limit: int) -> list[ConsentRecord]:
+        """The unit of work's tenant's records oldest first (by ``recorded_at``, then id), at
+        most ``limit``, after ``after``: a page of its export."""
         ...

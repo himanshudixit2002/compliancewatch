@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from domain_kernel.financial_year import FinancialYear
 from domain_kernel.ontology import AttributeSource
 from domain_kernel.profiles import ProfileSnapshot
+from profile_service.application.export import TenantDataExport
 from profile_service.application.prefill import PrefillResult
 from profile_service.domain.lookup import GstinLookupResult
 from profile_service.domain.model import (
@@ -249,4 +250,27 @@ class PrefillOut(BaseModel):
             result=None if result.result is None else LookupResultOut.from_result(result.result),
             applied=list(result.applied),
             review_task=None if result.review_task is None else result.review_task.value,
+        )
+
+
+class DataExportOut(BaseModel):
+    """What the profile service holds for one tenant, for the tenant's data export. Every
+    section is present, empty when the tenant has no rows in it."""
+
+    service: str = Field(description="The service the sections come from: profile")
+    tenant_id: UUID
+    generated_at: datetime
+    sections: dict[str, list[dict[str, Any]]] = Field(
+        description=(
+            "nodes, attributes, versions and review_tasks: JSON rows, oldest first, then the key"
+        )
+    )
+
+    @classmethod
+    def from_export(cls, export: TenantDataExport) -> "DataExportOut":
+        return cls(
+            service=export.service,
+            tenant_id=export.tenant_id.value,
+            generated_at=export.generated_at,
+            sections={name: list(rows) for name, rows in export.sections.items()},
         )

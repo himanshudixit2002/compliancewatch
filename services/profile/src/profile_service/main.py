@@ -32,6 +32,7 @@ from profile_service.application.businesses import (
     ReadBusiness,
     UpdateBusiness,
 )
+from profile_service.application.export import ExportTenantData
 from profile_service.application.onboarding import OnboardingChecklist
 from profile_service.application.prefill import PrefillFromGstin
 from profile_service.application.registration import RegisterNodes
@@ -154,6 +155,7 @@ def wire(
         list_businesses=ListBusinesses(unit_of_work),
         add_registration=AddRegistration(unit_of_work, prefill, entitlements=entitlements),
         onboarding=OnboardingChecklist(unit_of_work, loaded),
+        export_data=ExportTenantData(unit_of_work),
     )
 
 

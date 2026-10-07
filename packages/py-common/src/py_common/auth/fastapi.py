@@ -21,8 +21,15 @@ On top of it:
 
 - ``tenant_scope(required, missing_error)``: the request's tenant. A user's token names it, and
   an ``x-tenant-id`` header that names another is a 403 ``auth-tenant-mismatch``. A service names
-  it in ``x-tenant-id`` and needs ``tenant:act`` to do so. The anonymous principal names it in the
-  header, as before. No tenant at all is the service's own ``missing_error``.
+  it in ``x-tenant-id`` and needs ``tenant:act`` to do so, unless its token is bound to a tenant
+  (``Principal.acts_for``): then it acts for that tenant only, and a header naming another is a
+  403 ``auth-tenant-mismatch``. The anonymous principal names it in the header, as before. No
+  tenant at all is the service's own ``missing_error``.
+- ``data_export_scope(service, missing_error)``: the tenant whose data export ``service``
+  answers. A user with a tenant admin role (owner, ca_admin) for their own tenant; a service only
+  with a token bound to that tenant, addressed to ``service`` and holding ``data:export``, as
+  identity mints one per service an export reads; the anonymous principal of ``header`` mode for
+  the header's tenant. Anyone else is a 403.
 - ``require_roles(*roles, scopes=...)``: a user with one of the roles or a service with one of the
   scopes; anyone else is a 403 ``auth-forbidden``. It lets the anonymous principal through, so
   ``header`` mode (and ``dual`` without a token) behaves as before.
@@ -43,7 +50,14 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import SecretStr
 from starlette.concurrency import run_in_threadpool
 
-from domain_kernel.access import ANONYMOUS, Principal, PrincipalKind, Role, Scope
+from domain_kernel.access import (
+    ANONYMOUS,
+    TENANT_ADMIN_ROLES,
+    Principal,
+    PrincipalKind,
+    Role,
+    Scope,
+)
 from domain_kernel.errors import DomainError
 from domain_kernel.ids import TenantId
 from py_common.auth.context import TENANT_FIELD, bind_principal, unbind_principal
@@ -148,11 +162,18 @@ Authenticated = Annotated[Principal, Depends(require_authenticated)]
 
 def resolve_tenant(principal: Principal, offered: TenantId | None) -> TenantId | None:
     """The tenant a request acts for: the user's own, a service's ``x-tenant-id`` (with
-    ``tenant:act``), or the anonymous principal's header."""
+    ``tenant:act``), the one a bound service token names, or the anonymous principal's
+    header."""
     if principal.kind is PrincipalKind.USER:
         if offered is not None and offered != principal.tenant_id:
             raise AuthTenantMismatchError()
         return principal.tenant_id
+    if principal.acts_for is not None:
+        if offered is not None and offered != principal.acts_for:
+            raise AuthTenantMismatchError(
+                "x-tenant-id names another tenant than the one the service token is bound to"
+            )
+        return principal.acts_for
     if (
         principal.kind is PrincipalKind.SERVICE
         and offered is not None
@@ -215,6 +236,35 @@ def tenant_scope(
             structlog.contextvars.unbind_contextvars(TENANT_FIELD)
 
     return tenant
+
+
+def data_export_scope(
+    service: str, missing_error: type[DomainError]
+) -> Callable[..., Awaitable[TenantId]]:
+    """A dependency that resolves the tenant whose data export ``service`` answers, once the
+    caller may read it (see the module's docstring); ``missing_error`` is the service's own
+    problem for a request with no tenant."""
+    tenant_of_request = tenant_scope(True, missing_error)
+
+    async def export_tenant(
+        principal: CurrentPrincipal,
+        tenant: Annotated[TenantId, Depends(tenant_of_request)],
+    ) -> TenantId:
+        if not principal.is_authenticated:
+            return tenant
+        if principal.kind is PrincipalKind.USER:
+            if principal.has_role(*TENANT_ADMIN_ROLES):
+                return tenant
+            raise AuthForbiddenError(_needs(TENANT_ADMIN_ROLES, frozenset({Scope.DATA_EXPORT})))
+        if not principal.has_scope(Scope.DATA_EXPORT):
+            raise AuthForbiddenError(f"a service exports data only with {Scope.DATA_EXPORT.value}")
+        if principal.acts_for is None or principal.acts_for != tenant:
+            raise AuthForbiddenError("an export token is bound to the tenant it exports")
+        if principal.audience != service:
+            raise AuthForbiddenError(f"this export token is not addressed to {service}")
+        return tenant
+
+    return export_tenant
 
 
 def _roles(roles: Iterable[Role | Iterable[Role]]) -> frozenset[Role]:

@@ -9,8 +9,9 @@ from notification.application.bulk import BulkNotify
 from notification.application.dispatch import DispatchDue
 from notification.application.email_feedback import ReceiveEmailFeedback
 from notification.application.enqueue import EnqueueNotifications
+from notification.application.export import ExportTenantData
 from notification.application.history import GetNotification, ListNotifications
-from notification.application.preferences import GetPreference, SetOptIn
+from notification.application.preferences import GetPreference, SetOptIn, SetPreference
 from notification.application.receipts import ReconcileReceipts
 from notification.application.recipients import (
     GetRecipient,
@@ -41,6 +42,8 @@ class Wiring:
     idempotency: IdempotencyStore
     dispatch: DispatchDue
     set_opt_in: SetOptIn
+    set_preference: SetPreference
+    """The route's: ``set_opt_in`` once a web opt-in is known to be covered by a consent."""
     get_preference: GetPreference
     register_recipient: RegisterRecipient
     get_recipient: GetRecipient
@@ -50,6 +53,7 @@ class Wiring:
     get_notification: GetNotification
     list_notifications: ListNotifications
     resend: ResendNotification
+    export: ExportTenantData
     reconcile: ReconcileReceipts
     email_feedback: ReceiveEmailFeedback
     store_ready: Callable[[], Awaitable[bool]]

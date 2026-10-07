@@ -38,22 +38,40 @@ services.
 ``identity_dev_client_secret``: the committed ``identity_dev_clients.toml`` unless
 ``CW_IDENTITY_DEV_CLIENTS`` gives ``client=scope+scope,client=scope``. The secret is refused
 outside local and test.
+
+``identity_export_sources`` are the services whose data a tenant's export holds besides
+identity's own, as ``service=base_url`` pairs (``CW_IDENTITY_EXPORT_SOURCES``): by default the
+dev stack's profile, applicability engine, obligation and notification ports, which only local
+and test accept: anywhere else the setting is required, and each URL is https or a loopback
+address (the export token must not cross a network in clear). ``make web-stack`` passes its own
+ports and the combined product points them at its internal listener (loopback).
+``identity_export_timeout_seconds`` (20 s) bounds each service's answer; the services are asked
+``identity_export_concurrency`` (4) at a time, all of them within
+``identity_export_deadline_seconds`` (45 s), so a download answers within about a minute, below
+a proxy's usual timeout, and a service still answering at the deadline counts as pending.
 """
 
 import tomllib
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Final, Literal, Self
+from urllib.parse import urlsplit
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 
 from domain_kernel.access import Scope
 from identity.domain.billing import MAX_QUANTITY
+from identity.domain.data_requests import parse_export_sources
 from py_common.settings import Settings
 
 MIN_FAKE_SECRET_BYTES = 32
 MIN_DEV_CLIENT_SECRET_CHARS = 32
 DEV_ENVIRONMENTS: Final = ("local", "test")
+DEFAULT_EXPORT_SOURCES: Final = (
+    "profile=http://localhost:8002,applicability-engine=http://localhost:8004,"
+    "obligation=http://localhost:8005,notification=http://localhost:8006"
+)
+LOOPBACK_HOSTS: Final = frozenset({"localhost", "127.0.0.1", "::1"})
 DEV_CLIENTS_FILE: Final = Path(__file__).with_name("identity_dev_clients.toml")
 Store = Literal["memory", "postgres"]
 Billing = Literal["none", "memory", "razorpay"]
@@ -82,6 +100,10 @@ class IdentitySettings(Settings):
     service_token_ttl_seconds: int = Field(default=600, ge=60, le=3600)
     identity_dev_clients: str = ""
     identity_dev_client_secret: SecretStr | None = None
+    identity_export_sources: str = DEFAULT_EXPORT_SOURCES
+    identity_export_timeout_seconds: float = Field(default=20.0, gt=0, le=120)
+    identity_export_concurrency: int = Field(default=4, ge=1, le=16)
+    identity_export_deadline_seconds: float = Field(default=45.0, gt=0, le=120)
 
     @field_validator("razorpay_plan_ids", mode="before")
     @classmethod
@@ -130,6 +152,32 @@ class IdentitySettings(Settings):
             parse_dev_clients(self.identity_dev_clients)
         return self
 
+    @model_validator(mode="after")
+    def _check_the_export_sources(self) -> Self:
+        sources = self.export_sources
+        if "identity" in sources:
+            raise ValueError("CW_IDENTITY_EXPORT_SOURCES lists the other services, not identity")
+        if self.is_dev:
+            return self
+        if self.identity_export_sources.strip() == DEFAULT_EXPORT_SOURCES:
+            raise ValueError(
+                f"CW_ENV={self.env} needs CW_IDENTITY_EXPORT_SOURCES: the default names the dev "
+                "stack's ports, where every export would stay pending"
+            )
+        for service, url in sources.items():
+            if not secure_source(url):
+                raise ValueError(
+                    f"CW_IDENTITY_EXPORT_SOURCES: {service} is called over plain http outside "
+                    f"local and test (CW_ENV={self.env}); use https, or a loopback address for "
+                    "a service in the same process"
+                )
+        return self
+
+    @property
+    def export_sources(self) -> Mapping[str, str]:
+        """The services an export calls, by name, with their base URLs."""
+        return parse_export_sources(self.identity_export_sources)
+
     @property
     def is_dev(self) -> bool:
         """Whether this is a local or test run, where dev conveniences are allowed."""
@@ -139,6 +187,15 @@ class IdentitySettings(Settings):
     def dev_clients(self) -> Mapping[str, frozenset[Scope]]:
         """The dev service clients and their scopes."""
         return parse_dev_clients(self.identity_dev_clients)
+
+
+def secure_source(url: str) -> bool:
+    """Whether an export source's URL keeps the export token off the network in clear: https,
+    or http to a loopback address (the combined deployable calls its own internal listener)."""
+    parts = urlsplit(url)
+    return parts.scheme == "https" or (
+        parts.scheme == "http" and (parts.hostname or "") in LOOPBACK_HOSTS
+    )
 
 
 def _secret(value: SecretStr | None) -> str:

@@ -137,3 +137,118 @@ BEGIN
   );
 END
 $roles$;
+
+-- The identity directory: one NOLOGIN role, cw_identity_directory, that reads every tenant's
+-- data_request rows, and only through identity.data_requests_open(), a SECURITY DEFINER function
+-- it owns which answers counts per kind (open, and overdue: past the 30-day deadline and not
+-- completed) and no row. Identity's forced row-level security hides other tenants' requests from
+-- cw_identity and cw_app, so the DataRequestOverdue alert's gauges count through it. Only
+-- cw_identity and cw_app (when it exists; make product-role grants it too) may EXECUTE it; PUBLIC
+-- may not. The role holds USAGE on identity, SELECT on data_request and the read policy
+-- data_request_directory, and nothing else; nobody logs in as it.
+--
+-- The owner running this file creates the function as the role: a superuser can, and a
+-- deployment's owner (CREATEROLE, not a superuser) is made a member WITH INHERIT FALSE, SET TRUE.
+-- It does not inherit the role's reads, but it may SET ROLE to it and then read every tenant's
+-- requests through the policy, as the runbook's first step does. That is acceptable: the owner
+-- owns identity's tables and could switch their row-level security off anyway. The role makes
+-- the function, takes EXECUTE from PUBLIC and grants it to the callers while it still acts as the
+-- function's owner: a non-superuser owner back in its own role holds neither the function nor a
+-- grant option on it, so a REVOKE or GRANT it ran would only warn and change nothing. The role
+-- gets CREATE on identity only while the function is (re)made. Until identity's migration 0010
+-- has made data_request, the role is created and the rest skipped with a notice.
+--
+-- The function counts the open requests of each kind (neither completed nor, once offered and
+-- past the deadline, expired) and the overdue ones: never answered (received) and past the
+-- deadline (identity.domain.data_requests).
+DO $directory$
+DECLARE
+  directory_role CONSTANT text := 'cw_identity_directory';
+  callers CONSTANT text[] := ARRAY['cw_identity', 'cw_app'];
+  owner_name CONSTANT text := current_user;
+  found_role record;
+  caller text;
+BEGIN
+  SELECT * INTO found_role FROM pg_roles WHERE rolname = directory_role;
+  IF NOT FOUND THEN
+    EXECUTE format(
+      'CREATE ROLE %I NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT '
+      'NOREPLICATION',
+      directory_role
+    );
+  ELSE
+    IF found_role.rolcanlogin THEN
+      EXECUTE format('ALTER ROLE %I NOLOGIN', directory_role);
+    END IF;
+    IF found_role.rolsuper THEN
+      EXECUTE format('ALTER ROLE %I NOSUPERUSER', directory_role);
+    END IF;
+    IF found_role.rolbypassrls THEN
+      EXECUTE format('ALTER ROLE %I NOBYPASSRLS', directory_role);
+    END IF;
+    IF found_role.rolinherit THEN
+      EXECUTE format('ALTER ROLE %I NOINHERIT', directory_role);
+    END IF;
+    IF found_role.rolcreatedb OR found_role.rolcreaterole OR found_role.rolreplication THEN
+      EXECUTE format('ALTER ROLE %I NOCREATEDB NOCREATEROLE NOREPLICATION', directory_role);
+    END IF;
+  END IF;
+
+  IF to_regclass('identity.data_request') IS NULL THEN
+    RAISE NOTICE 'identity.data_request does not exist yet: % gets its function once this file '
+      'runs after identity''s migrations', directory_role;
+    RETURN;
+  END IF;
+
+  IF NOT (SELECT rolsuper FROM pg_roles WHERE rolname = owner_name)
+     AND NOT pg_has_role(owner_name, directory_role, 'SET') THEN
+    EXECUTE format('GRANT %I TO %I WITH INHERIT FALSE, SET TRUE', directory_role, owner_name);
+  END IF;
+  EXECUTE format('GRANT USAGE ON SCHEMA identity TO %I', directory_role);
+  EXECUTE format('GRANT SELECT ON identity.data_request TO %I', directory_role);
+  IF NOT EXISTS (
+    SELECT FROM pg_policies
+     WHERE schemaname = 'identity' AND tablename = 'data_request'
+       AND policyname = 'data_request_directory'
+  ) THEN
+    EXECUTE format(
+      'CREATE POLICY data_request_directory ON identity.data_request FOR SELECT TO %I '
+      'USING (true)',
+      directory_role
+    );
+  END IF;
+
+  IF to_regprocedure('identity.data_requests_open()') IS NOT NULL
+     AND (SELECT proowner::regrole::text FROM pg_proc
+           WHERE oid = to_regprocedure('identity.data_requests_open()')) <> directory_role THEN
+    EXECUTE 'DROP FUNCTION identity.data_requests_open()';
+  END IF;
+  EXECUTE format('GRANT CREATE ON SCHEMA identity TO %I', directory_role);
+  EXECUTE format('SET LOCAL ROLE %I', directory_role);
+  EXECUTE $function$
+    CREATE OR REPLACE FUNCTION identity.data_requests_open()
+    RETURNS TABLE (kind text, open bigint, overdue bigint)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path = pg_catalog, pg_temp
+    AS $body$
+      SELECT r.kind::text,
+             count(*),
+             count(*) FILTER (WHERE r.status = 'received' AND r.deadline_at < now())
+        FROM identity.data_request AS r
+       WHERE r.status = 'received' AND r.deadline_at < now()
+          OR r.status <> 'completed' AND r.deadline_at >= now()
+       GROUP BY r.kind
+    $body$
+  $function$;
+  EXECUTE 'REVOKE ALL ON FUNCTION identity.data_requests_open() FROM PUBLIC';
+  FOREACH caller IN ARRAY callers LOOP
+    IF EXISTS (SELECT FROM pg_roles WHERE rolname = caller) THEN
+      EXECUTE format(
+        'GRANT EXECUTE ON FUNCTION identity.data_requests_open() TO %I', caller
+      );
+    END IF;
+  END LOOP;
+  EXECUTE format('SET LOCAL ROLE %I', owner_name);
+  EXECUTE format('REVOKE CREATE ON SCHEMA identity FROM %I', directory_role);
+END
+$directory$;

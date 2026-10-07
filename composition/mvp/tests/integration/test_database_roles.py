@@ -11,7 +11,16 @@ roles.sql and dev-passwords.sql, before any migration. Every service then migrat
   second run), and it uses no other service's schema;
 - it may add rows to ``audit.event`` of its tenant or of none, under row-level security, and only
   ``cw_identity`` reads them: its tenant's, and the platform's under the regulatory scope;
-- running the file again changes no privilege, and a role made by hand with more is cut back.
+- running the file again changes no privilege, and a role made by hand with more is cut back;
+- the identity directory: the NOLOGIN role cw_identity_directory owns
+  identity.data_requests_open(), which only cw_identity (and cw_app) may run, and it counts every
+  tenant's open requests that row-level security hides from cw_identity itself. It holds no
+  attribute, and its only member, if any, is the owner, which does not inherit it.
+
+A second database is a deployment's: its schemas belong to a login that may create roles but is
+not a superuser. That owner runs roles.sql, identity's migrations, roles.sql again and
+50-app-role.sql (make product-role), and PUBLIC still cannot run the function: the grants are made
+as the function's owner, since the owner in its own role holds no grant option on it.
 """
 
 from collections.abc import Iterator
@@ -21,6 +30,7 @@ from uuid import uuid4
 import pytest
 from pydantic import SecretStr
 from sqlalchemy import Connection, Engine, create_engine, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 from testcontainers.community.postgres import PostgresContainer
 
@@ -29,7 +39,14 @@ from cw_mvp.settings import ReleaseSettings
 from domain_kernel.ids import TenantId
 from py_common.audit.testing import audit_entry
 from py_common.audit.writer import AuditWriter
-from py_common.db_roles import AUDIT_READER, SERVICE_SCHEMAS, apply_roles, as_role, role_name
+from py_common.db_roles import (
+    AUDIT_READER,
+    SERVICE_SCHEMAS,
+    apply_roles,
+    as_role,
+    role_name,
+    sql_dir,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -154,7 +171,7 @@ def test_each_role_logs_in_with_its_dev_password_and_has_no_other_attribute(
                 text(
                     "SELECT rolname, rolcanlogin, rolsuper, rolbypassrls, rolcreatedb, "
                     "rolcreaterole, rolinherit, rolreplication FROM pg_roles "
-                    "WHERE rolname LIKE 'cw\\_%'"
+                    "WHERE rolname LIKE 'cw\\_%' AND rolcanlogin"
                 )
             )
         }
@@ -316,3 +333,217 @@ def test_running_the_file_again_changes_nothing_and_cuts_a_widened_role_back(
         ).one()
         assert tuple(row) == (False, False, False, False, True)
         assert _privileges(connection) == before
+
+
+DIRECTORY_ROLE = "cw_identity_directory"
+
+
+def test_the_identity_directory_counts_across_tenants_for_identity_only(
+    owner_url: str, owner: Engine, first_migration_writes: dict[str, bool]
+) -> None:
+    with owner.connect() as connection:
+        _check_the_directory_role(connection, owner_of(connection))
+    tenants = [TenantId(uuid4()), TenantId(uuid4())]
+    identity = create_engine(as_role(owner_url, "identity"))
+    count = "SELECT coalesce(sum(open), 0) FROM identity.data_requests_open()"
+    with identity.connect() as connection, connection.begin():
+        before = connection.execute(text(count)).scalar_one()
+        for tenant in tenants:
+            _as_tenant(connection, tenant)
+            connection.execute(
+                text(
+                    "INSERT INTO identity.data_request (id, tenant_id, kind, source, "
+                    "requested_at, deadline_at, status) VALUES (:id, :tenant, 'export', "
+                    "'self_service', now() - interval '40 days', now() - interval '10 days', "
+                    "'received')"
+                ),
+                {"id": uuid4(), "tenant": tenant.value},
+            )
+        assert connection.execute(text(count)).scalar_one() == before + 2
+        assert (
+            connection.execute(text("SELECT count(*) FROM identity.data_request")).scalar_one() == 1
+        ), "the role itself reads its current tenant's requests only"
+        connection.rollback()
+    identity.dispose()
+    profile = create_engine(as_role(owner_url, "profile"))
+    with profile.connect() as connection, connection.begin():
+        assert _refused(connection, count) == INSUFFICIENT_PRIVILEGE
+    profile.dispose()
+
+
+def owner_of(connection: Connection) -> str:
+    return str(connection.execute(text("SELECT current_user")).scalar_one())
+
+
+def _check_the_directory_role(connection: Connection, owner: str) -> None:
+    """NOLOGIN with no attribute at all, and no member but the owner, which does not inherit."""
+    role = connection.execute(
+        text(
+            "SELECT rolcanlogin, rolsuper, rolbypassrls, rolinherit, rolcreatedb, rolcreaterole, "
+            "rolreplication FROM pg_roles WHERE rolname = :r"
+        ),
+        {"r": DIRECTORY_ROLE},
+    ).one()
+    assert tuple(role) == (False,) * 7, "NOLOGIN, NOINHERIT and nothing else"
+    members = connection.execute(
+        text(
+            "SELECT m.rolname, a.inherit_option FROM pg_auth_members a "
+            "JOIN pg_roles m ON m.oid = a.member WHERE a.roleid = to_regrole(:r)"
+        ),
+        {"r": DIRECTORY_ROLE},
+    ).all()
+    assert {name for name, _ in members} <= {owner}, members
+    assert not any(inherits for _, inherits in members), "the owner never inherits its reads"
+
+
+FUNCTION = "identity.data_requests_open()"
+DEPLOYMENT_OWNER = "cw_owner"
+APP_ROLE = "cw_app"
+
+
+def _psql(container: PostgresContainer, database: str, user: str, *args: str) -> str:
+    """psql inside the container as ``user`` (the image trusts local connections)."""
+    result = container.exec(
+        ["psql", "-q", "-v", "ON_ERROR_STOP=1", "-U", user, "-d", database, *args]
+    )
+    output = result.output.decode()
+    assert result.exit_code == 0, output
+    return output
+
+
+@pytest.fixture(scope="module")
+def deployment() -> Iterator[tuple[PostgresContainer, str]]:
+    """A database whose schemas belong to a login that may create roles but is neither a
+    superuser nor bypasses row-level security, as a managed Postgres gives a deployment; the
+    platform installed pgvector. The owner runs the role files and identity's migrations."""
+    container = PostgresContainer(POSTGRES_IMAGE, driver="psycopg").with_volume_mapping(
+        str(sql_dir()), "/role-files", "ro"
+    )
+    with container:
+        superuser = container.get_connection_url()
+        admin = create_engine(superuser, isolation_level="AUTOCOMMIT")
+        with admin.connect() as connection:
+            connection.execute(
+                text(
+                    f"CREATE ROLE {DEPLOYMENT_OWNER} LOGIN PASSWORD '{DEPLOYMENT_OWNER}' "
+                    "NOSUPERUSER NOBYPASSRLS CREATEROLE"
+                )
+            )
+            connection.execute(text(f"CREATE DATABASE deployment OWNER {DEPLOYMENT_OWNER}"))
+        admin.dispose()
+        url = (
+            make_url(superuser)
+            .set(username=DEPLOYMENT_OWNER, password=DEPLOYMENT_OWNER, database="deployment")
+            .render_as_string(hide_password=False)
+        )
+        platform = create_engine(
+            make_url(superuser).set(database="deployment"), isolation_level="AUTOCOMMIT"
+        )
+        with platform.connect() as connection:
+            connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        platform.dispose()
+        engine = create_engine(url, isolation_level="AUTOCOMMIT")
+        with engine.connect() as connection:
+            for schema in (*SERVICE_SCHEMAS, AUDIT):
+                connection.execute(text(f"CREATE SCHEMA {schema}"))
+        engine.dispose()
+        apply_roles(url)
+        settings = ReleaseSettings(
+            _env_file=None,
+            service_name="cw-mvp-release",
+            env="test",
+            log_level="WARNING",
+            database_url=RUNTIME,
+            migration_database_url=SecretStr(url),
+        )
+        migrate(settings, services=["identity"])
+        apply_roles(url)
+        _psql(
+            container,
+            "deployment",
+            DEPLOYMENT_OWNER,
+            "-v",
+            f"app_user={APP_ROLE}",
+            "-v",
+            f"app_password={APP_ROLE}",
+            "-f",
+            "/role-files/50-app-role.sql",
+        )
+        apply_roles(url)
+        yield container, url
+
+
+def test_with_an_owner_that_is_not_a_superuser_public_cannot_count(
+    deployment: tuple[PostgresContainer, str],
+) -> None:
+    _, url = deployment
+    owner = create_engine(url)
+    try:
+        with owner.connect() as connection:
+            _check_the_directory_role(connection, DEPLOYMENT_OWNER)
+            function_owner, acl = connection.execute(
+                text(
+                    "SELECT proowner::regrole::text, proacl::text FROM pg_proc "
+                    f"WHERE oid = '{FUNCTION}'::regprocedure"
+                )
+            ).one()
+            assert function_owner == DIRECTORY_ROLE
+            grantees = {entry.split("=")[0] for entry in acl.strip("{}").split(",")}
+            assert grantees == {DIRECTORY_ROLE, "cw_identity", APP_ROLE}, "no PUBLIC entry"
+            runs = {
+                role: connection.execute(
+                    text("SELECT has_function_privilege(:role, :function, 'EXECUTE')"),
+                    {"role": role, "function": FUNCTION},
+                ).scalar_one()
+                for role in ("cw_identity", APP_ROLE, "cw_profile", "cw_obligation")
+            }
+            assert runs == {
+                "cw_identity": True,
+                APP_ROLE: True,
+                "cw_profile": False,
+                "cw_obligation": False,
+            }
+    finally:
+        owner.dispose()
+
+
+def test_with_an_owner_that_is_not_a_superuser_the_rows_are_read_only_through_the_role(
+    deployment: tuple[PostgresContainer, str],
+) -> None:
+    _, url = deployment
+    tenants = [TenantId(uuid4()), TenantId(uuid4())]
+    identity = create_engine(as_role(url, "identity"))
+    owner = create_engine(url)
+    count = "SELECT coalesce(sum(open), 0) FROM identity.data_requests_open()"
+    try:
+        with identity.begin() as connection:
+            for tenant in tenants:
+                _as_tenant(connection, tenant)
+                connection.execute(
+                    text(
+                        "INSERT INTO identity.data_request (id, tenant_id, kind, source, "
+                        "requested_at, deadline_at, status) VALUES (:id, :tenant, 'deletion', "
+                        "'self_service', now() - interval '40 days', "
+                        "now() - interval '10 days', 'received')"
+                    ),
+                    {"id": uuid4(), "tenant": tenant.value},
+                )
+        with identity.connect() as connection:
+            assert connection.execute(text(count)).scalar_one() == 2
+            seen = connection.execute(text("SELECT count(*) FROM identity.data_request"))
+            assert seen.scalar_one() == 0, "without a tenant, row-level security hides every row"
+        with owner.connect() as connection:
+            seen = connection.execute(text("SELECT count(*) FROM identity.data_request"))
+            assert seen.scalar_one() == 0, "the owner does not inherit the directory's reads"
+        with owner.connect() as connection, connection.begin():
+            # It may SET ROLE to read through the policy, as the runbook does: it owns the
+            # tables and could switch their row-level security off anyway.
+            connection.execute(text(f"SET LOCAL ROLE {DIRECTORY_ROLE}"))
+            seen = connection.execute(text("SELECT count(*) FROM identity.data_request"))
+            assert seen.scalar_one() == 2
+            assert (
+                _refused(connection, "DELETE FROM identity.data_request") == INSUFFICIENT_PRIVILEGE
+            ), "the directory role only reads"
+    finally:
+        identity.dispose()
+        owner.dispose()

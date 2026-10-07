@@ -32,6 +32,9 @@ Design reference: Project Foundation guide, sections 7, 14 and 16.
 | `POST /v1/identity/billing/subscriptions` | Start a subscription with the provider (`Idempotency-Key` required: a retry with the same key and body gets the first answer and starts nothing more; another body is a 422); 503 while `CW_BILLING_PROVIDER=none` |
 | `POST /v1/identity/billing/webhook` | Provider webhook; the body is verified against the webhook secret (`X-Razorpay-Signature`) before it is read; 200 with `ignored` when it names no tenant, `duplicate` when the tenant received the same body before |
 | `GET /v1/identity/entitlements` | What the tenant's plan entitles it to: the plan, its status, the `registrations` and `seats` limits (null is none) and whether they are `enforced`; a user's own tenant, or a service with `entitlements:read` naming the tenant in `x-tenant-id` |
+| `POST /v1/identity/data-requests` | Ask for a copy of the tenant's data (`kind` export; deletion is a 422 `identity-data-request-kind-unavailable` until the erasure cascade exists), due 30 days later; the tenant's owner or CA admin, or the regulatory team's admin naming the tenant in `tenant_id` as a support request with a reason |
+| `GET /v1/identity/data-requests`, `GET /v1/identity/data-requests/{request_id}` | The tenant's requests, newest first, or one (404 `identity-data-request-not-found`), each with its deadline, whether it is overdue, the services that answered its export and those still pending; owners and CA admins |
+| `GET /v1/identity/data-requests/{request_id}/export` | The export as a JSON attachment, assembled now and never stored (409 `identity-export-not-ready` for a request that is not an export); owners and CA admins |
 
 Purposes: `terms`, `privacy_notice`, `profile_processing`, `whatsapp_reminders`,
 `email_reminders`, `analytics`. Sources: `web_onboarding`, `web_settings` (a change made later
@@ -53,6 +56,45 @@ a partial unique index on (channel, message_id) makes a redelivered webhook retu
 of its first delivery. A channel consent stays the keyword evidence of that number: the tenant
 user's own `whatsapp_reminders` consent is recorded in `consent_record` at web onboarding, and
 nothing links the two (docs/legal/consent-record.md).
+
+Data requests. A tenant's owner or CA admin asks for a copy of the tenant's data (an export),
+or the regulatory team's admin records one for a tenant that asked support. The request is due
+30 days after it was made (`docs/legal/data-map.md`; counsel to confirm). An export is answered
+as soon as it is made: it is `in_progress` (offered for download) until a download has had every
+service's part, then `completed`. One the tenant never completes expires quietly at its deadline:
+it is no longer open and never overdue, since only the tenant can complete it. Only a request
+still `received`, never answered (a deletion, once M3-6 answers them), is overdue past its
+deadline. The export is assembled on download and never stored: identity's own data of the
+tenant (the tenant, its users, its consent records, its billing customer, subscriptions and
+webhooks, its data requests; the growing ones read 500 rows at a time) and the part each service
+of `CW_IDENTITY_EXPORT_SOURCES` answers on `GET /v1/<service>/data-export` (profile, the
+applicability engine, obligation, notification; `service=url` pairs, the dev ports by default and
+required outside local and test, each https or loopback; the internal listener in the combined
+product). Identity calls each with a token it mints for that call: `data:export` only, bound to
+the tenant (`tid`) and addressed to that one service (`aud` `compliancewatch:<service>`), for two
+minutes, so a token that leaks cannot be replayed for another tenant or at another service. The
+services are asked four at a time, 20 seconds each at most and 45 seconds for all
+(`CW_IDENTITY_EXPORT_CONCURRENCY`, `CW_IDENTITY_EXPORT_TIMEOUT_SECONDS`,
+`CW_IDENTITY_EXPORT_DEADLINE_SECONDS`), and the answer is written a service at a time. A source
+that fails, is late or answers for another tenant is named in `services_pending` and its entry
+says why; the download still answers 200. Two downloads at once each add the services that
+answered them (the request's row is locked while they are recorded). No secrets reach the bundle
+(no session versions, service clients, idempotency keys, checkout links, webhook digests or the
+platform's own payment account id), and a support request shows `support` as who asked; the
+tenant's audit trail names the admin who recorded it, as it names every actor. The table is
+`data_request` (migration 0010), under forced row-level security; `data_request.created` and
+`data_request.exported` go to the tenant's audit trail.
+
+Counting every tenant's overdue requests needs to read past row-level security, so it goes
+through `identity.data_requests_open()`: a `SECURITY DEFINER` function owned by the NOLOGIN role
+`cw_identity_directory`, which has a read policy of its own on `data_request` and nothing else,
+answering counts per kind (open, overdue) and no row. `infra/dev/postgres/roles.sql` makes the
+role, the policy and the function once the table exists; only `cw_identity` and `cw_app` may run
+it (the role grants that itself, as the function's owner). A schema owner that is not a superuser
+is a member of the role WITH INHERIT FALSE, SET TRUE: it does not inherit the reads, but may SET
+ROLE to read through the policy, as the runbook does, no more than the tables' owner could anyway. With telemetry on, the app reports `identity_data_requests_open{kind}` and
+`identity_data_requests_overdue` from it, read at most once a minute; the DataRequestOverdue
+alert pages on the second (`docs/runbooks/data-requests.md`).
 
 Sign-in. People sign in at the identity provider and the web exchanges the provider's token at
 `POST /v1/identity/sessions` for this service's access token, an ES256 JWT with the claims `iss`,
@@ -262,9 +304,9 @@ The secrets these steps create rotate as `docs/runbooks/secret-rotation.md` desc
 ```
 src/identity/
   api/             # routers, request/response schemas, auth dependencies
-  domain/          # tenancy.py: Tenant, User, roles by tenant kind; provider.py: IdentityProvider; sessions.py: TokenMinter; service_clients.py; events.py; repository.py: the unit of work; consent.py, channel_consent.py, billing.py (plans, the ledger port), entitlements.py, flags.py
-  application/     # tenancy.py: CreateTenant, CurrentUser, InviteUser, ChangeRoles, DisableUser, ListUsers, ReadMembership; sessions.py: ExchangeSession, IssueServiceToken; bootstrap.py: BootstrapInternalTenant, service clients; consents.py, channel_consents.py, billing.py, entitlements.py (ReadEntitlements, SeatCheck)
-  infrastructure/  # memory.py, models.py, repository.py (Postgres, RLS, outbox, the billing ledger); minter.py; flags.py; providers/{fake,supabase}.py; billing/{memory,razorpay}.py
+  domain/          # tenancy.py: Tenant, User, roles by tenant kind; provider.py: IdentityProvider; sessions.py: TokenMinter; service_clients.py; events.py; repository.py: the unit of work; consent.py, channel_consent.py, billing.py (plans, the ledger port), entitlements.py, flags.py, data_requests.py (DataRequest, its deadline, the ExportSource and directory ports)
+  application/     # tenancy.py: CreateTenant, CurrentUser, InviteUser, ChangeRoles, DisableUser, ListUsers, ReadMembership; sessions.py: ExchangeSession, IssueServiceToken; bootstrap.py: BootstrapInternalTenant, service clients; consents.py, channel_consents.py, billing.py, entitlements.py (ReadEntitlements, SeatCheck), data_requests.py (RequestExport, ListDataRequests, ReadDataRequest, ExportTenantData)
+  infrastructure/  # memory.py, models.py, repository.py (Postgres, RLS, outbox, the billing ledger); minter.py; flags.py; providers/{fake,supabase}.py; billing/{memory,razorpay}.py; export_sources.py (HttpExportSource); data_request_metrics.py (the open and overdue gauges)
   admin.py         # identity-admin: signing keys, service clients, the internal tenant
   composition.py   # the identity provider CW_AUTH_PROVIDER names
   identity_dev_clients.toml  # the service clients local and test runs create

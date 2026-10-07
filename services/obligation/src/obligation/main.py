@@ -4,7 +4,8 @@ Guide section 11: wiring of interfaces to implementations happens here, never in
 The use cases run on the Postgres unit of work (row-level security by tenant, events through the
 outbox, audit entries into ``audit.event``). The API reads a business's obligations and one
 obligation whole, and lets the tenant's members start, complete, waive, assign and comment on
-one; the caller and its tenant come from ``py_common.auth`` by ``CW_AUTH_MODE`` (``api.deps``).
+one, and hands the tenant's admins and identity the service's part of a tenant's data export;
+the caller and its tenant come from ``py_common.auth`` by ``CW_AUTH_MODE`` (``api.deps``).
 The writes take an Idempotency-Key, kept next to the obligations (``idempotency_key``, migration
 0005) and each key in its own short transaction. The detail reads the rulebook at
 ``CW_RULEBOOK_URL`` when its cache has no row of the version, an assignment asks the identity
@@ -24,6 +25,7 @@ from domain_kernel.errors import DomainError, InvalidTransitionError
 from obligation import __version__
 from obligation.api.router import business_router, public_router, router
 from obligation.application.changes import ApplyDeadlineChange, CloseObligation, WithdrawRule
+from obligation.application.export import ExportTenantData
 from obligation.application.materialise import MaterialiseObligations
 from obligation.application.queries import ListBusinessObligations, ListObligations
 from obligation.application.tracking import (
@@ -118,6 +120,7 @@ def wire(
         change_status=ChangeStatus(unit_of_work),
         assign=AssignObligation(unit_of_work, members),
         add_comment=AddComment(unit_of_work),
+        export_tenant_data=ExportTenantData(unit_of_work),
     )
 
 

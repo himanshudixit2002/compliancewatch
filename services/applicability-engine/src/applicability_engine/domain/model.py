@@ -181,7 +181,8 @@ class Decision(ApplicabilityDecision):
 
 @dataclass(frozen=True, slots=True)
 class DecisionKey:
-    """Where a page of a business's decisions ends: newest first, then by id."""
+    """Where a page of decisions ends, by decided_at then id: newest first in a business's
+    listing, oldest first in the tenant's data export."""
 
     decided_at: datetime
     decision_id: DecisionId
