@@ -100,6 +100,8 @@ export function QueueList({ rows, caption, claim }: QueueListProps) {
   const [active, setActive] = useState(0);
   const [help, setHelp] = useState(false);
   const links = useRef<(HTMLAnchorElement | null)[]>([]);
+  /** Where the focus was when the shortcuts dialog opened, given back when it closes. */
+  const beforeHelp = useRef<HTMLElement | null>(null);
   const fallback: WriteAction<WriteResult> = async (state) => state;
   const { attempt, send, pending, outcomeRef } = useWriteAction(claim ?? fallback);
   const current = Math.min(active, Math.max(rows.length - 1, 0));
@@ -110,6 +112,12 @@ export function QueueList({ rows, caption, claim }: QueueListProps) {
     links.current[target]?.focus();
   };
 
+  const openHelp = () => {
+    beforeHelp.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setHelp(true);
+  };
+
   const onListKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.defaultPrevented || event.repeat) return;
     if (event.ctrlKey || event.metaKey || event.altKey) return;
@@ -118,7 +126,7 @@ export function QueueList({ rows, caption, claim }: QueueListProps) {
     if (row === null) return;
     if (event.key === "?") {
       event.preventDefault();
-      setHelp(true);
+      openHelp();
     } else if (event.key === "j") {
       event.preventDefault();
       focusRow(row + 1);
@@ -146,7 +154,7 @@ export function QueueList({ rows, caption, claim }: QueueListProps) {
         <p id={`${id}-hint`} className="text-sm text-fg-muted">
           {t("reviewQueue.keys.hint")}
         </p>
-        <Button type="button" variant="secondary" size="sm" onClick={() => setHelp(true)}>
+        <Button type="button" variant="secondary" size="sm" onClick={openHelp}>
           {t("reviewQueue.keys.button")}
         </Button>
       </div>
@@ -310,7 +318,17 @@ export function QueueList({ rows, caption, claim }: QueueListProps) {
         </Table>
       </div>
       <Dialog open={help} onOpenChange={setHelp}>
-        <DialogContent data-slot="shortcuts-dialog">
+        <DialogContent
+          data-slot="shortcuts-dialog"
+          onCloseAutoFocus={(event) => {
+            // No trigger opened the dialog, so the focus goes back to where it was by hand.
+            const target = beforeHelp.current;
+            if (target !== null && target.isConnected) {
+              event.preventDefault();
+              target.focus();
+            }
+          }}
+        >
           <DialogHeader>
             <DialogTitle>{t("reviewQueue.keys.title")}</DialogTitle>
             <DialogDescription>{t("reviewQueue.keys.description")}</DialogDescription>

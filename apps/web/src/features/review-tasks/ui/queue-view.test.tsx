@@ -147,6 +147,8 @@ describe("QueueView", () => {
     expect(document.activeElement).not.toBe(links[1]);
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).toBeNull();
+    // The focus goes back to the row it was on.
+    await waitFor(() => expect(document.activeElement).toBe(links[0]));
     expect(claim).not.toHaveBeenCalled();
   });
 
