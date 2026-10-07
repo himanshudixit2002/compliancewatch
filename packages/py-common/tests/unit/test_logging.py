@@ -6,6 +6,7 @@ import timeit
 from dataclasses import dataclass
 from typing import Any
 
+import pytest
 import structlog
 from hypothesis import given
 from hypothesis import strategies as st
@@ -13,6 +14,7 @@ from pydantic import BaseModel
 
 from domain_kernel.pii import CYCLE, MAX_DEPTH, TOO_DEEP
 from py_common.logging import (
+    FRAME_LOCALS_ENVIRONMENTS,
     REDACTION_FAILED,
     configure_logging,
     get_logger,
@@ -224,9 +226,15 @@ def _refuse(contact: str) -> None:
     raise ValueError(f"refused {contact} ({len(email)}, {len(tenant_id)})")
 
 
-def test_an_exceptions_message_and_its_frames_locals_are_masked() -> None:
+def _fail_with_a_secret_local() -> None:
+    token = "token-of-the-test-that-must-not-ship"
+    raise ValueError(f"failed after {len(token)} characters")
+
+
+@pytest.mark.parametrize("env", sorted(FRAME_LOCALS_ENVIRONMENTS))
+def test_in_local_and_test_a_traceback_carries_its_frames_locals_masked(env: str) -> None:
     buffer = io.StringIO()
-    configure_logging(service_name="test-svc", stream=buffer)
+    configure_logging(service_name="test-svc", stream=buffer, env=env)
     try:
         _refuse("PAN ABCDE1234F")
     except ValueError:
@@ -249,6 +257,26 @@ def test_an_exceptions_message_and_its_frames_locals_are_masked() -> None:
         assert "[" in frame["locals"]["contact"]
     assert "ABCDE1234F" not in buffer.getvalue()
     assert "owner@example.com" not in buffer.getvalue()
+
+
+@pytest.mark.parametrize("env", ["staging", "prod", None])
+def test_elsewhere_a_traceback_carries_no_locals(env: str | None) -> None:
+    buffer = io.StringIO()
+    configure_logging(service_name="test-svc", stream=buffer, env=env)
+    try:
+        _fail_with_a_secret_local()
+    except ValueError:
+        get_logger("py_common.tests").exception("failed")
+    try:
+        _fail_with_a_secret_local()
+    except ValueError:
+        logging.getLogger("httpx").error("foreign failed", exc_info=True)
+    for line in _lines(buffer)[-2:]:
+        [exception] = line["exception"]
+        assert exception["exc_value"] == "failed after 36 characters"
+        assert exception["frames"][-1]["name"] == "_fail_with_a_secret_local"
+        assert all("locals" not in frame for frame in exception["frames"])
+    assert "token-of-the-test" not in buffer.getvalue()
 
 
 def test_console_output_is_masked_too() -> None:

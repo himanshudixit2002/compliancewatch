@@ -246,11 +246,11 @@ and logs `flag_evaluation_failed`.
 
 ## Logging
 
-`configure_logging(service_name=...)`, which `create_app` and every worker call, renders structlog
-events and stdlib records (uvicorn, httpx, sqlalchemy) through one processor chain as JSON lines
-with `timestamp`, `level`, `logger`, `event`, `service`, `correlation_id`, `tenant_id` and
-`actor`, plus `trace_id` and `span_id` inside a span (`CW_LOG_JSON=false` prints them for a
-terminal instead).
+`configure_logging(service_name=..., env=settings.env)`, which `create_app` and every worker call,
+renders structlog events and stdlib records (uvicorn, httpx, sqlalchemy) through one processor
+chain as JSON lines with `timestamp`, `level`, `logger`, `event`, `service`, `correlation_id`,
+`tenant_id` and `actor`, plus `trace_id` and `span_id` inside a span (`CW_LOG_JSON=false` prints
+them for a terminal instead).
 
 The last processor, `redact_pii`, masks personal identifiers on every line, always, with no
 setting to turn it off: GSTINs, PANs, Aadhaar numbers, phone numbers and email addresses become
@@ -285,8 +285,10 @@ say) turns the line into `log_redaction_failed`, with the fields above, the mask
 the error's type; a value inside itself, or nested deeper than 32 levels, is cut there with
 `[CYCLE]` or `[TOO DEEP]`.
 
-In JSON output the exception carries the locals of its frames, each cut to 80 characters before
-it is masked.
+A JSON traceback carries the locals of its frames only with `CW_ENV` local or test. Anywhere else
+it carries none, so a request body, a token or a secret held in a local never reaches the log
+collector. Where they are carried, each local is cut to 80 characters before it is masked, so an
+identifier cut in two may show in part on a developer's machine.
 
 By design, any other ten-digit number that starts with 6 to 9, and any twelve-digit number that
 starts with 2 to 9, is masked as a phone or an Aadhaar number, whatever it is: an amount or a

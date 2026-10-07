@@ -55,7 +55,10 @@ def create_app(
     """
     settings = settings or Settings(service_name=service_name)
     configure_logging(
-        service_name=service_name, log_level=settings.log_level, json_output=settings.log_json
+        service_name=service_name,
+        log_level=settings.log_level,
+        json_output=settings.log_json,
+        env=settings.env,
     )
     telemetry = configure_telemetry(service_name=service_name, version=version, settings=settings)
     app = FastAPI(

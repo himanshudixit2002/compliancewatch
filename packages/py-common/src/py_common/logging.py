@@ -33,8 +33,11 @@ fails, say) turns the line into ``log_redaction_failed`` with the fields above, 
 text and the error's type, and a value nested deeper than the kernel's ``MAX_DEPTH`` or inside
 itself is cut there.
 
-In JSON output the exception carries the locals of its frames, each cut to 80 characters before
-it is masked. The console renderer (``CW_LOG_JSON=false``, for a developer's terminal) formats a
+A JSON traceback carries the locals of its frames only where ``env`` is local or test
+(``FRAME_LOCALS_ENVIRONMENTS``): anywhere else a local may hold a request body, a token or a
+secret, which the collector must never get. Where they are carried, each is cut to 80 characters
+before it is masked, so an identifier cut in two may show in part; that stays on a developer's
+machine. The console renderer (``CW_LOG_JSON=false``, for a developer's terminal) formats a
 traceback after the chain, so its traceback is not masked.
 """
 
@@ -46,6 +49,8 @@ from typing import Final, TextIO
 import structlog
 from opentelemetry import trace
 from opentelemetry.trace import format_span_id, format_trace_id
+from structlog.processors import ExceptionRenderer
+from structlog.tracebacks import ExceptionDictTransformer
 from structlog.typing import EventDict, Processor, WrappedLogger
 
 from domain_kernel.pii import ID_KEY_SUFFIXES, mask_pii_in
@@ -75,6 +80,8 @@ _LEFT_AS_THEY_ARE: Final = UNMASKED_FIELDS | {
 _STRUCTLOG_META: Final = frozenset({"_record", "_from_structlog"})
 _EXCEPTION: Final = "exception"
 """Where the JSON traceback goes: masked whole, with no field and no id key left alone."""
+FRAME_LOCALS_ENVIRONMENTS: Final = frozenset({"local", "test"})
+"""Where a JSON traceback carries the locals of its frames."""
 REDACTION_FAILED: Final = "log_redaction_failed"
 """The event of a line ``redact_pii`` could not mask, which stands in for it."""
 
@@ -150,8 +157,12 @@ def configure_logging(
     log_level: str = "INFO",
     json_output: bool = True,
     stream: TextIO | None = None,
+    env: str | None = None,
 ) -> None:
-    """Configure structlog and the stdlib root logger. Safe to call more than once (tests)."""
+    """Configure structlog and the stdlib root logger. Safe to call more than once (tests).
+
+    ``env`` is the deployment's ``CW_ENV``: a JSON traceback carries its frames' locals only in
+    ``FRAME_LOCALS_ENVIRONMENTS``, and None, a process that does not say, carries none."""
     shared: list[Processor] = [
         structlog.contextvars.merge_contextvars,
         structlog.stdlib.add_logger_name,
@@ -164,7 +175,8 @@ def configure_logging(
     ]
     renderer: Processor
     if json_output:
-        shared.append(structlog.processors.dict_tracebacks)
+        frame_locals = env in FRAME_LOCALS_ENVIRONMENTS
+        shared.append(ExceptionRenderer(ExceptionDictTransformer(show_locals=frame_locals)))
         renderer = structlog.processors.JSONRenderer()
     else:
         renderer = structlog.dev.ConsoleRenderer()

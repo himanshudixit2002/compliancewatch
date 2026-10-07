@@ -26,7 +26,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.parse_args(argv)
     settings = Settings(service_name=SERVICE_NAME)
     configure_logging(
-        service_name=SERVICE_NAME, log_level=settings.log_level, json_output=settings.log_json
+        service_name=SERVICE_NAME,
+        log_level=settings.log_level,
+        json_output=settings.log_json,
+        env=settings.env,
     )
     return 1 if purge_expired_keys(settings) is None else 0
 

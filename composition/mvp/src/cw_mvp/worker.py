@@ -204,7 +204,10 @@ def main(*, internal_url: str | None = None, settings: MvpSettings | None = None
     """The body of ``cw-mvp worker``: 0 after a clean stop, 1 when a loop failed."""
     root = settings or MvpSettings(service_name=WORKER_SERVICE_NAME)
     configure_logging(
-        service_name=WORKER_SERVICE_NAME, log_level=root.log_level, json_output=root.log_json
+        service_name=WORKER_SERVICE_NAME,
+        log_level=root.log_level,
+        json_output=root.log_json,
+        env=root.env,
     )
     telemetry = configure_telemetry(
         service_name=WORKER_SERVICE_NAME, version=__version__, settings=root

@@ -62,7 +62,10 @@ def release_settings() -> ReleaseSettings | None:
             _err(problem.line())
         return None
     configure_logging(
-        service_name=SERVICE_NAME, log_level=settings.log_level, json_output=settings.log_json
+        service_name=SERVICE_NAME,
+        log_level=settings.log_level,
+        json_output=settings.log_json,
+        env=settings.env,
     )
     return settings
 
