@@ -227,6 +227,12 @@ EXEMPT_ROUTES: dict[str, dict[str, str]] = {
         "POST /v1/identity/channel-consents": SERVICE_TOKEN,
         "GET /v1/identity/channel-consents/{channel}/{subject}": SERVICE_TOKEN,
         "GET /v1/identity/billing/plans": "the price list, the same for every visitor",
+        "GET /v1/identity/erasures/{tenant_id}": (
+            "what identity holds of a tenant's deletion, for the erasure consumers of the other "
+            "services, which name the tenant in the path, not as the caller's; status, ids and "
+            "whether it is internal, nothing of its data; with tokens it needs a service with "
+            "erasure:verify, a person is refused, and it is served on the internal listener only"
+        ),
         "POST /v1/identity/billing/webhook": (
             "called by the billing provider, which names no tenant; the body is verified "
             "against the webhook signature before it is read"
