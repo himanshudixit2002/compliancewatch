@@ -209,7 +209,7 @@ class ChangeStatus:
                     closure, at=now, by=acting.user_id, correlation_id=correlation
                 )
                 uow.obligations.save(after)
-                record(uow, event, after, note=reason)
+                record(uow, event, after, note=reason, audited=False)
             uow.audit.write(
                 _entry(
                     STATUS_ACTIONS[change.action],

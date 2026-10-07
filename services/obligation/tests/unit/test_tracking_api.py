@@ -54,6 +54,10 @@ class Api:
             )
         )
         self.first: ObligationId = made.created[0]
+        # Materialising wrote one obligation.created entry per obligation; the tests here count
+        # what the tracking routes write after it.
+        assert [e.action for e in self.store.audit] == ["obligation.created"] * len(made.created)
+        self.store.audit.clear()
         self.base = base
         self.client = TestClient(self.app)
 

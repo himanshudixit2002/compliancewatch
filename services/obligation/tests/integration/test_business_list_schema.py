@@ -38,6 +38,7 @@ from obligation.testing import (
     ref_of,
     rule,
 )
+from py_common.audit.testing import install_audit_table
 from py_common.db_roles import apply_roles, as_role
 
 pytestmark = pytest.mark.integration
@@ -62,6 +63,8 @@ def database_url() -> Iterator[str]:
         admin = create_engine(base_url, isolation_level="AUTOCOMMIT")
         with admin.connect() as connection:
             connection.execute(text(f"CREATE SCHEMA {SCHEMA}"))
+            # audit.event, which identity's migrations make: every change writes its entry.
+            install_audit_table(connection)
         admin.dispose()
         # The service's own role, as a fresh dev volume has it before the migrations:
         # the tables they create, again after a downgrade, reach it too.

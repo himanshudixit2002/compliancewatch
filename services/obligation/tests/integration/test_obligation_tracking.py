@@ -325,6 +325,9 @@ def test_tracking_writes_changes_the_closure_event_and_audit_rows_together(
                 {"t": tracked.tenant.value},
             ).scalars()
         )
+    created = [e for e in entries if e.action == "obligation.created"]
+    assert len(created) == 2, "materialising wrote one entry per obligation"
+    entries = [e for e in entries if e.action != "obligation.created"]
     assert [e.action for e in entries] == [
         START_ACTION,
         ASSIGN_ACTION,
@@ -358,7 +361,8 @@ def test_a_change_that_fails_after_its_audit_row_leaves_nothing(
     assert detail.obligation.status is ObligationStatus.OPEN
     assert [c.kind for c in detail.history] == [ChangeKind.CREATED]
     assert detail.comments == ()
-    assert count(app_engine, tracked.tenant, "SELECT count(*) FROM audit.event") == 0
+    tracking_rows = "SELECT count(*) FROM audit.event WHERE action <> 'obligation.created'"
+    assert count(app_engine, tracked.tenant, tracking_rows) == 0
     closed_events = (
         "SELECT count(*) FROM outbox_event WHERE topic = 'obligation.closed' AND tenant_id = :t"
     )
