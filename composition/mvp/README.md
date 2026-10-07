@@ -37,10 +37,12 @@ Anything else on the public listener, and any path no service owns, is a 404
   thread while they wait, so the app raises the thread pool to `CW_MVP_THREAD_TOKENS` (200) and
   runs at most `CW_MVP_LOOPBACK_LIMIT` (32) of the routes that make such calls at once: qa's
   `POST /v1/qa/ask` and the public `POST /v1/qa`, the engine's evaluation and its dry run,
-  obligation's detail and assignee routes and the public list of a business's obligations, and
-  notification's bulk change card. The routes they call make none themselves: qa and
-  notification read obligation's list, which calls nothing (`called_routes` in the registry), and
-  obligation's public list asks profile's node read.
+  obligation's detail and assignee routes and the public list of a business's obligations,
+  notification's bulk change card, and profile's three routes that may add a GSTIN registration
+  (they read the tenant's entitlements at identity while `identity.plan_limits` is on). The
+  routes they call make none themselves: qa and notification read obligation's list, which calls
+  nothing, and the engine, obligation and qa read profile's node, snapshot and business, which
+  call nothing either (`called_routes` in the registry); every service may call identity.
 - **Dispatch**: a public path outside every service's prefix, such as `/v1/businesses` (profile)
   or `/v1/businesses/{business_id}/obligations` (obligation), is matched longest template first;
   any other path goes to the service its first segment names, so `/v1/qa` is qa's and
