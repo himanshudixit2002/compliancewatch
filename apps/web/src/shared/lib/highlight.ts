@@ -76,3 +76,17 @@ export function markSpans(
   }
   return segments;
 }
+
+/**
+ * Where a quote stands in a text, word for word, as a [start, end) range in code points (the
+ * unit `markSpans` and the services count in); null when the text does not hold it exactly. A
+ * verified quote may still be missing: the rulebook verifies a quote by a match score, so a
+ * quote with different spacing or punctuation passes there and is not found here.
+ */
+export function quoteSpan(text: string, quote: string): { start: number; end: number } | null {
+  if (quote === "") return null;
+  const at = text.indexOf(quote);
+  if (at < 0) return null;
+  const start = codePointLength(text.slice(0, at));
+  return { start, end: start + codePointLength(quote) };
+}

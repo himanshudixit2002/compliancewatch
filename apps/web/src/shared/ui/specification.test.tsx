@@ -1,9 +1,17 @@
+import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import { runAxe } from "@compliancewatch/ui/test/axe";
 import { specificationFromMapping } from "@/entities/rule-version/mappers";
 import type { SpecNode } from "@/entities/rule-version/types";
 import { ontologyFixture } from "@/test/ontology-fixture";
 import { ruleVersionDto } from "@/test/rule-version-fixture";
-import { describeSpecification, operatorWords, valueWords } from "./specification";
+import {
+  SpecificationView,
+  describeSpecification,
+  operatorWords,
+  specificationText,
+  valueWords,
+} from "./specification";
 
 function spec(raw: unknown): SpecNode {
   const node = specificationFromMapping(raw);
@@ -92,5 +100,48 @@ describe("describeSpecification", () => {
     });
     expect(operatorWords("example_op")).toBe("example_op");
     expect(operatorWords("lte")).toBe("is at most");
+  });
+});
+
+describe("specificationText", () => {
+  it("reads the words as lines, two spaces deeper per level, as the rulebook describes them", () => {
+    const line = describeSpecification(spec(ruleVersionDto().specification), ontologyFixture());
+    expect(specificationText(line)).toEqual([
+      "All of these hold:",
+      "  example_kind is Example first kind",
+      "  example_band is above Example small band",
+      "  This does not hold:",
+      "    state_codes includes any of Example place one, Example place two",
+      "  example_question",
+      "    Needs judgement: Example condition an analyst judges.",
+    ]);
+    expect(specificationText(describeSpecification(spec({ example: 1 }), null))).toEqual([
+      'A part of the condition this page cannot read, as stored: {"example":1}',
+    ]);
+  });
+});
+
+describe("SpecificationView", () => {
+  it("shows each predicate with its meaning, and says what an empty group holds for", async () => {
+    const line = describeSpecification(spec(ruleVersionDto().specification), ontologyFixture());
+    const { container } = render(<SpecificationView line={line} />);
+    expect(screen.getByText("All of these hold:")).toBeDefined();
+    expect(screen.getByText("Needs judgement: Example condition an analyst judges.")).toBeDefined();
+    expect(screen.getByText("Not in the ontology")).toBeDefined();
+    expect(container.querySelectorAll("[data-slot='spec-predicate']")).toHaveLength(4);
+    expect(await runAxe(container)).toHaveNoViolations();
+  });
+
+  it("says an empty all of holds for every business and an empty any of for none", () => {
+    const { rerender } = render(
+      <SpecificationView line={describeSpecification(spec({ all_of: [] }), null)} />,
+    );
+    expect(
+      screen.getByText("Nothing is listed here, so this group holds for every business."),
+    ).toBeDefined();
+    rerender(<SpecificationView line={describeSpecification(spec({ any_of: [] }), null)} />);
+    expect(
+      screen.getByText("Nothing is listed here, so this group holds for no business."),
+    ).toBeDefined();
   });
 });

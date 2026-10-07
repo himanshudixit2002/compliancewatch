@@ -22,20 +22,36 @@ import {
   actorToDto,
   citationReportFromDto,
   citationsToDto,
+  claimToDto,
+  decideToDto,
+  draftEditToDto,
+  draftFromCandidateToDto,
   lifecycleFromDto,
   publicationFromDto,
+  reviewTaskDetailFromDto,
+  reviewTaskFromDto,
+  seedTasksFromDto,
   submitToDto,
+  taskDecisionFromDto,
   versionApprovalToDto,
 } from "@/entities/rule-version/mappers";
 import type {
   CitationInput,
   CitationReport,
+  DraftEdit,
+  DraftFromCandidate,
   Publication,
+  ReviewTask,
+  ReviewTaskDetail,
+  SeedTasksOpened,
+  TaskDecision,
+  TaskDecisionInput,
   VersionLifecycle,
 } from "@/entities/rule-version/types";
 import { isProblemOf } from "@/entities/problem/mappers";
 import type { FlagName } from "@/shared/config/flags";
-import { isRegulatory } from "@/shared/config/roles";
+import { can } from "@/shared/config/permissions";
+import { isRegulatory, type Principal } from "@/shared/config/roles";
 import { t } from "@/shared/i18n";
 import { getEnv, serviceUrl } from "../env";
 import { isEnabled } from "../flags";
@@ -53,7 +69,9 @@ import type { ClientContext } from "./services";
  *
  *   rulebookWriteClient(ctx)    x-cw-write-token, after a regulatory-role check
  *   rulebookReviewClient(ctx)   x-cw-review-token, after a regulatory-role check
- *   rulebookWrites(ctx)         the decisions an admin tool makes, behind the role, the flag
+ *   rulebookWrites(ctx)         the decisions an admin tool makes (entity groups, relation
+ *                               candidates, and a review task's claim, draft, edit and decision,
+ *                               and opening the seed tasks), behind the role, the flag
  *                               web.admin_rulebook_writes and the review token; a refusal is a
  *                               port whose every method answers the refusal without a request
  *   rulebookWriteAccess(ctx)    whether a form may offer those decisions, and why not
@@ -64,6 +82,9 @@ import type { ClientContext } from "./services";
  *
  * The body's decided_by or actor_id is the session's user id, filled here, so a form cannot name
  * someone else; the rulebook takes it as the caller's word until identity issues verified claims.
+ * The shared review token lets any caller approve, publish or withdraw, so those steps also need
+ * the session to hold a reviewer's or an admin's role here (`admin.review.approve`,
+ * `admin.publish`), whatever action sends them; the actions check first and say it plainly.
  * An approval never carries `synthetic`: that marks an approval no analyst made, which only the
  * local product's demo tool sends. A rulebook answer about a token (wrong: 401; not configured on
  * the rulebook: 503) is reworded to say which side to fix, with the variable to set and never its
@@ -127,6 +148,16 @@ function roleRefusal(): ApiError {
   );
 }
 
+/** An approval, a publication or a withdrawal from a session without a reviewer's role. */
+function reviewerRefusal(): ApiError {
+  return webError(
+    "forbidden",
+    "web-reviewer-role-required",
+    t("rulebookWrites.reviewerRequired"),
+    t("rulebookWrites.reviewerRequiredDetail"),
+  );
+}
+
 function tokenClient(
   ctx: ClientContext,
   header: string,
@@ -183,6 +214,16 @@ export interface RulebookWritePort {
     candidateId: string,
     rejection: CandidateRejection,
   ): Promise<Result<RelationCandidate>>;
+  /** A review task claimed by the session's user; claiming it again changes nothing. */
+  claimTask(taskId: string): Promise<Result<ReviewTask>>;
+  /** A review task for every seed draft that has none waiting. */
+  openSeedTasks(): Promise<Result<SeedTasksOpened>>;
+  /** A version drafted from a claimed candidate task's candidate. */
+  draftFromCandidate(taskId: string, draft: DraftFromCandidate): Promise<Result<ReviewTaskDetail>>;
+  /** An edit of a claimed task's draft. */
+  editDraft(taskId: string, edit: DraftEdit): Promise<Result<ReviewTaskDetail>>;
+  /** Approve, return or reject a review task. */
+  decideTask(taskId: string, input: TaskDecisionInput): Promise<Result<TaskDecision>>;
 }
 
 function explained<T>(result: Result<T>): Result<T> {
@@ -193,10 +234,12 @@ function explained<T>(result: Result<T>): Result<T> {
 export class RulebookWriteGateway implements RulebookWritePort {
   private readonly client: RulebookClient;
   private readonly decidedBy: string;
+  private readonly principal: Principal;
 
-  constructor(client: RulebookClient, decidedBy: string) {
+  constructor(client: RulebookClient, decidedBy: string, principal: Principal) {
     this.client = client;
     this.decidedBy = decidedBy;
+    this.principal = principal;
   }
 
   async decideEntityGroup(decision: EntityGroupDecision): Promise<Result<EntityGroupDecided>> {
@@ -233,6 +276,61 @@ export class RulebookWriteGateway implements RulebookWritePort {
     );
     return explained(mapBody(result, relationCandidateFromDto));
   }
+
+  private task(taskId: string) {
+    return { params: { path: { task_id: taskId } } };
+  }
+
+  async claimTask(taskId: string): Promise<Result<ReviewTask>> {
+    const result = await call(
+      this.client.POST("/v1/rulebook/review/tasks/{task_id}/claim", {
+        ...this.task(taskId),
+        body: claimToDto(this.decidedBy),
+      }),
+    );
+    return explained(mapBody(result, reviewTaskFromDto));
+  }
+
+  async openSeedTasks(): Promise<Result<SeedTasksOpened>> {
+    const result = await call(this.client.POST("/v1/rulebook/review/tasks/seed", {}));
+    return explained(mapBody(result, seedTasksFromDto));
+  }
+
+  async draftFromCandidate(
+    taskId: string,
+    draft: DraftFromCandidate,
+  ): Promise<Result<ReviewTaskDetail>> {
+    const result = await call(
+      this.client.POST("/v1/rulebook/review/tasks/{task_id}/draft", {
+        ...this.task(taskId),
+        body: draftFromCandidateToDto(draft, this.decidedBy),
+      }),
+    );
+    return explained(mapBody(result, reviewTaskDetailFromDto));
+  }
+
+  async editDraft(taskId: string, edit: DraftEdit): Promise<Result<ReviewTaskDetail>> {
+    const result = await call(
+      this.client.PATCH("/v1/rulebook/review/tasks/{task_id}/draft", {
+        ...this.task(taskId),
+        body: draftEditToDto(edit, this.decidedBy),
+      }),
+    );
+    return explained(mapBody(result, reviewTaskDetailFromDto));
+  }
+
+  async decideTask(taskId: string, input: TaskDecisionInput): Promise<Result<TaskDecision>> {
+    if (input.decision === "approve" && !can(this.principal, "admin.review.approve")) {
+      return err(reviewerRefusal());
+    }
+    const result = await call(
+      this.client.POST("/v1/rulebook/review/tasks/{task_id}/decide", {
+        ...this.task(taskId),
+        body: decideToDto(input, this.decidedBy),
+      }),
+    );
+    return explained(mapBody(result, taskDecisionFromDto));
+  }
 }
 
 /** A port that refuses every decision with the same error and sends nothing. */
@@ -254,6 +352,26 @@ export class RefusedWriteGateway implements RulebookWritePort {
   async rejectCandidate(): Promise<Result<RelationCandidate>> {
     return err(this.error);
   }
+
+  async claimTask(): Promise<Result<ReviewTask>> {
+    return err(this.error);
+  }
+
+  async openSeedTasks(): Promise<Result<SeedTasksOpened>> {
+    return err(this.error);
+  }
+
+  async draftFromCandidate(): Promise<Result<ReviewTaskDetail>> {
+    return err(this.error);
+  }
+
+  async editDraft(): Promise<Result<ReviewTaskDetail>> {
+    return err(this.error);
+  }
+
+  async decideTask(): Promise<Result<TaskDecision>> {
+    return err(this.error);
+  }
 }
 
 /** Why the admin tools may not send decisions. */
@@ -263,7 +381,7 @@ export type WriteAccess =
   { allowed: true } | { allowed: false; refusal: WriteRefusal; error: ApiError; flag: FlagName };
 
 type Checked =
-  | { allowed: true; client: RulebookClient; decidedBy: string }
+  | { allowed: true; client: RulebookClient; decidedBy: string; principal: Principal }
   | { allowed: false; refusal: WriteRefusal; error: ApiError };
 
 function flagRefusal(flag: FlagName): ApiError {
@@ -286,7 +404,7 @@ async function check(ctx: ClientContext, flag: FlagName): Promise<Checked> {
   }
   const client = rulebookReviewClient(ctx);
   if (!client.ok) return { allowed: false, refusal: "token", error: client.error };
-  return { allowed: true, client: client.value, decidedBy: session.userId };
+  return { allowed: true, client: client.value, decidedBy: session.userId, principal: session };
 }
 
 async function access(ctx: ClientContext, flag: FlagName): Promise<WriteAccess> {
@@ -312,7 +430,7 @@ export async function rulebookWriteAccess(ctx: ClientContext): Promise<WriteAcce
 export async function rulebookWrites(ctx: ClientContext): Promise<RulebookWritePort> {
   const checked = await check(ctx, RULEBOOK_WRITES_FLAG);
   return checked.allowed
-    ? new RulebookWriteGateway(checked.client, checked.decidedBy)
+    ? new RulebookWriteGateway(checked.client, checked.decidedBy, checked.principal)
     : new RefusedWriteGateway(checked.error);
 }
 
@@ -331,14 +449,20 @@ export interface RuleVersionWorkflowPort {
   withdraw(ruleVersionId: string, reason: string): Promise<Result<VersionLifecycle>>;
 }
 
-/** The workflow over the review client, with actor_id from the session. */
+/**
+ * The workflow over the review client, with actor_id from the session. Approving, publishing and
+ * withdrawing answer a role refusal without a request unless the session is a reviewer's or an
+ * admin's.
+ */
 export class RuleVersionWorkflowGateway implements RuleVersionWorkflowPort {
   private readonly client: RulebookClient;
   private readonly actorId: string;
+  private readonly principal: Principal;
 
-  constructor(client: RulebookClient, actorId: string) {
+  constructor(client: RulebookClient, actorId: string, principal: Principal) {
     this.client = client;
     this.actorId = actorId;
+    this.principal = principal;
   }
 
   private path(ruleVersionId: string) {
@@ -382,6 +506,7 @@ export class RuleVersionWorkflowGateway implements RuleVersionWorkflowPort {
   }
 
   async approve(ruleVersionId: string, note: string): Promise<Result<VersionLifecycle>> {
+    if (!can(this.principal, "admin.review.approve")) return err(reviewerRefusal());
     const result = await call(
       this.client.POST("/v1/rulebook/rule-versions/{rule_version_id}/approve", {
         ...this.path(ruleVersionId),
@@ -392,6 +517,7 @@ export class RuleVersionWorkflowGateway implements RuleVersionWorkflowPort {
   }
 
   async publish(ruleVersionId: string, note: string): Promise<Result<Publication>> {
+    if (!can(this.principal, "admin.publish")) return err(reviewerRefusal());
     const result = await call(
       this.client.POST("/v1/rulebook/rule-versions/{rule_version_id}/publish", {
         ...this.path(ruleVersionId),
@@ -402,6 +528,7 @@ export class RuleVersionWorkflowGateway implements RuleVersionWorkflowPort {
   }
 
   async withdraw(ruleVersionId: string, reason: string): Promise<Result<VersionLifecycle>> {
+    if (!can(this.principal, "admin.publish")) return err(reviewerRefusal());
     const result = await call(
       this.client.POST("/v1/rulebook/rule-versions/{rule_version_id}/withdraw", {
         ...this.path(ruleVersionId),
@@ -461,6 +588,6 @@ export async function rulebookWorkflowAccess(ctx: ClientContext): Promise<WriteA
 export async function rulebookWorkflow(ctx: ClientContext): Promise<RuleVersionWorkflowPort> {
   const checked = await check(ctx, PUBLISH_ACTIONS_FLAG);
   return checked.allowed
-    ? new RuleVersionWorkflowGateway(checked.client, checked.decidedBy)
+    ? new RuleVersionWorkflowGateway(checked.client, checked.decidedBy, checked.principal)
     : new RefusedWorkflowGateway(checked.error);
 }

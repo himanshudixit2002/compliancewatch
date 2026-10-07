@@ -23,6 +23,37 @@ import {
   type SpecValue,
   type SubmitInDto,
   type VersionLifecycle,
+  type AuditEntry,
+  type AuditEntryDto,
+  type ClaimInDto,
+  type DecideInDto,
+  type DraftEdit,
+  type DraftEditInDto,
+  type DraftFields,
+  type DraftFieldsInDto,
+  type DraftFromCandidate,
+  type DraftFromCandidateInDto,
+  type ProposedDraft,
+  type ProposedDraftDto,
+  type QueuedTask,
+  type QueuedTaskDto,
+  type ReviewStats,
+  type ReviewStatsDto,
+  type ReviewTask,
+  type ReviewTaskDetail,
+  type ReviewTaskDetailDto,
+  type ReviewTaskDto,
+  type RuleCandidate,
+  type RuleCandidateDto,
+  type SeedTasksDto,
+  type SeedTasksOpened,
+  type TaskDecision,
+  type TaskDecisionDto,
+  type TaskDecisionInput,
+  type TaskDocument,
+  type TaskDocumentDto,
+  type TaskPage,
+  type TaskPageDto,
 } from "./types";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -247,4 +278,267 @@ export function versionApprovalToDto(
   actorId: string,
 ): Omit<ApproveVersionInDto, "synthetic"> {
   return { actor_id: actorId, note };
+}
+
+// ---- Review tasks ------------------------------------------------------------------------------
+
+export function reviewTaskFromDto(dto: ReviewTaskDto): ReviewTask {
+  return {
+    taskId: dto.task_id,
+    ruleVersionId: dto.rule_version_id ?? null,
+    kind: dto.kind,
+    candidateId: dto.candidate_id ?? null,
+    priority: dto.priority,
+    regulator: dto.regulator,
+    status: dto.status,
+    openedAt: dto.opened_at,
+    claimedBy: dto.claimed_by ?? null,
+    claimedAt: dto.claimed_at ?? null,
+    decision: dto.decision ?? null,
+    decidedBy: dto.decided_by ?? null,
+    decidedAt: dto.decided_at ?? null,
+    note: dto.note,
+  };
+}
+
+export function queuedTaskFromDto(dto: QueuedTaskDto): QueuedTask {
+  const candidate = dto.candidate ?? null;
+  return {
+    ...reviewTaskFromDto(dto),
+    ruleKey: dto.rule_key ?? null,
+    version: dto.version ?? null,
+    title: dto.title,
+    versionStatus: dto.version_status ?? null,
+    highImpact: dto.high_impact,
+    approvals: dto.approvals,
+    requiredApprovals: dto.required_approvals,
+    candidate:
+      candidate === null
+        ? null
+        : {
+            candidateId: candidate.candidate_id,
+            documentId: candidate.document_id,
+            status: candidate.status,
+            outcome: candidate.outcome,
+            confidence: candidate.confidence,
+            needsReview: candidate.needs_review,
+            issueCount: candidate.issue_count,
+            suggestedRuleKey: candidate.suggested_rule_key ?? null,
+            highImpactSuggested: candidate.high_impact_suggested,
+          },
+  };
+}
+
+export function taskPageFromDto(dto: TaskPageDto): TaskPage {
+  return { tasks: dto.items.map(queuedTaskFromDto), nextCursor: dto.next_cursor ?? null };
+}
+
+export function taskDocumentFromDto(dto: TaskDocumentDto): TaskDocument {
+  return {
+    documentId: dto.document_id,
+    regulator: dto.regulator,
+    docType: dto.doc_type,
+    externalRef: dto.external_ref,
+    title: dto.title,
+    url: dto.url,
+    publishedAt: dto.published_at ?? null,
+  };
+}
+
+export function auditEntryFromDto(dto: AuditEntryDto): AuditEntry {
+  return {
+    decisionId: dto.decision_id,
+    action: dto.action,
+    fromStatus: dto.from_status,
+    toStatus: dto.to_status,
+    actorId: dto.actor_id ?? null,
+    causedByRuleVersionId: dto.caused_by_rule_version_id ?? null,
+    note: dto.note,
+    decidedAt: dto.decided_at,
+  };
+}
+
+function mappingOrNull(value: unknown): Record<string, unknown> | null {
+  return isRecord(value) ? { ...value } : null;
+}
+
+function proposedDraftFromDto(dto: ProposedDraftDto): ProposedDraft {
+  return {
+    title: dto.title ?? null,
+    summary: dto.summary ?? null,
+    specification: mappingOrNull(dto.specification),
+    obligationTemplate: mappingOrNull(dto.obligation_template),
+    recurrence: mappingOrNull(dto.recurrence),
+    effectiveFrom: dto.effective_from ?? null,
+    effectiveTo: dto.effective_to ?? null,
+    citations: dto.citations.map((citation) => ({
+      clauseRef: citation.clause_ref,
+      clauseId: citation.clause_id,
+      quote: citation.quote,
+    })),
+    problems: [...dto.problems],
+  };
+}
+
+export function ruleCandidateFromDto(dto: RuleCandidateDto): RuleCandidate {
+  return {
+    candidateId: dto.candidate_id,
+    documentId: dto.document_id,
+    document:
+      dto.document === null || dto.document === undefined
+        ? null
+        : taskDocumentFromDto(dto.document),
+    regulator: dto.regulator,
+    model: dto.model,
+    promptVersion: dto.prompt_version,
+    confidence: dto.confidence,
+    citationCount: dto.citation_count,
+    needsReview: dto.needs_review,
+    outcome: dto.outcome,
+    status: dto.status,
+    rejectReason: dto.reject_reason ?? null,
+    ruleVersionId: dto.rule_version_id ?? null,
+    suggestedRuleKey: dto.suggested_rule_key ?? null,
+    suggestedRuleKnown: dto.suggested_rule_known,
+    highImpactSuggested: dto.high_impact_suggested,
+    highImpactReasons: [...dto.high_impact_reasons],
+    issues: dto.issues.map((issue) => ({
+      code: issue.code,
+      detail: issue.detail,
+      clauseRef: issue.clause_ref ?? null,
+    })),
+    docType: dto.doc_type ?? null,
+    sourceKey: dto.source_key ?? null,
+    ontologyVersion: dto.ontology_version ?? null,
+    proposed: proposedDraftFromDto(dto.proposed),
+    createdAt: dto.created_at,
+    decidedBy: dto.decided_by ?? null,
+    decidedAt: dto.decided_at ?? null,
+  };
+}
+
+export function reviewTaskDetailFromDto(dto: ReviewTaskDetailDto): ReviewTaskDetail {
+  return {
+    task: reviewTaskFromDto(dto.task),
+    version:
+      dto.rule_version === null || dto.rule_version === undefined
+        ? null
+        : ruleVersionFromDto(dto.rule_version),
+    specificationDescribed: [...dto.specification_described],
+    citations: dto.citations.map(citationFromDto),
+    documents: dto.documents.map(taskDocumentFromDto),
+    sourceUrl: dto.source_url ?? null,
+    approvedBy: [...dto.approved_by],
+    requiredApprovals: dto.required_approvals,
+    decisions: dto.decisions.map(auditEntryFromDto),
+    tasks: dto.tasks.map(reviewTaskFromDto),
+    candidate:
+      dto.candidate === null || dto.candidate === undefined
+        ? null
+        : ruleCandidateFromDto(dto.candidate),
+  };
+}
+
+export function taskDecisionFromDto(dto: TaskDecisionDto): TaskDecision {
+  return {
+    task: reviewTaskFromDto(dto.task),
+    version:
+      dto.version === null || dto.version === undefined ? null : lifecycleFromDto(dto.version),
+    nextTaskId: dto.next_task_id ?? null,
+    candidateStatus: dto.candidate_status ?? null,
+  };
+}
+
+export function seedTasksFromDto(dto: SeedTasksDto): SeedTasksOpened {
+  return { opened: dto.opened, taskIds: [...dto.task_ids] };
+}
+
+export function reviewStatsFromDto(dto: ReviewStatsDto): ReviewStats {
+  return {
+    byStatus: { ...dto.by_status },
+    byRegulator: dto.by_regulator.map((row) => ({
+      regulator: row.regulator,
+      open: row.open,
+      claimed: row.claimed,
+      decided: row.decided,
+    })),
+    decisions: { ...dto.decisions },
+    candidates: {
+      decided: dto.candidates.decided,
+      approved: dto.candidates.approved,
+      approvedWithoutEdits: dto.candidates.approved_without_edits,
+      rejected: dto.candidates.rejected,
+      acceptanceRate: dto.candidates.acceptance_rate ?? null,
+    },
+    medianSecondsToDecide: dto.median_seconds_to_decide ?? null,
+    oldestOpenAt: dto.oldest_open_at ?? null,
+    oldestOpenAgeSeconds: dto.oldest_open_age_seconds,
+  };
+}
+
+/** A claim, by the session's user (filled by the server layer). */
+export function claimToDto(actorId: string): ClaimInDto {
+  return { actor_id: actorId };
+}
+
+/** The fields present, under the wire's names; a field left out keeps its value. */
+export function draftFieldsToDto(fields: DraftFields): DraftFieldsInDto {
+  const dto: DraftFieldsInDto = {};
+  if (fields.title !== undefined) dto.title = fields.title;
+  if (fields.summary !== undefined) dto.summary = fields.summary;
+  if (fields.specification !== undefined) dto.specification = { ...fields.specification };
+  if (fields.obligationTemplate !== undefined) {
+    dto.obligation_template = { ...fields.obligationTemplate };
+  }
+  if (fields.recurrence !== undefined) {
+    dto.recurrence = fields.recurrence === null ? null : { ...fields.recurrence };
+  }
+  if (fields.effectiveFrom !== undefined) dto.effective_from = fields.effectiveFrom;
+  if (fields.effectiveTo !== undefined) dto.effective_to = fields.effectiveTo;
+  if (fields.todo !== undefined) dto.todo = [...fields.todo];
+  return dto;
+}
+
+/** An edit of a claimed task's draft: the fields changed, the citations added and why. */
+export function draftEditToDto(edit: DraftEdit, actorId: string): DraftEditInDto {
+  return {
+    actor_id: actorId,
+    ...draftFieldsToDto(edit.fields),
+    ...(edit.citations.length === 0 ? {} : citationsToDto(edit.citations)),
+    note: edit.note,
+  };
+}
+
+export function draftFromCandidateToDto(
+  draft: DraftFromCandidate,
+  actorId: string,
+): DraftFromCandidateInDto {
+  return {
+    actor_id: actorId,
+    rule_key: draft.ruleKey,
+    ...(draft.newRule === null ? {} : { new_rule: { ...draft.newRule } }),
+    ...(draft.edits === null ? {} : { edits: draftFieldsToDto(draft.edits) }),
+    ...(draft.citations === null ? {} : citationsToDto(draft.citations)),
+    relation_candidates: draft.relations.map((choice) => ({
+      candidate_id: choice.candidateId,
+      ...(choice.targetRuleVersionId === null
+        ? {}
+        : { target_rule_version_id: choice.targetRuleVersionId }),
+    })),
+    note: draft.note,
+  };
+}
+
+/**
+ * A decision by the session's user: the high-impact tag goes with an approval only, the reason
+ * with a rejection only.
+ */
+export function decideToDto(input: TaskDecisionInput, actorId: string): DecideInDto {
+  return {
+    actor_id: actorId,
+    decision: input.decision,
+    note: input.note,
+    ...(input.decision === "approve" ? { high_impact: input.highImpact } : {}),
+    ...(input.decision === "reject" && input.reason !== null ? { reason: input.reason } : {}),
+  };
 }

@@ -6,7 +6,10 @@ import type { Principal, Role } from "./roles.ts";
  * authoritative matrix the docs table is generated from. Reads on /admin are open to every
  * regulatory role; writes that record a decision name the narrower set. A dry run reads every
  * tenant's profiles and the fan-out controls stop or roll back what every tenant is told, so
- * both are the admin's alone, as the engine's routes are (D-049 in docs/web/decisions.md).
+ * both are the admin's alone, as the engine's routes are (D-049 in docs/web/decisions.md). Every
+ * regulatory role works a review task (claims, drafts, edits, returns, rejects); approving one is
+ * the reviewer's or the admin's, as the role table says ("reviewer: approves and publishes"),
+ * although the rulebook's shared review token lets any caller approve (D-061).
  */
 export const CAPABILITIES = {
   "obligations.read": TENANT_MEMBER_ROLES,
@@ -19,6 +22,7 @@ export const CAPABILITIES = {
   "data_rights.manage": TENANT_ADMIN_ROLES,
   "audit.read": ["owner", "ca_admin", "compliance_lead"],
   "admin.review": REGULATORY_ROLES,
+  "admin.review.approve": ["reviewer", "admin"],
   "admin.decisions.resolve": ["reviewer", "admin"],
   "admin.publish": ["reviewer", "admin"],
   "admin.entities": REGULATORY_ROLES,

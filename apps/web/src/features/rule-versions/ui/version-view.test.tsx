@@ -13,7 +13,7 @@ import {
   ruleVersionDetailDto,
   ruleVersionDto,
 } from "@/test/rule-version-fixture";
-import { describeSpecification } from "../model/specification";
+import { describeSpecification } from "@/shared/ui/specification";
 import { citationView, graphHref, relationView, type VersionPageView } from "../model/version-page";
 import type { SaveCitationsAction } from "./citations-editor";
 import { VersionView } from "./version-view";
@@ -82,6 +82,7 @@ function pageView(overrides: Partial<VersionPageView> = {}): VersionPageView {
       },
     },
     steps: ["submit"],
+    reserved: [],
     access: { allowed: true },
     canCite: true,
     graphHref: graphHref(EXAMPLE_VERSION_ID),

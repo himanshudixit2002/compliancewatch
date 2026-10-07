@@ -685,7 +685,10 @@ rather than guessing. The acting analyst is the session's user, set by `server/a
 as `decided_by` is for the review decisions, and an approval never carries `synthetic`, which only
 the local product's demo tool sends. Citations and every step sit behind `web.publish_actions` and
 the review token, checked in that order after the role, as the decisions sit behind
-`web.admin_rulebook_writes`. A citation refusal comes back with every failure the rulebook listed,
+`web.admin_rulebook_writes`. Submitting, returning and citing are every regulatory role's;
+approving, publishing and withdrawing are a reviewer's or an admin's (`admin.review.approve`,
+`admin.publish`, D-061): the panel offers them only to those roles and names them for anyone
+else, and `takeStep` checks the role again before any request. A citation refusal comes back with every failure the rulebook listed,
 put on its row only when no other row cites the same clause, since the rulebook's failure lines
 name the clause but not the quote. Consequences: a status list costs one read per rule it walks; a
 chip with few versions may walk many rules for one page; when the version read gains the
@@ -1097,3 +1100,162 @@ depends on no guard, and the CI web-e2e job's memory stack passes it. Consequenc
 task end to end needs a staging route in the pipeline for local and test, or a spec on the product
 stack, which runs the worker; a stack started some other way than `make web-stack` has no record,
 so the suite refuses it until it is restarted that way or allowed.
+
+## D-061: Every regulatory role works a review task; approving is a reviewer's or an admin's
+
+2026-10-07. The rulebook's review task routes take an analyst a token names for the claim and the
+draft's edits (`AnalystWork`) and any regulatory role for the decision and the seed tasks
+(`AnalystWrite`); without a token, in `header` and `dual` mode, the shared review token opens every
+one of them and the body names the actor, so the rulebook cannot tell an analyst's approval from a
+reviewer's. The role table says "reviewer: approves and publishes". Settled: analysts, reviewers and
+admins read the queue, a task and the stats, claim a task, draft a version from a candidate, edit
+the draft, return and reject it, and open the seed tasks (capability `admin.review`); approving is
+the reviewer's or the admin's (`admin.review.approve`), offered only to them on the page and checked
+again in the action before any request. The rule version's page, where the workbench sends an
+approved version to be published, follows the same rule (D-043): approving, publishing and
+withdrawing are offered only to a reviewer or an admin (`admin.review.approve`, `admin.publish`) and
+named for anyone else, `takeStep` checks the role before any request, and
+`server/api/rulebook-write.ts` refuses those steps to any other session too, whichever action sends
+them; submitting, returning and citing stay every regulatory role's. A relation a decision attaches
+is checked against what the page offered, read again on the server when the form is sent: the
+relation candidate page's approval (the open drafts it may start from, the versions it may point at)
+and a draft from a candidate (the document's open relation candidates, each with its versions); a
+crafted request naming another candidate or version is refused on its row with nothing sent, and
+whether a target is needed comes from that read rather than from the page. Every step goes through
+`rulebookWrites` in `server/api/rulebook-write.ts`, behind `web.admin_rulebook_writes` and the
+review token like the entity and relation decisions, with the session's user as `actor_id`. The two
+rulebook flags overlap here: a decision that moves the version's lifecycle (an approval, a return,
+and a rejection once a version is drafted, which returns a version under review to draft or closes a
+candidate's draft) is a step the version's page holds behind `web.publish_actions`, so the workbench
+needs that flag for it as well, offers it only then and says in its place why it waits, and the
+action checks it before any request (a task it cannot read counts as drafted); a claim, a draft, an
+edit and a candidate's rejection before drafting stay under `web.admin_rulebook_writes` alone.
+Drafting and editing are the claimant's alone (the rulebook's rule); deciding needs no claim, so a
+second reviewer approves a task the first approval left open again. Consequences, for the M3
+security review: through the shared token the rulebook would still take an analyst's approval, and a
+drafter may approve their own draft when it is not high impact (one approver suffices); in token
+mode the rulebook takes a claim and an edit from an analyst alone, so a reviewer or an admin
+claiming would then get the rulebook's 403, shown as it comes; the rulebook does not check a
+relation's target against its candidate (any version of any rule is taken), so it should, as the web
+app now does; an approval reads the candidate and every rule's versions again, and a draft with
+relations the document's open candidates and their versions (the versions of the rules they name
+only, every rule's when one names none, as the form reads them).
+
+## D-062: The workbench never frames the stored file
+
+2026-10-07. The source pane shows each document the draft rests on as the rulebook stores it, every
+clause with its anchor and each cited quote marked where its clause holds it word for word (the
+whole clause marked, saying the span did not match, when it does not: the rulebook verifies a quote
+by a match score). The original file is a link to the stored-file handler
+(`/api-bff/pipeline/documents/[documentId]/raw`, D-059) in a new tab (`rel="noopener"`), offered once
+the pipeline's record of the document is read (`GET /v1/pipeline/documents/{document_id}`; a
+document the rulebook received another way, as the web seed registers the recorded notification,
+says the pipeline stores no file for it). Nothing is embedded: the app answers every response with
+`X-Frame-Options: DENY`, and a PDF in a frame would need `frame-ancestors 'self'` on the raw route
+alone plus a sandboxed `iframe`, a framing decision left for when someone asks for it. Each
+clause's text reaches the browser once: the page hands the texts of every clause it shows to one
+client provider, the pane draws each clause from it by code point ranges (its marks computed on
+the server) and the citation rows check a quote against it, where the pane's markup and the forms'
+clause choices each carried the whole text before.
+Consequences: the analyst compares the clause text with the file in two tabs; the page makes one
+pipeline read per document it shows.
+
+## D-063: The UI-only stack cannot stage a review task of a spec's own, so the specs take seed drafts
+
+2026-10-07. The brief staged a synthetic draft per run through the rulebook's write API. No route
+creates a rule version: the versions on `make web-stack` are the seed calendar's drafts the
+rulebook loads at start (D-042), and a candidate's draft (`POST .../draft`) needs a rule candidate,
+which arrives only through the worker's intake of `rule.candidate.created` (Kafka, on Postgres,
+behind `rulebook.candidate_intake`), none of which the stack runs; no route was added for tests.
+Every task on the stack therefore reviews one of the seed calendar's own drafts. The specs that
+take a review step do what the publish specs do (D-042): each test owns the draft of a rule no
+other spec moves, by its position in key order (the steps spec holds 8 and 9; the publish spec 2
+to 4, the relation review 6 and 7, and the read-only workbench spec the last), holds it while it
+works (`e2e/position-lock.ts`: a directory one process at a time can make, so a copy of the test
+from `--repeat-each` or a retry never moves the draft at once), and first returns the draft's task
+when an earlier run left it claimed, in review or with an approval. Covered end to end: an analyst
+claims a task from the queue (then marked as theirs), is offered no approval, edits the condition
+with the predicate editor (a predicate picked through the attribute's suggestions, the one an
+earlier run added removed first) and saves it; a reviewer approves with "mark high impact", so the
+round needs two approvals and stays open; the same reviewer approving again is told "a different
+reviewer must approve"; the return sends the version back to draft and opens its next task, which
+the next run claims; an analyst rejects another draft's task with a note, and "Open seed tasks"
+gives that draft its next task. The rule version page's approval is a reviewer's there too. No spec
+ever completes an approval round: a completed one marks the seed draft reviewed, which the memory
+store could not undo. Still covered only by unit and component tests over the rulebook's recorded
+shapes (`src/test/review-task-fixture.ts`): completing a round (a second reviewer), drafting from a
+candidate with the candidate pane, and the proposal's diff. The reading specs compare a page with
+the queue read either side of it, since the steps spec claims and decides meanwhile.
+Consequences: closing the rest needs a staging route in the rulebook for local and test (a
+candidate taken in without Kafka), or a spec on the product stack, which runs the worker, on a
+database of its own; on a stack that ran the steps spec, its draft keeps one added predicate and
+stays tagged high impact until the stack restarts.
+
+## D-064: The condition in words is shared, and the predicate editor posts the kernel's mapping
+
+2026-10-07. The rule version page and the workbench say a condition the same way, and the editor's
+live preview runs in the browser; a feature may not import another and a client component imports
+only `shared`, `entities` and its own directory, so `describeSpecification` and
+`SpecificationView` moved from `features/rule-versions` to `shared/ui/specification.tsx`, over
+structural types (shared code reads no entity). The editor builds the kernel's grammar (all of, at
+least one of, not, a predicate's attribute with an operator and a value or free text, or both):
+attributes suggested from `GET /v1/ontology` in an ARIA combobox, the operators the ontology allows
+on the attribute's type, its option labels for the values; a part of a shape it cannot read is kept
+as stored. The JSON view round-trips and is checked for shape only; the rulebook checks the
+condition against the ontology when the draft is saved. The form posts the mapping in a hidden
+field beside the mapping it was rendered with, and the action sends a content field only when it
+changed from that base (as the source settings form does, D-058), so an edit names what it
+changes and the audit says so; the editor's flagged parts therefore hold the form back only once
+the condition changed from its base, since an untouched one is not sent. Before the `PATCH`, the
+action reads the task again: a field the analyst changed whose value the draft now holds otherwise
+than the form showed (the same claimant in another tab) is refused under the field, by name and
+with its value now, nothing is sent and the page renders the draft as it is (the condition is
+compared after the editor's own round trip on both sides, so a form it normalises is not a
+change); the rulebook's `PATCH` takes no precondition, so a change in the moment between that read
+and the write still lands last. Every read of a
+condition walks it recursively, here as in the kernel: 20,000 nested negations overflowed the
+server's stack (a 500, and a form that said no answer arrived) and 5,000 reach the rulebook's
+recursion limit. So a condition nests at most 32 deep (its groups and negations) and holds at
+most 500 parts: both are checked without recursion right after the JSON is parsed, before any
+other walk, in the action and in the JSON view, and a condition past either bound, or one whose
+walk fails anyway, is an error on its field, never a thrown error. Consequences: the shape rules
+live twice (the editor's and the kernel's), the kernel's winning; a field nobody touched is never
+overwritten; for the M3 review, the kernel (`specification_from_mapping`) should cap the depth and
+the size too, since another client can send the rulebook a condition deep enough to reach its
+recursion limit.
+
+## D-065: The queue pages by the rulebook's cursor, marks "mine", and has keys that keep out of the way
+
+2026-10-07. `GET /v1/rulebook/review/tasks` filters by status, regulator and kind, pages with an
+opaque `cursor` bound to the filter, and has no assignee filter. The queue keeps the three filters
+as rows of chips in the address (open by default, since claimed and decided tasks are someone's
+work or done; the regulators are the ones the stats count), carries the cursor in the address for
+the next page and offers the first page from a later one, and marks the tasks the signed-in
+analyst claimed rather than offering a filter the route lacks. The keyboard is optional and stays
+out of the way: the rows' title links are one tab stop (a roving tabindex), and the keys listen on
+the list alone, so they act only while the focus is on a row (its link or its claim button): j and
+k move between the rows, Enter opens one (the link's own key), ? lists the keys in a dialog. A key
+typed anywhere else on the page, into a form control or a dialog is not theirs, a key with a
+modifier is the browser's, a key held down moves once (its repeats are ignored), and Tab leaves the
+list as usual. No key claims: a claim cannot be undone, so a single key that took it from wherever
+the focus was would fail WCAG 2.1.4, and claiming is the row's button alone. The strip above the
+queue is the stats page's model in five figures. Consequences: a cursor from another filter (or an
+older queue) is the rulebook's refusal, shown with a "Back to the first page" link under it; a
+claim's answer takes the focus, and the row's link takes it back with Tab or a click.
+
+## D-066: The diff is a line diff of words, and the previous version comes from the rule's versions
+
+2026-10-07. The workbench compares the candidate's proposal with the draft made of it and the
+rule's previous version with the draft, field by field (title, summary, period, recurrence, the
+obligation, the open questions, the condition), each field as the lines it reads in (the condition
+as the lines `specificationText` gives the words), with `shared/lib/diff.ts`, a longest common
+subsequence over lines and no library. The previous version is the latest earlier one of the rule
+that is not a closed draft, read from `GET /v1/rulebook/rules/{rule_key}/versions`: the as-of
+list (`GET /v1/rulebook/rule-versions`) holds only published and superseded versions on a date.
+A removed line is marked "-" and an added one "+", with the change said in words for a screen
+reader. The lines both sides share at their start and at their end are kept as they are before
+any table is built, so two equal fields are never marked changed, however long; only the lines
+between are aligned, by a table of at most 250,000 cells (500 lines a side). Past that the lines
+between are listed as removed, then added: still correct, only coarser, and the shared start and
+end stay shared. Consequences: one rulebook read per drafted task; a long field whose changes are
+spread out diffs coarsely between its first and last change rather than slowly.

@@ -36,8 +36,10 @@ export type TakeStepAction = (
 export interface WorkflowPanelProps {
   /** The step action, bound to the version. */
   action: TakeStepAction;
-  /** The steps the version's status allows. */
+  /** The steps the version's status allows that the session's roles take. */
   steps: readonly WorkflowStep[];
+  /** The steps the status allows that are a reviewer's or an admin's: named, not offered. */
+  reserved: readonly WorkflowStep[];
   access: AccessView;
   version: number;
   highImpact: boolean;
@@ -94,16 +96,19 @@ function Approvals({
 }
 
 /**
- * The publish workflow of a version: the steps its status allows, each confirmed in a dialog
- * that says what the rulebook records (a reason for return and withdraw), the outcome of the
- * last step with the approvers of the round as the rulebook reported them, and any refusal
- * (the rulebook's problem: a second approval by the same analyst, missing citations, an overlap)
- * right under the step it refused. The acting analyst is the session's user; nothing here names
- * another, and no approval is ever sent as synthetic.
+ * The publish workflow of a version: the steps its status allows the session's roles, each
+ * confirmed in a dialog that says what the rulebook records (a reason for return and withdraw),
+ * the outcome of the last step with the approvers of the round as the rulebook reported them, and
+ * any refusal (the rulebook's problem: a second approval by the same reviewer, missing citations,
+ * an overlap) right under the step it refused. Approving, publishing and withdrawing are a
+ * reviewer's or an admin's: for anyone else the panel names them and offers none (D-043). The
+ * acting analyst is the session's user; nothing here names another, and no approval is ever sent
+ * as synthetic.
  */
 export function WorkflowPanel({
   action,
   steps,
+  reserved,
   access,
   version,
   highImpact,
@@ -206,8 +211,15 @@ export function WorkflowPanel({
           </>
         )}
       </div>
+      {reserved.length === 0 ? null : (
+        <p className="max-w-prose text-sm text-fg-muted" data-slot="workflow-reserved">
+          {t("ruleVersion.workflow.reserved", { steps: reserved.map(stepLabel).join(", ") })}
+        </p>
+      )}
       {steps.length === 0 ? (
-        <p className="text-sm text-fg-muted">{t("ruleVersion.workflow.noSteps")}</p>
+        reserved.length === 0 ? (
+          <p className="text-sm text-fg-muted">{t("ruleVersion.workflow.noSteps")}</p>
+        ) : null
       ) : (
         <ul className="flex flex-col gap-3" data-slot="workflow-steps">
           {steps.map((step) => (

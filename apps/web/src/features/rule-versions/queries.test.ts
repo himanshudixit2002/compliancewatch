@@ -267,6 +267,7 @@ describe("getVersionPage", () => {
     });
     expect(port.calls).toContain(`version:${EXAMPLE_OTHER_VERSION_ID}`);
     expect(page.value.steps).toEqual(["submit"]);
+    expect(page.value.reserved).toEqual([]);
     expect(page.value.access).toEqual({ allowed: true });
     expect(page.value.canCite).toBe(true);
     expect(page.value.graphHref).toContain(EXAMPLE_VERSION_ID);
@@ -300,7 +301,9 @@ describe("getVersionPage", () => {
       value: [{ clause: null, quoteMark: null }],
     });
     expect(page.value.relations).toEqual({ ok: false, error: failure });
-    expect(page.value.steps).toEqual(["withdraw"]);
+    // Withdrawing is a reviewer's or an admin's: an analyst is told, not offered it.
+    expect(page.value.steps).toEqual([]);
+    expect(page.value.reserved).toEqual(["withdraw"]);
     expect(page.value.canCite).toBe(false);
     expect(page.value.access).toMatchObject({
       allowed: false,

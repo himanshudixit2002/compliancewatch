@@ -93,6 +93,32 @@ async function everyVersion(port: RelationReviewPort): Promise<Result<RuleVersio
   return ok(all);
 }
 
+/**
+ * A candidate read again for its approval, with the versions the page offers it (the open drafts
+ * it may start from, the versions it may point at): the action checks the form against them
+ * (D-061). Null when no status holds the candidate; no versions are read for a candidate that is
+ * no longer open.
+ */
+export async function approvalOptions(
+  candidateId: string,
+  deps: QueryDeps = {},
+): Promise<
+  Result<{
+    candidate: RelationCandidate;
+    options: { from: VersionOption[]; target: VersionOption[] };
+  } | null>
+> {
+  const port = relationReviewGateway(deps);
+  const found = await findCandidate(port, candidateId);
+  if (!found.ok) return found;
+  const candidate = found.value;
+  if (candidate === null) return ok(null);
+  if (candidate.status !== "open") return ok({ candidate, options: { from: [], target: [] } });
+  const versions = await everyVersion(port);
+  if (!versions.ok) return versions;
+  return ok({ candidate, options: versionOptions(versions.value, candidate.targetRuleKey) });
+}
+
 export interface CandidatePage {
   facts: CandidateFacts;
   evidence: Evidence;

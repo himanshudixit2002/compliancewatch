@@ -29,11 +29,17 @@ describe("sitemapSections", () => {
       "/legal/terms-of-service",
       "/legal/whatsapp-consent",
     ]);
-    const stats = toSitemapRow(screenById("admin.review.stats"));
-    expect(stats.waitsFor).toEqual([
-      { method: "GET", path: "/v1/rulebook/review/stats", owner: "services track (WP21)" },
+    const reports = toSitemapRow(screenById("admin.error-reports"));
+    expect(reports.waitsFor).toEqual([
+      { method: "GET", path: "/v1/rulebook/error-reports", owner: "services track (WP24)" },
+      {
+        method: "POST",
+        path: "/v1/rulebook/error-reports/{report_id}/decision",
+        owner: "services track (WP24)",
+      },
     ]);
-    expect(stats.roles).toContain("Analyst");
+    expect(reports.roles).toContain("Analyst");
+    expect(toSitemapRow(screenById("admin.review.stats")).waitsFor).toEqual([]);
     const hindi = toSitemapRow(screenById("system.hindi-ui"));
     expect(hindi.waitsFor[0]?.method).toBe("file");
   });

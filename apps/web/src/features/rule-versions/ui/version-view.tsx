@@ -7,11 +7,11 @@ import { humanise } from "@/shared/lib/humanise";
 import { Breadcrumbs } from "@/shared/ui/breadcrumbs";
 import { RuleVersionStatusChip, SeedStatusChip } from "@/shared/ui/rule-version-status";
 import { ServiceError } from "@/shared/ui/service-error";
+import { SpecificationView } from "@/shared/ui/specification";
 import type { VersionPageView } from "../model/version-page";
 import { CitationsSection } from "./citations-section";
 import type { SaveCitationsAction } from "./citations-editor";
 import { RelationsSection } from "./relations-section";
-import { SpecificationView } from "./specification-view";
 import { WorkflowPanel, type TakeStepAction } from "./workflow-panel";
 
 export interface VersionViewProps {
@@ -252,6 +252,7 @@ export function VersionView({
       <WorkflowPanel
         action={stepAction}
         steps={view.steps}
+        reserved={view.reserved}
         access={view.access}
         version={version.version}
         highImpact={version.highImpact}

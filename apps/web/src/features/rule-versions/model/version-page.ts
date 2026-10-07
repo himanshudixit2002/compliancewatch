@@ -3,8 +3,8 @@ import type { Citation, RuleVersion, WorkflowStep } from "@/entities/rule-versio
 import { hrefFor, screenById } from "@/shared/config/screens";
 import { withQuery } from "@/shared/lib/url";
 import type { ServiceErrorLike } from "@/shared/ui/service-error";
+import type { SpecLine } from "@/shared/ui/specification";
 import type { AccessView } from "../ui/workflow-shared";
-import type { SpecLine } from "./specification";
 import { versionHref } from "./version-list";
 
 /**
@@ -60,7 +60,10 @@ export interface VersionPageView {
   ontologyError: ServiceErrorLike | null;
   citations: Part<readonly CitationView[]>;
   relations: Part<{ from: readonly RelationView[]; to: readonly RelationView[] }>;
+  /** The steps the version's status allows that the session's roles take. */
   steps: readonly WorkflowStep[];
+  /** The steps the status allows that are a reviewer's or an admin's, named but not offered. */
+  reserved: readonly WorkflowStep[];
   access: AccessView;
   /** Citations change only while the version is a draft. */
   canCite: boolean;

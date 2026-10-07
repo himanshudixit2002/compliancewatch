@@ -10,8 +10,36 @@ import {
   ruleVersionDetailDto,
   ruleVersionDto,
 } from "@/test/rule-version-fixture";
+import { EXAMPLE_CLAUSE_IDS, EXAMPLE_DOCUMENT_ID } from "@/test/rulebook-fixture";
+import {
+  EXAMPLE_NEXT_TASK_ID,
+  EXAMPLE_RELATION_CANDIDATE_ID,
+  EXAMPLE_RULE_CANDIDATE_ID,
+  EXAMPLE_TASK_ID,
+  candidateTaskDetailDto,
+  queuedCandidateTaskDto,
+  queuedTaskDto,
+  reviewStatsDto,
+  reviewTaskDetailDto,
+  ruleCandidateDto,
+  seedTasksDto,
+  taskDecisionDto,
+  taskPageDto,
+} from "@/test/review-task-fixture";
 import {
   actorToDto,
+  claimToDto,
+  decideToDto,
+  draftEditToDto,
+  draftFieldsToDto,
+  draftFromCandidateToDto,
+  queuedTaskFromDto,
+  reviewStatsFromDto,
+  reviewTaskDetailFromDto,
+  ruleCandidateFromDto,
+  seedTasksFromDto,
+  taskDecisionFromDto,
+  taskPageFromDto,
   citationFromDto,
   citationReportFromDto,
   citationsToDto,
@@ -346,5 +374,231 @@ describe("the step bodies", () => {
     const body = versionApprovalToDto("", EXAMPLE_ANALYST_ID);
     expect(body).toEqual({ actor_id: EXAMPLE_ANALYST_ID, note: "" });
     expect(Object.keys(body)).not.toContain("synthetic");
+  });
+});
+
+describe("the review task mappers", () => {
+  it("reads a queued seed task with its version and a candidate task with its candidate", () => {
+    expect(queuedTaskFromDto(queuedTaskDto())).toMatchObject({
+      taskId: EXAMPLE_TASK_ID,
+      ruleVersionId: EXAMPLE_VERSION_ID,
+      kind: "seed",
+      candidateId: null,
+      ruleKey: "example_rule",
+      version: 1,
+      versionStatus: "draft",
+      approvals: 0,
+      requiredApprovals: 1,
+      candidate: null,
+      claimedBy: null,
+    });
+    const candidate = queuedTaskFromDto(queuedCandidateTaskDto());
+    expect(candidate).toMatchObject({
+      ruleVersionId: null,
+      version: null,
+      versionStatus: null,
+      highImpact: true,
+      candidate: {
+        candidateId: EXAMPLE_RULE_CANDIDATE_ID,
+        outcome: "extracted",
+        issueCount: 2,
+        suggestedRuleKey: "example_suggested_rule",
+        highImpactSuggested: true,
+      },
+    });
+    expect(taskPageFromDto(taskPageDto([queuedTaskDto()], "example-cursor"))).toMatchObject({
+      nextCursor: "example-cursor",
+      tasks: [{ taskId: EXAMPLE_TASK_ID }],
+    });
+  });
+
+  it("reads a task's detail: the version, citations, documents, audit and tasks", () => {
+    const detail = reviewTaskDetailFromDto(
+      reviewTaskDetailDto({ approved_by: [EXAMPLE_ANALYST_ID], source_url: "https://example.com" }),
+    );
+    expect(detail.version?.ruleVersionId).toBe(EXAMPLE_VERSION_ID);
+    expect(detail.citations[0]).toMatchObject({ clauseRef: "en.p1", verified: true });
+    expect(detail.documents[0]).toMatchObject({
+      externalRef: "Example 1/2000",
+      publishedAt: "2000-01-15",
+    });
+    expect(detail.decisions[0]).toMatchObject({
+      action: "edited",
+      actorId: EXAMPLE_ANALYST_ID,
+      note: "Example note: title",
+    });
+    expect(detail).toMatchObject({
+      approvedBy: [EXAMPLE_ANALYST_ID],
+      requiredApprovals: 1,
+      sourceUrl: "https://example.com",
+      candidate: null,
+    });
+  });
+
+  it("reads a candidate task's candidate with the draft it proposes", () => {
+    const detail = reviewTaskDetailFromDto(candidateTaskDetailDto());
+    expect(detail.version).toBeNull();
+    expect(detail.candidate).toMatchObject({
+      candidateId: EXAMPLE_RULE_CANDIDATE_ID,
+      promptVersion: "example.extraction@1",
+      suggestedRuleKnown: false,
+      highImpactReasons: ["Example reason it looks high impact"],
+      issues: [{ code: "example_issue", clauseRef: "en.p2" }],
+      document: { documentId: EXAMPLE_DOCUMENT_ID },
+      proposed: {
+        title: "Example candidate title",
+        recurrence: null,
+        effectiveTo: null,
+        citations: [{ clauseRef: "en.p1", quote: "Example clause text that opens" }],
+        problems: ["effective_to: Example problem the analyst fixes"],
+      },
+    });
+    expect(
+      ruleCandidateFromDto(
+        ruleCandidateDto({ document: null, outcome: "unparseable", candidate: null }),
+      ),
+    ).toMatchObject({ document: null, outcome: "unparseable" });
+  });
+
+  it("reads a decision, the seed tasks opened and the stats", () => {
+    expect(
+      taskDecisionFromDto(taskDecisionDto({ next_task_id: EXAMPLE_NEXT_TASK_ID })),
+    ).toMatchObject({
+      task: { status: "decided", decision: "approve" },
+      version: { status: "approved", requiredApprovals: 1 },
+      nextTaskId: EXAMPLE_NEXT_TASK_ID,
+      candidateStatus: null,
+    });
+    expect(taskDecisionFromDto(taskDecisionDto({ version: null })).version).toBeNull();
+    expect(seedTasksFromDto(seedTasksDto())).toEqual({
+      opened: 2,
+      taskIds: [EXAMPLE_TASK_ID, EXAMPLE_NEXT_TASK_ID],
+    });
+    expect(reviewStatsFromDto(reviewStatsDto())).toMatchObject({
+      byStatus: { open: 3, claimed: 1, decided: 4 },
+      byRegulator: [{ regulator: "example_regulator", open: 2 }, { regulator: "example_other" }],
+      decisions: { approved: 2, returned: 1, rejected: 1 },
+      candidates: { approvedWithoutEdits: 1, acceptanceRate: 1 / 3 },
+      medianSecondsToDecide: 5400,
+      oldestOpenAgeSeconds: 93_600,
+    });
+  });
+
+  it("sends only the fields an edit changed, the citations added and the session's user", () => {
+    expect(claimToDto(EXAMPLE_ANALYST_ID)).toEqual({ actor_id: EXAMPLE_ANALYST_ID });
+    expect(
+      draftEditToDto(
+        {
+          fields: { title: "Example title", recurrence: null, effectiveTo: null },
+          citations: [{ clauseId: EXAMPLE_CLAUSE_IDS.first, quote: "Example quote" }],
+          note: "Example why",
+        },
+        EXAMPLE_ANALYST_ID,
+      ),
+    ).toEqual({
+      actor_id: EXAMPLE_ANALYST_ID,
+      title: "Example title",
+      recurrence: null,
+      effective_to: null,
+      citations: [{ clause_id: EXAMPLE_CLAUSE_IDS.first, quote: "Example quote" }],
+      note: "Example why",
+    });
+    expect(
+      draftFieldsToDto({
+        summary: "Example summary",
+        specification: { all_of: [] },
+        obligationTemplate: { title: "Example" },
+        recurrence: { frequency: "monthly", due_day: 1, due_month_offset: 0 },
+        effectiveFrom: "2000-04-01",
+        todo: ["Example question?"],
+      }),
+    ).toEqual({
+      summary: "Example summary",
+      specification: { all_of: [] },
+      obligation_template: { title: "Example" },
+      recurrence: { frequency: "monthly", due_day: 1, due_month_offset: 0 },
+      effective_from: "2000-04-01",
+      todo: ["Example question?"],
+    });
+  });
+
+  it("drafts from a candidate into a new rule, with relations and the candidate's quotes", () => {
+    expect(
+      draftFromCandidateToDto(
+        {
+          ruleKey: "example_new_rule",
+          newRule: { regulator: "example_regulator", level: "registration" },
+          edits: null,
+          citations: null,
+          relations: [
+            {
+              candidateId: EXAMPLE_RELATION_CANDIDATE_ID,
+              targetRuleVersionId: EXAMPLE_OTHER_VERSION_ID,
+            },
+            { candidateId: EXAMPLE_TASK_ID, targetRuleVersionId: null },
+          ],
+          note: "",
+        },
+        EXAMPLE_ANALYST_ID,
+      ),
+    ).toEqual({
+      actor_id: EXAMPLE_ANALYST_ID,
+      rule_key: "example_new_rule",
+      new_rule: { regulator: "example_regulator", level: "registration" },
+      relation_candidates: [
+        {
+          candidate_id: EXAMPLE_RELATION_CANDIDATE_ID,
+          target_rule_version_id: EXAMPLE_OTHER_VERSION_ID,
+        },
+        { candidate_id: EXAMPLE_TASK_ID },
+      ],
+      note: "",
+    });
+    expect(
+      draftFromCandidateToDto(
+        {
+          ruleKey: "example_rule",
+          newRule: null,
+          edits: { title: "Example edited title" },
+          citations: [],
+          relations: [],
+          note: "Example why",
+        },
+        EXAMPLE_ANALYST_ID,
+      ),
+    ).toEqual({
+      actor_id: EXAMPLE_ANALYST_ID,
+      rule_key: "example_rule",
+      edits: { title: "Example edited title" },
+      citations: [],
+      relation_candidates: [],
+      note: "Example why",
+    });
+  });
+
+  it("sends the high-impact tag with an approval only and the reason with a rejection only", () => {
+    expect(
+      decideToDto(
+        { decision: "approve", note: "", highImpact: true, reason: "duplicate" },
+        EXAMPLE_ANALYST_ID,
+      ),
+    ).toEqual({ actor_id: EXAMPLE_ANALYST_ID, decision: "approve", note: "", high_impact: true });
+    expect(
+      decideToDto(
+        { decision: "reject", note: "Example why", highImpact: true, reason: "not_a_rule" },
+        EXAMPLE_ANALYST_ID,
+      ),
+    ).toEqual({
+      actor_id: EXAMPLE_ANALYST_ID,
+      decision: "reject",
+      note: "Example why",
+      reason: "not_a_rule",
+    });
+    expect(
+      decideToDto(
+        { decision: "return", note: "Example why", highImpact: true, reason: null },
+        EXAMPLE_ANALYST_ID,
+      ),
+    ).toEqual({ actor_id: EXAMPLE_ANALYST_ID, decision: "return", note: "Example why" });
   });
 });

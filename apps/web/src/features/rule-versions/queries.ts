@@ -7,9 +7,9 @@ import type { ClientContext } from "@/server/api/services";
 import { getOntology } from "@/server/ontology";
 import { ok, type Result } from "@/server/result";
 import { hrefFor, screenById } from "@/shared/config/screens";
+import { describeSpecification } from "@/shared/ui/specification";
 import { ruleVersionsGateway } from "./gateway";
 import { listHref, type VersionListFilter } from "./model/list-filter";
-import { describeSpecification } from "./model/specification";
 import {
   PAGE_SIZE,
   RULE_BATCH,
@@ -20,7 +20,7 @@ import {
   type VersionListView,
 } from "./model/version-list";
 import { citationView, graphHref, relationView, type VersionPageView } from "./model/version-page";
-import { stepsFor } from "./model/workflow";
+import { stepsOffered } from "./model/workflow";
 import type { RuleVersionsPort } from "./ports";
 import type { AccessView } from "./ui/workflow-shared";
 
@@ -166,8 +166,9 @@ async function versionsOf(
 /**
  * The version page: the version first (a version the rulebook does not hold is the caller's
  * not-found), then, side by side, its citations, its relations from and to it, the ontology to
- * word its condition with, and whether the session may take workflow steps; then the clauses the
- * citations cite and the versions at the other end of the relations, for their names.
+ * word its condition with, and whether the session may take workflow steps (and which: approving,
+ * publishing and withdrawing are left to a reviewer or an admin); then the clauses the citations
+ * cite and the versions at the other end of the relations, for their names.
  */
 export async function getVersionPage(
   ruleVersionId: string,
@@ -206,6 +207,7 @@ export async function getVersionPage(
           },
         };
   const spec = version.value.specification;
+  const { steps, reserved } = stepsOffered(version.value.status, ctx.session);
   return ok({
     version: version.value,
     specification:
@@ -220,7 +222,8 @@ export async function getVersionPage(
         }
       : { ok: false, error: citations.error },
     relations,
-    steps: stepsFor(version.value.status),
+    steps,
+    reserved,
     access: accessView(access),
     canCite: version.value.status === "draft",
     graphHref: graphHref(ruleVersionId),

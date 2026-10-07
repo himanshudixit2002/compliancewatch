@@ -35,6 +35,13 @@ import {
   lifecycleDto,
   publicationDto,
 } from "@/test/rule-version-fixture";
+import {
+  EXAMPLE_TASK_ID,
+  reviewTaskDetailDto,
+  reviewTaskDto,
+  seedTasksDto,
+  taskDecisionDto,
+} from "@/test/review-task-fixture";
 import type { ClientContext, ClientPrincipal } from "./services";
 
 // Obviously fake values: the module must never put either one in an error or another call.
@@ -271,6 +278,27 @@ describe("rulebookWrites", () => {
       }),
       await port.approveCandidate(CANDIDATE_ID, { fromRuleVersionId: FROM_VERSION, note: "" }),
       await port.rejectCandidate(CANDIDATE_ID, { reason: "duplicate", note: "" }),
+      await port.claimTask(EXAMPLE_TASK_ID),
+      await port.openSeedTasks(),
+      await port.draftFromCandidate(EXAMPLE_TASK_ID, {
+        ruleKey: "example_rule",
+        newRule: null,
+        edits: null,
+        citations: null,
+        relations: [],
+        note: "",
+      }),
+      await port.editDraft(EXAMPLE_TASK_ID, {
+        fields: { title: "Example" },
+        citations: [],
+        note: "",
+      }),
+      await port.decideTask(EXAMPLE_TASK_ID, {
+        decision: "approve",
+        note: "",
+        highImpact: false,
+        reason: null,
+      }),
     ];
     for (const result of results) {
       if (result.ok) throw new Error("expected a refusal");
@@ -535,6 +563,161 @@ describe("rulebookWrites", () => {
   });
 });
 
+describe("rulebookWrites: review tasks", () => {
+  const TASK = `/v1/rulebook/review/tasks/${EXAMPLE_TASK_ID}`;
+
+  it("claims a task and opens the seed tasks with the review token, the session's user claiming", async () => {
+    allowDecisions();
+    const fake = fakeFetch([
+      {
+        method: "POST",
+        path: `${TASK}/claim`,
+        body: reviewTaskDto({ status: "claimed", claimed_by: analyst.userId }),
+      },
+      { method: "POST", path: "/v1/rulebook/review/tasks/seed", body: seedTasksDto() },
+    ]);
+    const port = await rulebookWrites(ctx(analyst, fake));
+    const claimed = await port.claimTask(EXAMPLE_TASK_ID);
+    expect(claimed).toMatchObject({
+      ok: true,
+      value: { status: "claimed", claimedBy: analyst.userId },
+    });
+    const opened = await port.openSeedTasks();
+    expect(opened).toMatchObject({ ok: true, value: { opened: 2 } });
+    expect(
+      fake.requests.map((request) => [request.method, request.pathname, request.body]),
+    ).toEqual([
+      ["POST", `${TASK}/claim`, { actor_id: analyst.userId }],
+      ["POST", "/v1/rulebook/review/tasks/seed", undefined],
+    ]);
+    for (const request of fake.requests) {
+      expect(request.headers[REVIEW_TOKEN_HEADER]).toBe(REVIEW_TOKEN);
+      expect(request.headers[WRITE_TOKEN_HEADER]).toBeUndefined();
+      expect(request.headers[TENANT_HEADER]).toBeUndefined();
+      expect(request.url.startsWith(RULEBOOK)).toBe(true);
+    }
+  });
+
+  it("drafts, edits and decides with the session's user as the actor", async () => {
+    allowDecisions();
+    const fake = fakeFetch([
+      { method: "POST", path: `${TASK}/draft`, body: reviewTaskDetailDto() },
+      { method: "PATCH", path: `${TASK}/draft`, body: reviewTaskDetailDto() },
+      { method: "POST", path: `${TASK}/decide`, body: taskDecisionDto() },
+    ]);
+    const port = await rulebookWrites(ctx(reviewer, fake));
+    const drafted = await port.draftFromCandidate(EXAMPLE_TASK_ID, {
+      ruleKey: "example_rule",
+      newRule: null,
+      edits: { title: "Example title" },
+      citations: null,
+      relations: [{ candidateId: CANDIDATE_ID, targetRuleVersionId: TARGET_VERSION }],
+      note: "Example why",
+    });
+    expect(drafted).toMatchObject({
+      ok: true,
+      value: { version: { ruleVersionId: EXAMPLE_VERSION_ID } },
+    });
+    const edited = await port.editDraft(EXAMPLE_TASK_ID, {
+      fields: { effectiveTo: null },
+      citations: [{ clauseId: CLAUSE_ID, quote: "Example quote" }],
+      note: "Example why",
+    });
+    expect(edited.ok).toBe(true);
+    const decidedTask = await port.decideTask(EXAMPLE_TASK_ID, {
+      decision: "approve",
+      note: "",
+      highImpact: true,
+      reason: null,
+    });
+    expect(decidedTask).toMatchObject({ ok: true, value: { version: { status: "approved" } } });
+    expect(fake.requests.map((request) => request.body)).toEqual([
+      {
+        actor_id: reviewer.userId,
+        rule_key: "example_rule",
+        edits: { title: "Example title" },
+        relation_candidates: [
+          { candidate_id: CANDIDATE_ID, target_rule_version_id: TARGET_VERSION },
+        ],
+        note: "Example why",
+      },
+      {
+        actor_id: reviewer.userId,
+        effective_to: null,
+        citations: [{ clause_id: CLAUSE_ID, quote: "Example quote" }],
+        note: "Example why",
+      },
+      { actor_id: reviewer.userId, decision: "approve", note: "", high_impact: true },
+    ]);
+  });
+
+  it("passes the rulebook's refusal on with its problem, and rewords a wrong review token", async () => {
+    allowDecisions();
+    const fake = fakeFetch([
+      {
+        method: "POST",
+        path: `${TASK}/claim`,
+        status: 409,
+        problem: {
+          type: `${PROBLEM_TYPE_PREFIX}rulebook-review-task-claimed`,
+          title: "Review task claimed by someone else",
+          detail: "Example detail",
+        },
+      },
+      {
+        method: "POST",
+        path: `${TASK}/decide`,
+        status: 401,
+        problem: {
+          type: `${PROBLEM_TYPE_PREFIX}rulebook-review-token-invalid`,
+          title: "Review token missing or wrong",
+        },
+      },
+    ]);
+    const port = await rulebookWrites(ctx(analyst, fake));
+    const claimed = await port.claimTask(EXAMPLE_TASK_ID);
+    if (claimed.ok) throw new Error("expected a refusal");
+    expect(claimed.error).toMatchObject({ kind: "conflict", status: 409 });
+    expect(problemSlug(claimed.error)).toBe("rulebook-review-task-claimed");
+    const refused = await port.decideTask(EXAMPLE_TASK_ID, {
+      decision: "return",
+      note: "Example why",
+      highImpact: false,
+      reason: null,
+    });
+    if (refused.ok) throw new Error("expected a refusal");
+    expect(refused.error.message).toBe(t("rulebookWrites.reviewTokenInvalid"));
+    expectNoToken(refused.error);
+  });
+
+  it("refuses an analyst's approval without a request; a return and a rejection go through", async () => {
+    allowDecisions();
+    const fake = fakeFetch([
+      { method: "POST", path: `${TASK}/decide`, body: taskDecisionDto() },
+      { method: "POST", path: `${TASK}/decide`, body: taskDecisionDto() },
+    ]);
+    const port = await rulebookWrites(ctx(analyst, fake));
+    const approved = await port.decideTask(EXAMPLE_TASK_ID, {
+      decision: "approve",
+      note: "",
+      highImpact: false,
+      reason: null,
+    });
+    if (approved.ok) throw new Error("expected a refusal");
+    expect(problemSlug(approved.error)).toBe("web-reviewer-role-required");
+    for (const decision of ["return", "reject"] as const) {
+      const result = await port.decideTask(EXAMPLE_TASK_ID, {
+        decision,
+        note: "Example why",
+        highImpact: false,
+        reason: null,
+      });
+      expect(result.ok).toBe(true);
+    }
+    expect(fake.requests).toHaveLength(2);
+  });
+});
+
 describe("explainTokenProblem", () => {
   function refusal(slug: string, status: number): ApiError {
     return {
@@ -730,7 +913,7 @@ describe("rulebookWorkflow", () => {
         },
       },
     ]);
-    const port = await rulebookWorkflow(ctx(analyst, fake));
+    const port = await rulebookWorkflow(ctx(reviewer, fake));
     const twice = await port.approve(EXAMPLE_VERSION_ID, "");
     expect(twice).toMatchObject({
       ok: false,
@@ -745,5 +928,31 @@ describe("rulebookWorkflow", () => {
     if (wrong.ok) throw new Error("expected a refusal");
     expect(wrong.error.message).toBe(t("rulebookWrites.reviewTokenInvalid"));
     expectNoToken(wrong.error);
+  });
+
+  it("refuses an analyst's approval, publication and withdrawal without a request, and sends the rest", async () => {
+    allowWorkflow();
+    const fake = fakeFetch([
+      { method: "POST", path: `${VERSION}/submit`, body: lifecycleDto({ approved_by: [] }) },
+      { method: "POST", path: `${VERSION}/return`, body: lifecycleDto({ status: "draft" }) },
+    ]);
+    const port = await rulebookWorkflow(ctx(analyst, fake));
+    const refused = [
+      await port.approve(EXAMPLE_VERSION_ID, ""),
+      await port.publish(EXAMPLE_VERSION_ID, ""),
+      await port.withdraw(EXAMPLE_VERSION_ID, "Example reason text"),
+    ];
+    for (const result of refused) {
+      if (result.ok) throw new Error("expected a refusal");
+      expect(result.error).toMatchObject({ kind: "forbidden", status: 403 });
+      expect(problemSlug(result.error)).toBe("web-reviewer-role-required");
+      expect(result.error.message).toBe(t("rulebookWrites.reviewerRequired"));
+    }
+    expect((await port.submit(EXAMPLE_VERSION_ID, { highImpact: false, note: "" })).ok).toBe(true);
+    expect((await port.returnToDraft(EXAMPLE_VERSION_ID, "Example reason text")).ok).toBe(true);
+    expect(fake.requests.map((request) => request.pathname)).toEqual([
+      `${VERSION}/submit`,
+      `${VERSION}/return`,
+    ]);
   });
 });

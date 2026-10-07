@@ -43,10 +43,14 @@ describe("AdminHomeView", () => {
     expect(screen.getByRole("link", { name: "Sources" }).getAttribute("href")).toBe(
       "/admin/sources",
     );
+    const tenant = container.querySelector("[data-tool='admin.tenant']");
+    expect(tenant?.querySelector("a")).toBeNull();
+    expect(tenant?.textContent).toContain("services/identity/README.md");
+    const team = container.querySelector("[data-tool='admin.team']");
+    expect(team?.textContent).toContain("+");
     const task = container.querySelector("[data-tool='admin.review.task']");
-    expect(task?.querySelector("a")).toBeNull();
+    expect(task?.textContent).toContain("Available");
     expect(task?.textContent).toContain("services/rulebook/README.md");
-    expect(task?.textContent).toContain("+");
     const system = container.querySelector("[data-tool='admin.system']");
     expect(system?.textContent).toContain("Available");
     expect(screen.getByRole("link", { name: "System" }).getAttribute("href")).toBe("/admin/system");
@@ -56,7 +60,6 @@ describe("AdminHomeView", () => {
     expect(sources?.textContent).toContain("Available");
     const pipeline = container.querySelector("[data-tool='admin.pipeline']");
     expect(pipeline?.textContent).toContain("Available");
-    const team = container.querySelector("[data-tool='admin.team']");
     expect(team?.textContent).toContain("Ready to build");
     const audit = container.querySelector("[data-tool='admin.audit']");
     expect(audit?.textContent).toContain("Waiting for a backend");

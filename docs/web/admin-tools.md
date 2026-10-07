@@ -11,11 +11,11 @@ The admin layout runs `requireAdmin()` before anything renders, so a tenant role
 (`requireScreenSession`), and a regulatory role a tool's entry does not list gets the not-found
 page as well ([auth-and-roles.md](auth-and-roles.md)). The flags, ontology, notification,
 template, rulebook, review queue, decision review, fan-out, impact, LLM gateway, review task,
-system, source and pipeline pages each have a sibling `loading.tsx` with a skeleton (the console's
-sits in the route group `(console)`, the rule version list's, the fan-out list's and the source
-list's in `(list)`, the resolve tool's in `(resolve)`, the two review queues' in `(queue)` and the
-pipeline's operations' in `(operations)`, so each wraps that page alone, as the home's sits in
-`(home)`); under one, a
+system, source and pipeline pages, and the review workbench and stats, each have a sibling
+`loading.tsx` with a skeleton (the console's sits in the route group `(console)`, the rule version
+list's, the fan-out list's and the source list's in `(list)`, the resolve tool's in `(resolve)`,
+the three review queues' in `(queue)` and the pipeline's operations' in `(operations)`, so each
+wraps that page alone, as the home's sits in `(home)`); under one, a
 not-found answer (an unknown id, a regulatory role the tool does not list) is streamed with status
 200 and a `noindex` tag rather than a 404 status, as on the business pages (D-029 in
 [decisions.md](decisions.md)). A tenant role still gets the real 404 from the layout's gate. The
@@ -40,6 +40,9 @@ document tool has no loading boundary, so its unknown ids stay real 404s (D-037)
 | Relation candidates | `/admin/rulebook/relations`              | every regulatory role   | `GET /v1/rulebook/review/relations`                                   |
 | Relation candidate  | `/admin/rulebook/relations/[candidateId]`| every regulatory role reads and decides | the list's keyset for the candidate, its evidence clause, the rules and their versions; `POST .../{candidate_id}/approve` and `/reject` through `server/api/rulebook-write.ts`, behind `web.admin_rulebook_writes` |
 | Rules               | `/admin/rulebook/rules`                  | every regulatory role   | `GET /v1/rulebook/rules` (cached five minutes)                        |
+| Review queue        | `/admin/review`                          | every regulatory role reads, claims and opens the seed tasks | `GET /v1/rulebook/review/tasks` and `.../review/stats`; `POST .../tasks/{task_id}/claim` and `POST .../tasks/seed` through `server/api/rulebook-write.ts`, behind `web.admin_rulebook_writes` |
+| Review workbench    | `/admin/review/[taskId]`                 | every regulatory role reads, claims, drafts, edits, returns and rejects; a reviewer or an admin approves | the task (`GET .../review/tasks/{task_id}`), each document it rests on (`GET /v1/rulebook/documents/{document_id}`, cached) with the pipeline's record of its file (`GET /v1/pipeline/documents/{document_id}`), the ontology and the rule's versions; for a candidate's draft the document's open relation candidates, the rules and their versions; `POST` and `PATCH .../tasks/{task_id}/draft` and `POST .../decide` through `server/api/rulebook-write.ts`, behind `web.admin_rulebook_writes` |
+| Review stats        | `/admin/review/stats`                    | every regulatory role   | `GET /v1/rulebook/review/stats`                                       |
 | Decision review     | `/admin/decisions`                       | every regulatory role reads; a reviewer or an admin settles | `GET /v1/applicability-engine/review-items`, `POST .../{item_id}/resolve`, for the tenant looked up; each version from the rulebook |
 | Fan-outs            | `/admin/fan-outs`                        | every regulatory role reads; an admin holds | `GET /v1/applicability-engine/fan-outs`, `GET` and `PUT .../fan-out-hold`; each version from the rulebook |
 | Fan-out control     | `/admin/fan-outs/[ruleVersionId]`        | every regulatory role reads; an admin controls | the run, the hold, `POST .../fan-outs/{id}/pause`, `/resume`, `/cancel`; the version and its withdraw (`server/api/rulebook-write.ts`, `web.publish_actions`) |
@@ -205,16 +208,19 @@ four open mappings as stored at the foot.
   number (read for the purpose), and a link to the graph.
 - **The publish workflow.** The steps the version's status allows, as the rulebook's routes state
   them: submit a draft (optionally as high impact, which a later submission keeps), approve or
-  return a version in review, publish or return an approved one, withdraw a published one. Each
+  return a version in review, publish or return an approved one, withdraw a published one.
+  Submitting and returning are every regulatory role's; approving, publishing and withdrawing are a
+  reviewer's or an admin's (`admin.review.approve`, `admin.publish`, D-043): an analyst is not
+  offered them, the panel names them instead, and the action refuses them before any request. Each
   opens a dialog that says what the rulebook records; return and withdraw ask for a reason of ten
   characters or more (`ReasonDialog`), the others take an optional note (`ConfirmDialog`). The
   acting analyst is the session's user, filled in by `server/api/rulebook-write.ts`, never a form
   field, and an approval is never sent as synthetic. The panel says what the step did and lists the
   round's approvers from the rulebook's answer ("1 of 2 approvals in this round. It needs a second
-  approver: a different analyst.", the signed-in analyst named); every refusal (the same analyst
-  approving twice, citations missing or unverified, an overlap, a relation that cannot take effect,
-  publishing turned off) is shown under the step with the rulebook's title, detail and correlation
-  id. On success the page renders again in the new status.
+  approver: a different reviewer or admin.", the signed-in reviewer named); every refusal (the same
+  reviewer approving twice, citations missing or unverified, an overlap, a relation that cannot
+  take effect, publishing turned off) is shown under the step with the rulebook's title, detail and
+  correlation id. On success the page renders again in the new status.
 - Citations and steps are sent only with `web.publish_actions` on for the session's tenant and
   `CW_WEB_RULEBOOK_REVIEW_TOKEN` set; otherwise the page shows the refusal (which names the flag or
   the variable) and offers nothing. The rulebook's version read does not carry the round's
@@ -337,7 +343,10 @@ it word for word, else the quote alone.
   rule's versions, and the version it points at: required for the relations that only point at a
   version (supersedes, extends a deadline, corrects, withdraws) and for a candidate that names its
   target rule (whose versions are offered then), optional otherwise, when the relation points at the
-  aligned entity. The dialog names both versions.
+  aligned entity. The dialog names both versions. When it is sent, the action reads the candidate
+  and every rule's versions again and refuses, on its field and before anything reaches the
+  rulebook, a draft or a target the page would not offer (D-061); whether a target is needed comes
+  from that read, never from the page.
 - **Reject** takes one of the rulebook's reasons (the wrong kind, the wrong target, not in the
   text, a duplicate, out of scope).
 - Both take an optional note and record the signed-in user as `decided_by`. The panel shows the
@@ -358,6 +367,119 @@ rulebook), its id to copy and a link to all its versions on the rule version lis
 the title or the regulator and announces how many are shown. The read is the cached rule list
 (five minutes under `rulebook:rules`, as the admin home counts it). Read-only: a rule arrives with
 its first version.
+
+## Review queue: `/admin/review`
+
+The rulebook's review tasks: the seed calendar's drafts waiting for an analyst and the rule
+candidates the pipeline extracted, each to be approved, returned or rejected, in the rulebook's
+order (by regulator, higher priority first, then the oldest), 25 to a page with the rulebook's
+opaque cursor (D-065). Read fresh on every visit.
+
+- **The strip**: how many tasks are open, claimed and decided, the acceptance rate of the rule
+  candidates and how long the oldest open task has waited, from the stats, with the stats page. A
+  failed stats read shows in the strip's place and leaves the queue.
+- **Open seed tasks** opens a task for each seed draft that needs review and has none waiting
+  (`POST /v1/rulebook/review/tasks/seed`) and says how many, or that every draft already has one;
+  pressing it again opens nothing.
+- **The filters**, each a row of chips in the address: the status (open by default, claimed,
+  decided, every status), the kind (seed draft or rule candidate) and the regulator (those the
+  stats count). A row shows the task's kind, its title (the version's, or the candidate's before
+  drafting) linking the workbench, the rule key and version (or the key the candidate suggests),
+  the version's status, the approvals as "k of required" and high impact, a candidate's outcome,
+  confidence, issue count and whether it asked for review, who claimed it and when, and the
+  decision. The rulebook has no assignee filter, so the tasks the signed-in analyst claimed are
+  marked "Yours" instead.
+- **Claim** on an open row claims the task for the signed-in analyst; the answer is said above the
+  list and the queue renders again.
+- **Keys** (optional, D-065): while a row has the focus (its link or its claim button), j and k
+  move between the rows (one tab stop, a roving tabindex), Enter opens the task and ? lists the keys
+  in a dialog; a key typed elsewhere on the page, into a form control or a dialog is not theirs, a
+  key held down moves once, and Tab leaves the list. No key claims a task: claiming is the row's
+  button.
+- A later page whose read failed (the rulebook refuses a cursor from another filter) shows the
+  refusal with a link back to the first page.
+- A reviewer or an admin reads that review sampling, the queue's planned part
+  (`admin.review-sampling`), waits for a route nobody has scheduled (D-039).
+
+## Review workbench: `/admin/review/[taskId]`
+
+One task, from `GET /v1/rulebook/review/tasks/{task_id}` and the reads it leads to: the facts (its
+kind, status, regulator, priority, when it opened, who claimed it, the decision with its note, the
+version with its status, high impact and closed), then three panes, side by side on a wide screen
+and stacked on a narrow one, then what changed and the history. An id the rulebook does not hold is
+the not-found page.
+
+- **Source.** Each document the draft rests on (a candidate task's own document first), as the
+  rulebook stores it: every clause with its page and anchor, each cited quote marked where its
+  clause holds it word for word, the whole clause marked with the quote listed when it does not (a
+  quote is verified by a match score); a link to the document viewer, and "Open the original file"
+  (its type and size) to the stored-file handler in a new tab once the pipeline's record shows it
+  stores one, else that it stores none. Nothing is framed (D-062). Then the draft's citations, each
+  verified or not with its match score and when, linking its clause.
+- **Candidate** (a candidate task). The outcome and confidence, the model and prompt version,
+  whether the extraction asked for review, its status, the quotes the pipeline verified, the issues
+  the checks found (code, clause, detail), whether it looks high impact and why, the rule key it
+  suggests and whether a rule has it, and the draft it proposes field by field (the condition in
+  words) with its quotes and each problem the rulebook found mapping it. An unparseable candidate
+  says plainly that there is none, so the analyst drafts by hand.
+- **Rule.** The draft in words (the rule and version, title, summary, where it applies, the period,
+  how it recurs, the obligation, the condition, the open questions and the instrument), a link to
+  the version's page, then the steps the task's state allows (D-061):
+  - **Claim**: required before drafting or editing; claiming one's own task again changes nothing,
+    and a task someone else claimed names them (read again after the rulebook's refusal). A claim,
+    a draft or an edit that finds the task decided meanwhile is an error that names who decided it
+    and says nothing was saved; only a decision that finds it decided is said as information.
+  - **Draft from the candidate** (the claimant, before drafting): the rule key (the suggested one,
+    another rule's, or a new rule's with its regulator and level), the proposed content with the
+    analyst's changes, the citations (the candidate's quotes, or the analyst's own, each a clause of
+    the document and a quote), the document's open relation candidates to take on (each row named
+    by its candidate, however many the document holds, at most 50 ticked; each with the version it
+    points at where its kind needs one, from the versions of the rule it names, or of every rule
+    when it names none) and why. The action reads the open candidates and their versions again and
+    refuses a candidate or a version the form would not offer, on its row, before anything is sent
+    (D-061). Refusals are said plainly: a key no rule has or one a rule has, a rule of another
+    regulator, a candidate drafted already (the page renders its draft), an overlapping version, a
+    relation candidate gone or decided meanwhile, a target not aligned, a supersession cycle or a
+    version the rulebook does not hold (each on the relation's row when the rulebook names it), a
+    quote not in its clause, and an incomplete draft with every problem the rulebook listed.
+  - **Edit the draft** (the claimant, while the version is a draft and not closed): the title,
+    summary, dates, recurrence, obligation, open questions and condition (the predicate editor,
+    D-064), only the fields changed sent; citations to add, each a clause of a cited document and
+    its words, the row saying beforehand whether the clause holds them word for word; and why, for
+    the audit. A field the analyst changed that the draft now holds otherwise than the form showed
+    (another tab's save) is refused under it with its value now, and nothing is sent (D-064). A
+    content the rulebook refuses (`invariant-violation`) is said as such, each problem it found on
+    a line of its own. A closed draft, a version under review and someone else's claim
+    each say why there is no form.
+  - **Decide**: approve (a reviewer's or an admin's; it submits a draft and approves it, after
+    tagging it high impact when asked), return or reject with a note, a candidate's rejection with
+    its reason, each confirmed in a dialog that says what the rulebook records. The round's
+    approvals show as "k of required" with the approvers' ids ("you" for the signed-in one). The
+    answer says the task after the decision, the version's status and approvers, the candidate's
+    status and the rework's new task (linked), and stays on the page as it renders again; a second
+    approval by the same reviewer is "a different reviewer must approve", a task decided before the
+    decision arrived is read again and said with who decided it, reviews switched off on the
+    rulebook and a wrong review token are said as such. An approved version is published from its
+    own page (W5), which the pane links; the workbench publishes nothing.
+- **What changed** (D-066): the candidate's proposal against the draft made of it, and the rule's
+  previous version against the draft, field by field, a removed line "-" and an added one "+".
+- **History**: the version's decision audit, newest first (each submission, return, approval,
+  publication and edit, who, the move and the note), and every task the version or the candidate
+  has had, oldest first, the current one marked and each other one linked.
+
+With `web.admin_rulebook_writes` off or the review token unset, the page shows the task and says
+which one holds the steps back. A decision that moves the version's lifecycle (approving,
+returning, a rejection once a version is drafted) needs `web.publish_actions` too, as those steps
+do on the version's page (D-061): with it off, each such step says so in its place, and the claim,
+the draft, the edit and a candidate's rejection before drafting stay offered.
+
+## Review stats: `/admin/review/stats`
+
+The queue in numbers, read-only and fresh on every visit: the tasks by status and by regulator, the
+decisions (approved, returned, rejected), the rule candidates analysts decided (approved, approved
+without an edit, rejected) with the acceptance rate explained as the share approved without an
+edit (ADR-006's measure of the extraction; "None decided yet" while none is), the median time from
+a task's opening to its decision and how long the oldest open task has waited.
 
 ## Decision review: `/admin/decisions`
 
@@ -641,6 +763,12 @@ exporting, or failed; the flag is not read again; D-057). Refresh probes again.
   capability `admin.sources.add`); the e2e suite adds its synthetic sources through the route.
 - Turning crawling on or off from a page: the switch is the pipeline's environment
   (`CW_PIPELINE_CRAWL_ENABLED`), which no route reads or sets.
+- Review sampling, the planned part of the review queue (`admin.review-sampling`): no route exists.
+- Part of the review steps end to end on the UI-only stack: no route stages a version or a rule
+  candidate of a spec's own there, so the e2e suite takes the claim, the edit with the predicate
+  editor, one high-impact approval and the second refused, the return and the rejection on seed
+  drafts it owns, and the unit tests alone cover completing a round, drafting from a candidate with
+  the candidate pane and the proposal's diff (D-063).
 - Resolving and dismissing tasks and requeueing dead rows end to end on the UI-only stack: tasks
   open in the ingest and rows die in the relay, and the stack runs neither (no Temporal, no relay),
   so the e2e suite reads their empty states and the unit tests cover the writes (D-060).

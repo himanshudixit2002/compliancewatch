@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { lifecycleFromDto, publicationFromDto } from "@/entities/rule-version/mappers";
 import { lifecycleDto, publicationDto } from "@/test/rule-version-fixture";
-import { isWorkflowStep, parseStepForm, stepResult, stepsFor } from "./workflow";
+import {
+  isWorkflowStep,
+  mayTake,
+  parseStepForm,
+  stepResult,
+  stepsFor,
+  stepsOffered,
+} from "./workflow";
 
 function form(values: Record<string, string>): FormData {
   const data = new FormData();
@@ -20,6 +27,30 @@ describe("stepsFor", () => {
     expect(stepsFor("example")).toEqual([]);
     expect(isWorkflowStep("approve")).toBe(true);
     expect(isWorkflowStep("delete")).toBe(false);
+  });
+});
+
+describe("stepsOffered", () => {
+  it("leaves approving, publishing and withdrawing to a reviewer or an admin", () => {
+    const analyst = { roles: ["analyst"] as const };
+    const reviewer = { roles: ["reviewer"] as const };
+    expect(stepsOffered("in_review", analyst)).toEqual({
+      steps: ["return"],
+      reserved: ["approve"],
+    });
+    expect(stepsOffered("approved", analyst)).toEqual({ steps: ["return"], reserved: ["publish"] });
+    expect(stepsOffered("published", analyst)).toEqual({ steps: [], reserved: ["withdraw"] });
+    expect(stepsOffered("draft", analyst)).toEqual({ steps: ["submit"], reserved: [] });
+    expect(stepsOffered("in_review", reviewer)).toEqual({
+      steps: ["approve", "return"],
+      reserved: [],
+    });
+    expect(stepsOffered("approved", { roles: ["admin"] })).toEqual({
+      steps: ["publish", "return"],
+      reserved: [],
+    });
+    expect(mayTake(null, "submit")).toBe(false);
+    expect(mayTake({ roles: ["owner"] }, "submit")).toBe(false);
   });
 });
 
