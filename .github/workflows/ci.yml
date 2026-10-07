@@ -746,13 +746,17 @@ jobs:
       # browser and its system libraries are fetched here, explicitly. The browser download is
       # the slow part (one run reached the job's limit while still fetching it), so it is kept
       # in the cache under the Playwright version apps/web pins. A hit still installs the system
-      # libraries, which the cache does not carry; a miss installs both, as before.
+      # libraries, which the cache does not carry; a miss installs both, as before. The cache is
+      # restored and saved in separate steps so the save happens as soon as the download is on
+      # disk: a single actions/cache step saves in its post step, which runs only when every
+      # later step succeeded, so a run that downloaded the browser and then failed a Playwright
+      # assertion or reached the limit would leave nothing for the next run to restore.
       - name: Playwright version
         id: playwright
         run: |
           version=$(node -p "require('./apps/web/package.json').devDependencies['@playwright/test']")
           echo "version=$version" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v6
+      - uses: actions/cache/restore@v6
         id: playwright-browsers
         with:
           path: ~/.cache/ms-playwright
@@ -760,6 +764,12 @@ jobs:
       - name: Chromium for Playwright
         if: steps.playwright-browsers.outputs.cache-hit != 'true'
         run: pnpm --filter web e2e:install
+      - name: Save the downloaded Chromium to the cache
+        if: steps.playwright-browsers.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ steps.playwright-browsers.outputs.cache-primary-key }}
       - name: System libraries for the cached Chromium
         if: steps.playwright-browsers.outputs.cache-hit == 'true'
         run: pnpm --filter web exec playwright install-deps chromium
