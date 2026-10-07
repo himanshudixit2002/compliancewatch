@@ -2619,6 +2619,8 @@
   "workbench.edit.changed": "Changed: {fields}.",
   "workbench.edit.cited": "Citations added: {count}; the rulebook found every quote in its clause.",
   "workbench.edit.saved": "The draft is saved.",
+  "workbench.edit.meanwhile": "{field} changed meanwhile: it is now {value}.",
+  "workbench.edit.meanwhileNothingSaved": "Nothing was saved. The form now shows the draft as the rulebook holds it: make your change again if it still applies.",
   "workbench.draft.done": "The version is drafted.",
   "workbench.draft.doneVersion": "Drafted {rule} v{version} from the candidate.",
   "workbench.draft.relations": "Relation candidates taken on: {count}.",

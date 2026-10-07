@@ -24,7 +24,16 @@ import { formatDateTime } from "@/shared/lib/dates";
 import { isHexUuid } from "@/shared/lib/identifiers";
 import { ruleVersionStatusLabel } from "@/shared/ui/rule-version-status";
 import { candidateStatusLabel } from "./model/candidate";
-import { parseClaim, parseDecision, parseDraft, parseEdit, type Parsed } from "./model/forms";
+import { getOntology } from "@/server/ontology";
+import { valueNowWords, versionValues } from "./model/content";
+import {
+  changedMeanwhile,
+  parseClaim,
+  parseDecision,
+  parseDraft,
+  parseEdit,
+  type Parsed,
+} from "./model/forms";
 import { decisionLabel, taskHref } from "./model/queue";
 import {
   REVIEW_PROBLEMS,
@@ -34,7 +43,7 @@ import {
   type ReviewStep,
   type SentRelation,
 } from "./model/refusals";
-import { checkRelations } from "./model/workbench";
+import { checkRelations, editorOntology } from "./model/workbench";
 import { relationsOffered, taskNow } from "./queries";
 import type { WriteResult } from "./ui/form-shared";
 
@@ -319,7 +328,46 @@ export async function draftFromCandidate(
   return actionSuccess(done, done.message);
 }
 
-/** An edit of a claimed task's draft: the fields changed, the citations added and why. */
+/**
+ * The fields an edit changed that the draft now holds otherwise than the form was rendered with,
+ * each refused on its field with its value now (D-058's check for the draft, D-064); null when
+ * none did, when the task cannot be read (the rulebook then answers the edit itself) or when it is
+ * decided (the rulebook refuses the edit as closed).
+ */
+async function staleEdit(
+  taskId: string,
+  formData: FormData,
+): Promise<ActionState<WriteResult> | null> {
+  const now = await taskNow(taskId);
+  if (!now.ok || now.value === null || now.value.task.status === "decided") return null;
+  const version = now.value.version;
+  if (version === null) return null;
+  const ontology = await getOntology();
+  const known = ontology.ok ? ontology.value : null;
+  const stale = changedMeanwhile(
+    formData,
+    versionValues(version),
+    known === null ? null : editorOntology(known),
+  );
+  if (stale.length === 0) return null;
+  const fieldErrors: Record<string, string[]> = {};
+  for (const { field, name } of stale) {
+    fieldErrors[name] = [
+      t("workbench.edit.meanwhile", {
+        field: FIELD_WORDS[field](),
+        value: valueNowWords(field, version, known),
+      }),
+    ];
+  }
+  return { status: "error", fieldErrors, formErrors: [t("workbench.edit.meanwhileNothingSaved")] };
+}
+
+/**
+ * An edit of a claimed task's draft: the fields changed, the citations added and why. A field it
+ * changed that someone changed meanwhile (the same analyst in another tab) is refused by name with
+ * its value now, nothing is sent, and the page renders the draft as it is; the rulebook's `PATCH`
+ * takes no precondition, so a change in the moment between that read and the write still lands.
+ */
 export async function editDraft(
   taskId: string,
   _state: ActionState<WriteResult>,
@@ -330,6 +378,13 @@ export async function editDraft(
   const parsed = parseEdit(formData);
   if (!parsed.ok) return failure(parsed);
   const id = taskId.toLowerCase();
+  if (Object.keys(parsed.value.fields).length > 0) {
+    const stale = await staleEdit(id, formData);
+    if (stale !== null) {
+      refresh(id);
+      return stale;
+    }
+  }
   const writes = await rulebookWrites({ session });
   const edited = await writes.editDraft(id, parsed.value);
   if (!edited.ok) return refusal(edited.error, id, session, "edit", (found) => found);

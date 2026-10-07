@@ -469,16 +469,20 @@ describe("draftFromCandidate", () => {
 });
 
 describe("editDraft", () => {
+  /** The summary the draft was rendered with: the fixture's, which the rulebook still holds. */
+  const SUMMARY = "Example summary of what the rule asks.";
+
   function edit(values: Record<string, string>): FormData {
     const data = form(values);
-    data.set("base:summary", "Example summary.");
-    data.set("summary", values.summary ?? "Example summary.");
+    data.set("base:summary", SUMMARY);
+    data.set("summary", values.summary ?? SUMMARY);
     return data;
   }
 
   it("sends the changed fields and the citations, and says what it saved", async () => {
     await signedInAs(["analyst"]);
     const fake = fakeFetch([
+      { method: "GET", path: TASK, body: reviewTaskDetailDto() },
       { method: "PATCH", path: `${TASK}/draft`, body: reviewTaskDetailDto() },
     ]);
     vi.stubGlobal("fetch", fake.fetchImpl);
@@ -501,11 +505,98 @@ describe("editDraft", () => {
         ],
       },
     });
-    expect(fake.requests[0]?.body).toEqual({
+    expect(fake.requests.find((request) => request.method === "PATCH")?.body).toEqual({
       actor_id: USER_ID,
       summary: "Example new summary.",
       citations: [{ clause_id: EXAMPLE_CLAUSE_IDS.first, quote: "Example clause text" }],
       note: "",
+    });
+  });
+
+  it("refuses a field someone changed meanwhile by name with its value now, and sends nothing", async () => {
+    await signedInAs(["analyst"]);
+    const meanwhile = reviewTaskDetailDto({
+      rule_version: ruleVersionDto({
+        summary: "Example summary another tab saved.",
+        title: "Example title another tab saved",
+      }),
+    });
+    const fake = fakeFetch([
+      { method: "GET", path: TASK, body: meanwhile },
+      { method: "PATCH", path: `${TASK}/draft`, body: reviewTaskDetailDto() },
+    ]);
+    vi.stubGlobal("fetch", fake.fetchImpl);
+    const data = edit({ summary: "Example new summary." });
+    data.set("base:title", "Example rule title");
+    data.set("title", "Example rule title");
+    expect(await editDraft(EXAMPLE_TASK_ID, IDLE, data)).toEqual({
+      status: "error",
+      fieldErrors: {
+        summary: ['Summary changed meanwhile: it is now "Example summary another tab saved.".'],
+      },
+      formErrors: [
+        "Nothing was saved. The form now shows the draft as the rulebook holds it: make your change again if it still applies.",
+      ],
+    });
+    expect(fake.requests.filter((request) => request.method === "PATCH")).toHaveLength(0);
+    expect(paths()).toContain(`/admin/review/${EXAMPLE_TASK_ID}`);
+  });
+
+  it("sends a change while a field it left alone changed meanwhile, and compares a condition as the editor writes it", async () => {
+    await signedInAs(["analyst"]);
+    const stored = ruleVersionDto().specification;
+    const fake = fakeFetch([
+      {
+        method: "GET",
+        path: TASK,
+        body: reviewTaskDetailDto({
+          rule_version: ruleVersionDto({ title: "Example title another tab saved" }),
+        }),
+      },
+      { method: "PATCH", path: `${TASK}/draft`, body: reviewTaskDetailDto() },
+    ]);
+    vi.stubGlobal("fetch", fake.fetchImpl);
+    const data = edit({ summary: "Example new summary." });
+    data.set("base:title", "Example rule title");
+    data.set("title", "Example rule title");
+    // The condition as the editor wrote it back (keys in its own order), changed by the analyst.
+    data.set("base:specification", JSON.stringify(stored));
+    data.set(
+      "specification",
+      JSON.stringify({ all_of: [{ attribute: "example_kind", operator: "eq", value: "second" }] }),
+    );
+    expect(await editDraft(EXAMPLE_TASK_ID, IDLE, data)).toMatchObject({ status: "ok" });
+    expect(fake.requests.find((request) => request.method === "PATCH")?.body).toMatchObject({
+      summary: "Example new summary.",
+      specification: { all_of: [{ attribute: "example_kind", operator: "eq", value: "second" }] },
+    });
+  });
+
+  it("names a condition changed meanwhile in words", async () => {
+    await signedInAs(["analyst"]);
+    vi.stubGlobal(
+      "fetch",
+      fakeFetch([
+        {
+          method: "GET",
+          path: TASK,
+          body: reviewTaskDetailDto({
+            rule_version: ruleVersionDto({
+              specification: { attribute: "example_kind", operator: "eq", value: "first" },
+            }),
+          }),
+        },
+      ]).fetchImpl,
+    );
+    const data = edit({});
+    data.set("base:specification", JSON.stringify(ruleVersionDto().specification));
+    data.set("specification", JSON.stringify({ all_of: [] }));
+    const state = await editDraft(EXAMPLE_TASK_ID, IDLE, data);
+    expect(state).toMatchObject({
+      status: "error",
+      fieldErrors: {
+        specification: [expect.stringMatching(/^Condition changed meanwhile: it is now "/)],
+      },
     });
   });
 

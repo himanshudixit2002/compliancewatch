@@ -446,8 +446,10 @@ the not-found page.
     summary, dates, recurrence, obligation, open questions and condition (the predicate editor,
     D-064), only the fields changed sent; citations to add, each a clause of a cited document and
     its words, the row saying beforehand whether the clause holds them word for word; and why, for
-    the audit. A content the rulebook refuses (`invariant-violation`) is said as such, each problem
-    it found on a line of its own. A closed draft, a version under review and someone else's claim
+    the audit. A field the analyst changed that the draft now holds otherwise than the form showed
+    (another tab's save) is refused under it with its value now, and nothing is sent (D-064). A
+    content the rulebook refuses (`invariant-violation`) is said as such, each problem it found on
+    a line of its own. A closed draft, a version under review and someone else's claim
     each say why there is no form.
   - **Decide**: approve (a reviewer's or an admin's; it submits a draft and approves it, after
     tagging it high impact when asked), return or reject with a note, a candidate's rejection with

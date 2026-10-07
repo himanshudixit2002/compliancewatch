@@ -2,8 +2,10 @@ import {
   obligationTemplateFromMapping,
   recurrenceFromMapping,
 } from "@/entities/rule-version/mappers";
+import type { Ontology } from "@/entities/ontology/types";
 import {
   FREQUENCIES,
+  type DraftFields,
   type ObligationTemplate,
   type ProposedDraft,
   type Recurrence,
@@ -12,6 +14,7 @@ import {
 import { t, type MessageKey } from "@/shared/i18n";
 import { formatDate } from "@/shared/lib/dates";
 import { humanise } from "@/shared/lib/humanise";
+import { describeSpecification, specificationText } from "@/shared/ui/specification";
 import type { ContentValues, Frequency } from "../ui/form-shared";
 
 /**
@@ -126,4 +129,54 @@ export function periodWords(from: string | null, to: string | null): string {
   return to === null || to === ""
     ? t("workbench.period.openEnded", { from: start })
     : t("workbench.period.bounded", { from: start, to: formatDate(to) });
+}
+
+/** At most this many characters of a long value are quoted back. */
+const QUOTED = 160;
+
+function quoted(text: string): string {
+  const characters = Array.from(text);
+  return `"${characters.length > QUOTED ? `${characters.slice(0, QUOTED).join("")}...` : text}"`;
+}
+
+/**
+ * A field's value as the rulebook holds it now, in words, for the refusal of an edit to a field
+ * that changed meanwhile: a text quoted (a long one cut), a date, how it recurs, the obligation's
+ * title, the questions, the condition in words.
+ */
+export function valueNowWords(
+  field: keyof DraftFields,
+  version: RuleVersion,
+  ontology: Ontology | null,
+): string {
+  switch (field) {
+    case "title":
+      return quoted(version.title);
+    case "summary":
+      return version.summary === "" ? t("workbench.diff.notStated") : quoted(version.summary);
+    case "effectiveFrom":
+      return formatDate(version.effectiveFrom);
+    case "effectiveTo":
+      return version.effectiveTo === null
+        ? t("workbench.diff.openEnded")
+        : formatDate(version.effectiveTo);
+    case "recurrence":
+      return recurrenceWords(version.recurrence);
+    case "obligationTemplate":
+      return version.obligationTemplate === null
+        ? t("workbench.diff.notStated")
+        : quoted(version.obligationTemplate.title);
+    case "todo":
+      return version.todo.length === 0
+        ? t("workbench.draftView.noQuestions")
+        : version.todo.map(quoted).join(", ");
+    case "specification":
+      return version.specification === null
+        ? t("ruleVersion.spec.none")
+        : quoted(
+            specificationText(describeSpecification(version.specification, ontology))
+              .map((line) => line.trim())
+              .join(" "),
+          );
+  }
 }

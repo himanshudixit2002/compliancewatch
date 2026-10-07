@@ -26,8 +26,16 @@ import {
   RULE_KEY,
   citationField,
   relationField,
+  type ContentValues,
 } from "../ui/form-shared";
-import { conditionProblem, sizeProblem } from "../ui/predicate-tree";
+import {
+  conditionProblem,
+  fromMapping,
+  idSource,
+  sizeProblem,
+  toMapping,
+  type EditorOntology,
+} from "../ui/predicate-tree";
 
 /**
  * The workbench forms' shapes, checked before the rulebook is asked. A content field is sent
@@ -74,6 +82,8 @@ function add(errors: FormErrors, field: string, message: string): void {
 type Read = (name: string) => string;
 
 interface FieldRule<T> {
+  /** The draft's field it reads. */
+  field: keyof DraftFields;
   /** The form names the field is read from (the first carries its errors). */
   names: readonly string[];
   read: (value: Read) => T;
@@ -137,6 +147,7 @@ function specificationOf(read: Read): unknown {
 
 const RULES: readonly FieldRule<unknown>[] = [
   {
+    field: "title",
     names: [CONTENT_FIELDS.title],
     read: (value) => value(CONTENT_FIELDS.title).trim(),
     check: (value) => {
@@ -152,6 +163,7 @@ const RULES: readonly FieldRule<unknown>[] = [
     },
   },
   {
+    field: "summary",
     names: [CONTENT_FIELDS.summary],
     read: (value) => value(CONTENT_FIELDS.summary).trim(),
     check: (value) =>
@@ -163,6 +175,7 @@ const RULES: readonly FieldRule<unknown>[] = [
     },
   },
   {
+    field: "effectiveFrom",
     names: [CONTENT_FIELDS.effectiveFrom],
     read: (value) => value(CONTENT_FIELDS.effectiveFrom).trim(),
     check: (value) =>
@@ -172,6 +185,7 @@ const RULES: readonly FieldRule<unknown>[] = [
     },
   },
   {
+    field: "effectiveTo",
     names: [CONTENT_FIELDS.effectiveTo],
     read: (value) => {
       const to = value(CONTENT_FIELDS.effectiveTo).trim();
@@ -186,6 +200,7 @@ const RULES: readonly FieldRule<unknown>[] = [
     },
   },
   {
+    field: "recurrence",
     names: [CONTENT_FIELDS.frequency, CONTENT_FIELDS.dueDay, CONTENT_FIELDS.dueMonthOffset],
     read: recurrenceOf,
     check: (value) => {
@@ -213,6 +228,7 @@ const RULES: readonly FieldRule<unknown>[] = [
     },
   },
   {
+    field: "obligationTemplate",
     names: [
       CONTENT_FIELDS.templateTitle,
       CONTENT_FIELDS.templateSteps,
@@ -236,6 +252,7 @@ const RULES: readonly FieldRule<unknown>[] = [
     },
   },
   {
+    field: "todo",
     names: [CONTENT_FIELDS.todo],
     read: (value) => lines(value(CONTENT_FIELDS.todo)),
     check: (value) => {
@@ -253,6 +270,7 @@ const RULES: readonly FieldRule<unknown>[] = [
     },
   },
   {
+    field: "specification",
     names: [CONTENT_FIELDS.specification],
     read: specificationOf,
     check: (value) => {
@@ -294,6 +312,47 @@ export function parseContentChanges(
     }
   }
   return { fields, changed, errors };
+}
+
+/**
+ * The content fields an edit changed that the rulebook now holds otherwise than the form showed
+ * (D-058's check, for the draft): for each field whose value differs from the one it was rendered
+ * with (`base:<name>`), the base is compared with the live draft read just before the edit is
+ * sent. A condition is compared after the editor's own round trip (read into its tree and written
+ * back with the ontology), on both sides, so the forms it normalises compare equal. The field's
+ * first form name is returned with it, for the error under it.
+ */
+export function changedMeanwhile(
+  formData: FormData,
+  live: ContentValues,
+  ontology: EditorOntology | null,
+): { field: keyof DraftFields; name: string }[] {
+  const current: Read = (name) => text(formData, name);
+  const base: Read = (name) => text(formData, `${BASE_PREFIX}${name}`);
+  const keys = Object.keys(CONTENT_FIELDS) as (keyof typeof CONTENT_FIELDS)[];
+  const now: Read = (name) => {
+    const key = keys.find((candidate) => CONTENT_FIELDS[candidate] === name);
+    if (key === undefined) return "";
+    const value = live[key];
+    return key === "specification" ? JSON.stringify(value ?? {}) : String(value ?? "");
+  };
+  const normal = (field: keyof DraftFields, value: unknown): string => {
+    if (field !== "specification" || value instanceof Unreadable) return canonical(value);
+    return canonical(toMapping(fromMapping(value, idSource()), ontology));
+  };
+  const stale: { field: keyof DraftFields; name: string }[] = [];
+  for (const rule of RULES) {
+    try {
+      const was = rule.read(base);
+      if (canonical(rule.read(current)) === canonical(was)) continue;
+      if (normal(rule.field, was) !== normal(rule.field, rule.read(now))) {
+        stale.push({ field: rule.field, name: rule.names[0] ?? "" });
+      }
+    } catch {
+      // A base that cannot be read was checked when the edit was parsed; nothing to compare.
+    }
+  }
+  return stale;
 }
 
 /**

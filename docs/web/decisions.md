@@ -1185,7 +1185,13 @@ condition against the ontology when the draft is saved. The form posts the mappi
 field beside the mapping it was rendered with, and the action sends a content field only when it
 changed from that base (as the source settings form does, D-058), so an edit names what it
 changes and the audit says so; the editor's flagged parts therefore hold the form back only once
-the condition changed from its base, since an untouched one is not sent. Every read of a
+the condition changed from its base, since an untouched one is not sent. Before the `PATCH`, the
+action reads the task again: a field the analyst changed whose value the draft now holds otherwise
+than the form showed (the same claimant in another tab) is refused under the field, by name and
+with its value now, nothing is sent and the page renders the draft as it is (the condition is
+compared after the editor's own round trip on both sides, so a form it normalises is not a
+change); the rulebook's `PATCH` takes no precondition, so a change in the moment between that read
+and the write still lands last. Every read of a
 condition walks it recursively, here as in the kernel: 20,000 nested negations overflowed the
 server's stack (a 500, and a form that said no answer arrived) and 5,000 reach the rulebook's
 recursion limit. So a condition nests at most 32 deep (its groups and negations) and holds at
