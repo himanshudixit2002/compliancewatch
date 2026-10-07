@@ -60,13 +60,18 @@ files together.
 | `web.admin_rulebook_writes` | regulatory-intelligence | Entity, relation and review task decisions from `/admin`, sent with the review token |
 | `web.analytics_enabled`     | core-product            | Product events for sessions that granted the analytics consent                       |
 | `web.otel_enabled`          | platform                | OpenTelemetry registration in `instrumentation.ts`                                   |
-| `web.publish_actions`       | regulatory-intelligence | Citations and the publish workflow on a rule version's page                          |
+| `web.publish_actions`       | regulatory-intelligence | Citations and the publish workflow on a rule version's page, and the workbench's decisions that move a version |
 | `web.qa_enabled`            | ai-platform             | The ask screen                                                                       |
 | `web.tenant_header_off`     | identity-partner        | Stops sending `x-tenant-id` once services take the tenant from a token               |
 
 `web.analytics_enabled` is read by `server/analytics.ts`, `web.admin_rulebook_writes` and
 `web.publish_actions` by `server/api/rulebook-write.ts`, `web.qa_enabled` by the ask screen and
-`web.otel_enabled` by `server/telemetry.ts`; `web.tenant_header_off` is not read yet. The e2e run
+`web.otel_enabled` by `server/telemetry.ts`; `web.tenant_header_off` is not read yet. The two
+rulebook flags overlap on the review workbench (D-061): a review task's claim, draft, edit and a
+candidate's rejection before drafting need `web.admin_rulebook_writes`, and a decision that moves
+the version's lifecycle (approving, returning, a rejection once a version is drafted) needs
+`web.publish_actions` as well, as those steps do on the version's page; with it off the workbench
+says so under each step it holds back. The e2e run
 turns `web.publish_actions`, `web.admin_rulebook_writes` and `web.qa_enabled` on through their
 overrides (the Playwright config), so the rule version specs can cite, submit, approve and return
 drafts, the review specs can decide entity groups and relation candidates and open the review

@@ -57,6 +57,7 @@ function view(dto: ReviewTaskDetailDto, overrides: Partial<WorkbenchReads> = {})
       targets: null,
       ruleKeys: [],
       access: { allowed: true },
+      lifecycle: { allowed: true },
       ...overrides,
     },
     SESSION,

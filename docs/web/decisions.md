@@ -1105,36 +1105,41 @@ so the suite refuses it until it is restarted that way or allowed.
 
 2026-10-07. The rulebook's review task routes take an analyst a token names for the claim and the
 draft's edits (`AnalystWork`) and any regulatory role for the decision and the seed tasks
-(`AnalystWrite`); without a token, in `header` and `dual` mode, the shared review token opens
-every one of them and the body names the actor, so the rulebook cannot tell an analyst's approval
-from a reviewer's. The role table says "reviewer: approves and publishes". Settled: analysts,
-reviewers and admins read the queue, a task and the stats, claim a task, draft a version from a
-candidate, edit the draft, return and reject it, and open the seed tasks (capability
-`admin.review`); approving is the reviewer's or the admin's (`admin.review.approve`), offered only
-to them on the page and checked again in the action before any request. The rule version's page,
-where the workbench sends an approved version to be published, follows the same rule (D-043):
-approving, publishing and withdrawing are offered only to a reviewer or an admin
-(`admin.review.approve`, `admin.publish`) and named for anyone else, `takeStep` checks the role
-before any request, and `server/api/rulebook-write.ts` refuses those steps to any other session
-too, whichever action sends them; submitting, returning and citing stay every regulatory role's.
-A relation a decision attaches is checked against what the page offered, read again on the
-server when the form is sent: the relation candidate page's approval (the open drafts it may start
-from, the versions it may point at) and a draft from a candidate (the document's open relation
-candidates, each with its versions); a crafted request naming another candidate or version is
-refused on its row with nothing sent, and whether a target is needed comes from that read rather
-than from the page. Every step goes through
+(`AnalystWrite`); without a token, in `header` and `dual` mode, the shared review token opens every
+one of them and the body names the actor, so the rulebook cannot tell an analyst's approval from a
+reviewer's. The role table says "reviewer: approves and publishes". Settled: analysts, reviewers and
+admins read the queue, a task and the stats, claim a task, draft a version from a candidate, edit
+the draft, return and reject it, and open the seed tasks (capability `admin.review`); approving is
+the reviewer's or the admin's (`admin.review.approve`), offered only to them on the page and checked
+again in the action before any request. The rule version's page, where the workbench sends an
+approved version to be published, follows the same rule (D-043): approving, publishing and
+withdrawing are offered only to a reviewer or an admin (`admin.review.approve`, `admin.publish`) and
+named for anyone else, `takeStep` checks the role before any request, and
+`server/api/rulebook-write.ts` refuses those steps to any other session too, whichever action sends
+them; submitting, returning and citing stay every regulatory role's. A relation a decision attaches
+is checked against what the page offered, read again on the server when the form is sent: the
+relation candidate page's approval (the open drafts it may start from, the versions it may point at)
+and a draft from a candidate (the document's open relation candidates, each with its versions); a
+crafted request naming another candidate or version is refused on its row with nothing sent, and
+whether a target is needed comes from that read rather than from the page. Every step goes through
 `rulebookWrites` in `server/api/rulebook-write.ts`, behind `web.admin_rulebook_writes` and the
-review token like the entity and relation decisions, with the session's user as `actor_id`.
+review token like the entity and relation decisions, with the session's user as `actor_id`. The two
+rulebook flags overlap here: a decision that moves the version's lifecycle (an approval, a return,
+and a rejection once a version is drafted, which returns a version under review to draft or closes a
+candidate's draft) is a step the version's page holds behind `web.publish_actions`, so the workbench
+needs that flag for it as well, offers it only then and says in its place why it waits, and the
+action checks it before any request (a task it cannot read counts as drafted); a claim, a draft, an
+edit and a candidate's rejection before drafting stay under `web.admin_rulebook_writes` alone.
 Drafting and editing are the claimant's alone (the rulebook's rule); deciding needs no claim, so a
 second reviewer approves a task the first approval left open again. Consequences, for the M3
-security review: through the shared token the rulebook would still take an analyst's approval,
-and a drafter may approve their own draft when it is not high impact (one approver suffices); in
-token mode the rulebook takes a claim and an edit from an analyst alone, so a reviewer or an admin
+security review: through the shared token the rulebook would still take an analyst's approval, and a
+drafter may approve their own draft when it is not high impact (one approver suffices); in token
+mode the rulebook takes a claim and an edit from an analyst alone, so a reviewer or an admin
 claiming would then get the rulebook's 403, shown as it comes; the rulebook does not check a
-relation's target against its candidate (any version of any rule is taken), so it should, as the
-web app now does; an approval reads the candidate and every rule's versions again, and a draft
-with relations the document's open candidates and their versions (the versions of the rules they
-name only, every rule's when one names none, as the form reads them).
+relation's target against its candidate (any version of any rule is taken), so it should, as the web
+app now does; an approval reads the candidate and every rule's versions again, and a draft with
+relations the document's open candidates and their versions (the versions of the rules they name
+only, every rule's when one names none, as the form reads them).
 
 ## D-062: The workbench never frames the stored file
 

@@ -95,6 +95,7 @@ beforeEach(() => {
   vi.stubEnv("CW_WEB_SESSION_SECRET", Buffer.from(KEY).toString("base64"));
   vi.stubEnv("CW_WEB_ENV", "test");
   vi.stubEnv("CW_WEB_FLAG_ADMIN_RULEBOOK_WRITES", "true");
+  vi.stubEnv("CW_WEB_FLAG_PUBLISH_ACTIONS", "true");
   vi.stubEnv("CW_WEB_RULEBOOK_REVIEW_TOKEN", "example-review-token");
   vi.mocked(redirect).mockImplementation((href) => {
     throw new Error(`redirect ${String(href)}`);
@@ -828,6 +829,7 @@ describe("decideTask", () => {
   it("rejects a candidate with its reason and says the candidate's status", async () => {
     await signedInAs(["analyst"]);
     const fake = fakeFetch([
+      { method: "GET", path: CANDIDATE_TASK, body: candidateTaskDetailDto() },
       {
         method: "POST",
         path: `${CANDIDATE_TASK}/decide`,
@@ -855,12 +857,57 @@ describe("decideTask", () => {
       message: "Rejected: the task is closed.",
       value: { details: ["Candidate: Rejected."], links: [] },
     });
-    expect(fake.requests[0]?.body).toEqual({
+    expect(fake.requests.find((request) => request.method === "POST")?.body).toEqual({
       actor_id: USER_ID,
       decision: "reject",
       note: "Example why",
       reason: "not_a_rule",
     });
+  });
+
+  it("holds a decision that moves the version back while web.publish_actions is off", async () => {
+    await signedInAs(["reviewer"]);
+    vi.stubEnv("CW_WEB_FLAG_PUBLISH_ACTIONS", "false");
+    const fake = fakeFetch([
+      { method: "GET", path: TASK, body: reviewTaskDetailDto() },
+      { method: "GET", path: CANDIDATE_TASK, body: candidateTaskDetailDto() },
+      { method: "POST", path: `${TASK}/decide`, body: taskDecisionDto() },
+      {
+        method: "POST",
+        path: `${CANDIDATE_TASK}/decide`,
+        body: taskDecisionDto({ version: null, candidate_status: "rejected" }),
+      },
+    ]);
+    vi.stubGlobal("fetch", fake.fetchImpl);
+    const refused = {
+      status: "error",
+      problem: {
+        title: "The web.publish_actions flag is off",
+        detail:
+          "Approving, returning and rejecting a drafted version move its lifecycle, so they wait for web.publish_actions, as on the version's page. Nothing was sent.",
+      },
+    };
+    expect(
+      await decideTask(EXAMPLE_TASK_ID, false, IDLE, form({ decision: "approve" })),
+    ).toMatchObject(refused);
+    expect(
+      await decideTask(EXAMPLE_TASK_ID, false, IDLE, form({ decision: "return", note: "Example" })),
+    ).toMatchObject(refused);
+    // A seed task has its version from the start: rejecting it moves the version too.
+    expect(
+      await decideTask(EXAMPLE_TASK_ID, false, IDLE, form({ decision: "reject", note: "Example" })),
+    ).toMatchObject(refused);
+    expect(fake.requests.filter((request) => request.method === "POST")).toHaveLength(0);
+    // A candidate not drafted yet is rejected under web.admin_rulebook_writes alone.
+    expect(
+      await decideTask(
+        EXAMPLE_CANDIDATE_TASK_ID,
+        true,
+        IDLE,
+        form({ decision: "reject", note: "Example why", reason: "not_a_rule" }),
+      ),
+    ).toMatchObject({ status: "ok" });
+    expect(fake.requests.filter((request) => request.method === "POST")).toHaveLength(1);
   });
 
   it("reads a task decided before the decision arrived again, and says who decided it", async () => {

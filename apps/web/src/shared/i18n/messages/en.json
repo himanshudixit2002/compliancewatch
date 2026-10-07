@@ -2599,6 +2599,8 @@
   "workbench.draft.blockedOther": "Another analyst claimed this task: only they draft its version.",
   "workbench.decide.blockedNotDrafted": "Approving needs a drafted version: draft one from the candidate first. Until then the task can only be rejected.",
   "workbench.decide.blockedRole": "Approving is a reviewer's or an admin's: you can return or reject.",
+  "workbench.decide.blockedLifecycle": "{reason}: approving, returning and rejecting a drafted version move its lifecycle, which waits for that flag here as it does on the version's page.",
+  "workbench.decide.lifecycleRefusedDetail": "Approving, returning and rejecting a drafted version move its lifecycle, so they wait for web.publish_actions, as on the version's page. Nothing was sent.",
   "workbench.diff.proposalTitle": "The candidate's proposal and the draft",
   "workbench.diff.proposalLabel": "Proposed",
   "workbench.diff.draftLabel": "This draft",

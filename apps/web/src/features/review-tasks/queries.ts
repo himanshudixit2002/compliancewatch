@@ -3,7 +3,11 @@ import "server-only";
 import type { DocumentDetail } from "@/entities/pipeline/types";
 import type { RelationCandidate, RulebookDocument } from "@/entities/rulebook/types";
 import type { ReviewTaskDetail, RuleVersion } from "@/entities/rule-version/types";
-import { rulebookWriteAccess, type WriteAccess } from "@/server/api/rulebook-write";
+import {
+  rulebookWorkflowAccess,
+  rulebookWriteAccess,
+  type WriteAccess,
+} from "@/server/api/rulebook-write";
 import type { ClientContext, ClientPrincipal } from "@/server/api/services";
 import { getOntology, readOntology } from "@/server/ontology";
 import { err, ok, type ApiError, type Result } from "@/server/result";
@@ -204,15 +208,17 @@ export async function workbenchFor(
     detail.version === null &&
     detail.task.status !== "decided" &&
     detail.task.claimedBy === session.userId;
-  const [ontology, documents, stored, ruleVersions, access, offered, rules] = await Promise.all([
-    deps.fetchImpl === undefined ? getOntology() : readOntology({ fetchImpl: deps.fetchImpl }),
-    readEach<RulebookDocument>(documentIds, (id) => port.document(id)),
-    readEach<DocumentDetail>(documentIds, (id) => port.storedDocument(id)),
-    detail.version === null ? Promise.resolve(null) : port.versionsOf(detail.version.ruleKey),
-    rulebookWriteAccess({ session, fetchImpl: deps.fetchImpl }),
-    formShown ? relationReads(port, candidate.documentId) : Promise.resolve(null),
-    formShown ? port.rules() : Promise.resolve(null),
-  ]);
+  const [ontology, documents, stored, ruleVersions, access, lifecycle, offered, rules] =
+    await Promise.all([
+      deps.fetchImpl === undefined ? getOntology() : readOntology({ fetchImpl: deps.fetchImpl }),
+      readEach<RulebookDocument>(documentIds, (id) => port.document(id)),
+      readEach<DocumentDetail>(documentIds, (id) => port.storedDocument(id)),
+      detail.version === null ? Promise.resolve(null) : port.versionsOf(detail.version.ruleKey),
+      rulebookWriteAccess({ session, fetchImpl: deps.fetchImpl }),
+      rulebookWorkflowAccess({ session, fetchImpl: deps.fetchImpl }),
+      formShown ? relationReads(port, candidate.documentId) : Promise.resolve(null),
+      formShown ? port.rules() : Promise.resolve(null),
+    ]);
   const reads: WorkbenchReads = {
     detail,
     ontology,
@@ -223,6 +229,7 @@ export async function workbenchFor(
     targets: offered?.targets ?? null,
     ruleKeys: rules !== null && rules.ok ? rules.value.map((rule) => rule.ruleKey).sort() : [],
     access: accessView(access),
+    lifecycle: accessView(lifecycle),
   };
   return workbenchView(reads, session);
 }

@@ -52,6 +52,7 @@ function reads(dto: ReviewTaskDetailDto, overrides: Partial<WorkbenchReads> = {}
     targets: null,
     ruleKeys: [],
     access: { allowed: true },
+    lifecycle: { allowed: true },
     ...overrides,
   };
 }
@@ -123,7 +124,9 @@ describe("workbenchView of a seed task", () => {
       canApprove: false,
       approveBlocked: "Approving is a reviewer's or an admin's: you can return or reject.",
       canReturn: true,
+      returnBlocked: null,
       canReject: true,
+      rejectBlocked: null,
       highImpact: false,
     });
     expect(view.rule.approvals).toEqual({
@@ -482,6 +485,45 @@ describe("the helpers", () => {
       "attributes",
       "operatorsByType",
     ]);
+  });
+});
+
+describe("the steps that move the version's lifecycle", () => {
+  const OFF = {
+    allowed: false as const,
+    title: "The web.publish_actions flag is off",
+  };
+  const WAITS =
+    "The web.publish_actions flag is off: approving, returning and rejecting a drafted version move its lifecycle, which waits for that flag here as it does on the version's page.";
+
+  it("hold back approving, returning and rejecting a drafted version, saying why", () => {
+    const view = workbenchView(reads(reviewTaskDetailDto(), { lifecycle: OFF }), REVIEWER);
+    expect(view.rule.decide).toMatchObject({
+      canApprove: false,
+      approveBlocked: WAITS,
+      canReturn: false,
+      returnBlocked: WAITS,
+      canReject: false,
+      rejectBlocked: WAITS,
+    });
+    // The claim and the edit stay under web.admin_rulebook_writes alone.
+    expect(view.rule.claim).toEqual({ state: "open", canClaim: true });
+  });
+
+  it("leave a rejection before drafting to web.admin_rulebook_writes, and an analyst the role's words", () => {
+    const candidate = workbenchView(reads(candidateTaskDetailDto(), { lifecycle: OFF }), ANALYST);
+    expect(candidate.rule.decide).toMatchObject({
+      drafted: false,
+      canApprove: false,
+      canReturn: false,
+      returnBlocked: null,
+      canReject: true,
+      rejectBlocked: null,
+    });
+    const analyst = workbenchView(reads(reviewTaskDetailDto(), { lifecycle: OFF }), ANALYST);
+    expect(analyst.rule.decide?.approveBlocked).toBe(
+      "Approving is a reviewer's or an admin's: you can return or reject.",
+    );
   });
 });
 

@@ -7,7 +7,7 @@ import type {
   ReviewTaskDetail,
   TaskDecision,
 } from "@/entities/rule-version/types";
-import { rulebookWrites } from "@/server/api/rulebook-write";
+import { rulebookWorkflowAccess, rulebookWrites } from "@/server/api/rulebook-write";
 import { afterMutation } from "@/server/cache";
 import { requireScreenSession } from "@/server/dal";
 import type { ApiError } from "@/server/result";
@@ -448,9 +448,23 @@ function decisionResult(decision: TaskDecision, session: SessionClaims): WriteRe
 }
 
 /**
+ * Whether a decision moves the version's lifecycle: an approval and a return always do, a
+ * rejection once a version is drafted (it returns one under review to draft, or closes a
+ * candidate's draft). The task is read to know; a read that fails counts as drafted, so the
+ * lifecycle's flag is never skipped by mistake.
+ */
+async function movesLifecycle(taskId: string, decision: string): Promise<boolean> {
+  if (decision !== "reject") return true;
+  const now = await taskNow(taskId);
+  return !now.ok || now.value === null || now.value.version !== null;
+}
+
+/**
  * Approve, return or reject. Approving is a reviewer's or an admin's (the rulebook's shared review
- * token would take it from any analyst, so the role is checked here, D-061); the same reviewer
- * approving a round twice is the rulebook's refusal, said as "a different reviewer must approve".
+ * token would take it from any analyst, so the role is checked here, D-061); a decision that moves
+ * the version's lifecycle also needs web.publish_actions, as the version's page does, checked
+ * before any request; the same reviewer approving a round twice is the rulebook's refusal, said as
+ * "a different reviewer must approve".
  */
 export async function decideTask(
   taskId: string,
@@ -466,6 +480,18 @@ export async function decideTask(
     return actionFailure(t("workbench.decide.blockedRole"));
   }
   const id = taskId.toLowerCase();
+  if (await movesLifecycle(id, parsed.value.decision)) {
+    const lifecycle = await rulebookWorkflowAccess({ session });
+    if (!lifecycle.allowed) {
+      const state = refusalState<WriteResult>(lifecycle.error, { step: "decide" });
+      return state.status !== "error" || state.problem === undefined
+        ? state
+        : {
+            ...state,
+            problem: { ...state.problem, detail: t("workbench.decide.lifecycleRefusedDetail") },
+          };
+    }
+  }
   const writes = await rulebookWrites({ session });
   const decided = await writes.decideTask(id, parsed.value);
   if (!decided.ok) return refusal(decided.error, id, session, "decide", (found) => found);

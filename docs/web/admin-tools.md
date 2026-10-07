@@ -468,7 +468,10 @@ the not-found page.
   has had, oldest first, the current one marked and each other one linked.
 
 With `web.admin_rulebook_writes` off or the review token unset, the page shows the task and says
-which one holds the steps back.
+which one holds the steps back. A decision that moves the version's lifecycle (approving,
+returning, a rejection once a version is drafted) needs `web.publish_actions` too, as those steps
+do on the version's page (D-061): with it off, each such step says so in its place, and the claim,
+the draft, the edit and a candidate's rejection before drafting stay offered.
 
 ## Review stats: `/admin/review/stats`
 

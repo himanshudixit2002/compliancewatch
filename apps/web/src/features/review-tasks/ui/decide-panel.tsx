@@ -64,8 +64,10 @@ export function Approvals({ approvals }: { approvals: ApprovalsView }) {
  * Deciding the task: approve (a reviewer's or an admin's; it submits a draft and approves it, and
  * may first tag the version high impact, which then needs two different approvers), return it for
  * rework with a note, or reject it with a note (and a candidate's reason). Each opens a dialog
- * that says what the rulebook records. The panel stays on the page after the decision, so the
- * answer (the task, the version, the candidate and the next task a return opened) is still there.
+ * that says what the rulebook records. A step that is not offered says why (the role, the
+ * version's state, or web.publish_actions for a step that moves the version, D-061). The panel
+ * stays on the page after the decision, so the answer (the task, the version, the candidate and
+ * the next task a return opened) is still there.
  */
 export function DecidePanel({ action, view, approvals }: DecidePanelProps) {
   const id = useId();
@@ -166,6 +168,16 @@ export function DecidePanel({ action, view, approvals }: DecidePanelProps) {
               </p>
             )}
           </div>
+          {!view.canReturn && view.returnBlocked !== null ? (
+            <div className="flex flex-col gap-3" data-decision="return">
+              <h4 className="text-sm font-semibold text-fg">
+                {t("workbench.decide.returnHeading")}
+              </h4>
+              <p className="text-sm text-fg-muted" data-slot="return-blocked">
+                {view.returnBlocked}
+              </p>
+            </div>
+          ) : null}
           {view.canReturn ? (
             <div className="flex flex-col gap-3" data-decision="return">
               <h4 className="text-sm font-semibold text-fg">
@@ -196,6 +208,16 @@ export function DecidePanel({ action, view, approvals }: DecidePanelProps) {
                   {t("workbench.decide.return")}
                 </Button>
               </div>
+            </div>
+          ) : null}
+          {!view.canReject && view.rejectBlocked !== null ? (
+            <div className="flex flex-col gap-3" data-decision="reject">
+              <h4 className="text-sm font-semibold text-fg">
+                {t("workbench.decide.rejectHeading")}
+              </h4>
+              <p className="text-sm text-fg-muted" data-slot="reject-blocked">
+                {view.rejectBlocked}
+              </p>
             </div>
           ) : null}
           {view.canReject ? (

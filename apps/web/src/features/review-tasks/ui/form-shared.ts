@@ -199,7 +199,11 @@ export interface DraftForm {
   revision: string;
 }
 
-/** What the decision panel offers. */
+/**
+ * What the decision panel offers. A step that moves a version's lifecycle (approve, return, and
+ * a rejection once a version is drafted) also needs `web.publish_actions`, as the version's page
+ * does (D-061); a step not offered says why.
+ */
 export interface DecideView {
   candidateTask: boolean;
   drafted: boolean;
@@ -207,7 +211,11 @@ export interface DecideView {
   /** Why approving is not offered, when it is not. */
   approveBlocked: string | null;
   canReturn: boolean;
+  /** Why returning is not offered, when the task has a version to return. */
+  returnBlocked: string | null;
   canReject: boolean;
+  /** Why rejecting is not offered, when it is not. */
+  rejectBlocked: string | null;
   /** The version is tagged high impact already; the tag stays once set. */
   highImpact: boolean;
 }

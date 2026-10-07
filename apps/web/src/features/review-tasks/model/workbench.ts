@@ -144,7 +144,10 @@ export interface WorkbenchReads {
   targets: Result<RuleVersion[]> | null;
   /** For the draft form only: the rules' keys. */
   ruleKeys: readonly string[];
+  /** Claim, draft, edit and a rejection before drafting: web.admin_rulebook_writes. */
   access: AccessView;
+  /** The steps that move the version's lifecycle: web.publish_actions as well (D-061). */
+  lifecycle: AccessView;
 }
 
 export function errorLike(error: ApiError): ServiceErrorLike {
@@ -358,25 +361,42 @@ function editBlocked(detail: ReviewTaskDetail, claim: ClaimView): string | null 
   return null;
 }
 
-function decideView(detail: ReviewTaskDetail, session: Session): DecideView | null {
+/** Why the lifecycle's steps wait: the flag (or token) refusal, then what it holds back. */
+function lifecycleBlocked(lifecycle: AccessView): string | null {
+  return lifecycle.allowed
+    ? null
+    : t("workbench.decide.blockedLifecycle", { reason: lifecycle.title });
+}
+
+function decideView(
+  detail: ReviewTaskDetail,
+  session: Session,
+  lifecycle: AccessView,
+): DecideView | null {
   if (detail.task.status === "decided") return null;
   const version = detail.version;
   const candidateTask = detail.task.kind === "candidate";
   const drafted = version !== null;
   const approver = can(session, "admin.review.approve");
+  const waits = lifecycleBlocked(lifecycle);
   let approveBlocked: string | null = null;
   if (!drafted) approveBlocked = t("workbench.decide.blockedNotDrafted");
   else if (version.closed) approveBlocked = t("workbench.edit.blockedClosed");
   else if (version.status !== "draft" && version.status !== "in_review") {
     approveBlocked = t("workbench.edit.blockedStatus", { status: humanise(version.status) });
   } else if (!approver) approveBlocked = t("workbench.decide.blockedRole");
+  else approveBlocked = waits;
+  // A rejection before drafting closes the candidate alone; once drafted it moves the version.
+  const rejectBlocked = drafted ? waits : null;
   return {
     candidateTask,
     drafted,
     canApprove: approveBlocked === null,
     approveBlocked,
-    canReturn: drafted,
-    canReject: true,
+    canReturn: drafted && waits === null,
+    returnBlocked: drafted ? waits : null,
+    canReject: rejectBlocked === null,
+    rejectBlocked,
     highImpact: version?.highImpact ?? false,
   };
 }
@@ -530,7 +550,7 @@ export function workbenchView(reads: WorkbenchReads, session: Session): Workbenc
         version === null ? null : (blocked ?? (reads.access.allowed ? null : reads.access.title)),
       draftForm: reads.access.allowed ? draftForm : null,
       draftBlocked: draftForm !== null && !reads.access.allowed ? reads.access.title : draftBlocked,
-      decide: reads.access.allowed ? decideView(detail, session) : null,
+      decide: reads.access.allowed ? decideView(detail, session, reads.lifecycle) : null,
       approvals: approvalsView(detail, session),
       publishHref: version !== null && version.status === "approved" ? versionHref : null,
       versionHref,

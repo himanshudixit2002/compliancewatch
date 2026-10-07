@@ -391,7 +391,9 @@ describe("DecidePanel", () => {
     canApprove: true,
     approveBlocked: null,
     canReturn: true,
+    returnBlocked: null,
     canReject: true,
+    rejectBlocked: null,
     highImpact: false,
   };
   const APPROVALS = {
@@ -483,6 +485,30 @@ describe("DecidePanel", () => {
     expect(action).not.toHaveBeenCalled();
     rerender(<DecidePanel action={action} view={null} approvals={null} />);
     expect(screen.getByText("The task is decided: nothing more is decided here.")).toBeDefined();
+  });
+
+  it("says why each step that moves the version waits, and offers none of them", async () => {
+    const waits = "Example: the web.publish_actions flag is off.";
+    const { container } = render(
+      <DecidePanel
+        action={vi.fn<WriteAction<WriteResult>>()}
+        view={{
+          ...VIEW,
+          canApprove: false,
+          approveBlocked: waits,
+          canReturn: false,
+          returnBlocked: waits,
+          canReject: false,
+          rejectBlocked: waits,
+        }}
+        approvals={null}
+      />,
+    );
+    for (const slot of ["approve-blocked", "return-blocked", "reject-blocked"]) {
+      expect(container.querySelector(`[data-slot='${slot}']`)?.textContent).toBe(waits);
+    }
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(await runAxe(container)).toHaveNoViolations();
   });
 
   it("keeps the high-impact tag once set, and offers no return before drafting", () => {
