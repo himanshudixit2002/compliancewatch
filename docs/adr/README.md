@@ -2,7 +2,7 @@
 
 Numbered ADRs, one file each. Titles and status for ADR-001 to ADR-011 come from the Project
 Foundation guide, section 21 (decision log); ADR-012 and ADR-013 come from the Architecture
-Reference v1.0, section 9.2 (decision log). ADR-001 to ADR-008 and ADR-012 to ADR-020 have their
+Reference v1.0, section 9.2 (decision log). ADR-001 to ADR-008 and ADR-012 to ADR-021 have their
 full text; ADR-009 to ADR-011 are stubs that keep the decision log's one-line rationale until
 they are written. ADR-014 (identity for the MVP), ADR-015 (recurring obligations and deadline
 changes) and ADR-016 (business hierarchy) record decisions of 2026-09-28; ADR-017 the KAG-style
@@ -11,6 +11,9 @@ ADR-019 (2026-09-29) records how the web app reaches the services: through its s
 only, with an encrypted stateless session. ADR-020 (2026-10-07) sets out the two options for model
 calls and data residency, masked calls to models outside India or providers in India only, which
 the maintainer decides with counsel; the gateway's `CW_LLM_RESIDENCY` already implements both.
+ADR-021 (2026-10-07) records that a route which creates something a client would not want twice
+takes a required `Idempotency-Key`, and that making an existing route require one is a recorded
+break (`packages/contracts/openapi/BREAKING.md`), first made on the billing subscription route.
 Dated addenda of 2026-09-29 record what the question-answering work built against four of them:
 ADR-003 (embeddings in a side table), ADR-008 (embeddings through the gateway), ADR-012 and
 ADR-017 (what shipped, the first evaluation numbers and what each needs to be Accepted). A new
@@ -37,3 +40,4 @@ sections 4 and 14).
 - [ADR-018: The pipeline hands regulatory records to the rulebook over its HTTP API](ADR-018-regulatory-records-through-the-rulebook-api.md) (Proposed)
 - [ADR-019: The web app reaches the services only through its server layer, with an encrypted stateless session](ADR-019-web-server-layer-and-stateless-session.md) (Proposed)
 - [ADR-020: Model calls and data residency](ADR-020-model-calls-and-data-residency.md) (Proposed)
+- [ADR-021: Idempotency keys on the routes that create something](ADR-021-idempotency-keys-on-creating-routes.md) (Proposed)
