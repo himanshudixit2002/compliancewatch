@@ -764,10 +764,11 @@ exporting, or failed; the flag is not read again; D-057). Refresh probes again.
 - Turning crawling on or off from a page: the switch is the pipeline's environment
   (`CW_PIPELINE_CRAWL_ENABLED`), which no route reads or sets.
 - Review sampling, the planned part of the review queue (`admin.review-sampling`): no route exists.
-- The review steps end to end on the UI-only stack: no route stages a version or a rule candidate
-  of a spec's own there, so the e2e suite reads the queue, the stats and a seed task's workbench
-  and opens the seed tasks, and the unit tests cover the claim, the draft, the edit with the
-  predicate editor, the two approvals, the return, the rejection and the diff (D-063).
+- Part of the review steps end to end on the UI-only stack: no route stages a version or a rule
+  candidate of a spec's own there, so the e2e suite takes the claim, the edit with the predicate
+  editor, one high-impact approval and the second refused, the return and the rejection on seed
+  drafts it owns, and the unit tests alone cover completing a round, drafting from a candidate with
+  the candidate pane and the proposal's diff (D-063).
 - Resolving and dismissing tasks and requeueing dead rows end to end on the UI-only stack: tasks
   open in the ingest and rows die in the relay, and the stack runs neither (no Temporal, no relay),
   so the e2e suite reads their empty states and the unit tests cover the writes (D-060).

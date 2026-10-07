@@ -13,15 +13,16 @@ import { ruleKeys } from "./rulebook-helpers";
 
 /**
  * The review workbench against the stack's rulebook. Every task there reviews one of the seed
- * calendar's own drafts, which no spec claims, edits or decides (D-063): this spec opens a seed
- * task's workbench read-only and checks what it shows against the rulebook's task read, the steps
- * each role is offered (without taking any), and the not-found page. Claiming, drafting from a
- * candidate, editing with the predicate editor, the two approvals, the return, the rejection and
- * the diff of a drafted candidate are covered by the unit and component tests over the rulebook's
- * recorded shapes.
+ * calendar's own drafts: this spec opens a seed task's workbench read-only and checks what it
+ * shows against the rulebook's task read, the steps each role is offered (without taking any), and
+ * the not-found page. The steps themselves (claiming, editing with the predicate editor, one
+ * high-impact approval and the second refused, the return and the rejection) are
+ * admin-review-steps.spec.ts's, on drafts of their own (D-063); drafting from a candidate, the
+ * candidate pane, a completed round and the proposal's diff are covered by the unit and
+ * component tests over the rulebook's recorded shapes.
  */
 /**
- * An open seed task over the last rule in key order: the other specs move the drafts at the first
+ * An open seed task over the last rule in key order: the other specs move the drafts of other
  * positions (rulebook-helpers' latestVersion), so this one's draft stays as the seed wrote it.
  */
 async function aQuietSeedTask(): Promise<QueuedTaskRow> {

@@ -1156,24 +1156,36 @@ alone plus a sandboxed `iframe`, a framing decision left for when someone asks f
 Consequences: the analyst compares the clause text with the file in two tabs; the page makes one
 pipeline read per document it shows.
 
-## D-063: The UI-only stack cannot stage a review task of a spec's own
+## D-063: The UI-only stack cannot stage a review task of a spec's own, so the specs take seed drafts
 
 2026-10-07. The brief staged a synthetic draft per run through the rulebook's write API. No route
 creates a rule version: the versions on `make web-stack` are the seed calendar's drafts the
 rulebook loads at start (D-042), and a candidate's draft (`POST .../draft`) needs a rule candidate,
 which arrives only through the worker's intake of `rule.candidate.created` (Kafka, on Postgres,
 behind `rulebook.candidate_intake`), none of which the stack runs; no route was added for tests.
-Every task on the stack therefore reviews one of the seed calendar's own drafts, which no spec
-claims, edits or decides. The e2e suite opens the seed tasks (idempotent) and reads: the queue in
-the rulebook's order through every filter, the strip against the stats, the keyboard, the stats
-page, a seed task's workbench read-only with what each role is offered (without taking it), the
-original file's link when a draft cites a document, and the not-found page. Claiming, drafting
-from a candidate with the candidate pane, editing with the predicate editor, the two approvals and
-"a different reviewer must approve", the return, the rejection and the proposal's diff are covered
-by unit and component tests over the rulebook's recorded shapes (`src/test/review-task-fixture.ts`).
-Consequences: closing the gap needs a staging route in the rulebook for local and test (a draft of
-a spec's own, or a candidate taken in without Kafka), or a spec on the product stack, which runs
-the worker, on a database of its own.
+Every task on the stack therefore reviews one of the seed calendar's own drafts. The specs that
+take a review step do what the publish specs do (D-042): each test owns the draft of a rule no
+other spec moves, by its position in key order (the steps spec holds 8 and 9; the publish spec 2
+to 4, the relation review 6 and 7, and the read-only workbench spec the last), holds it while it
+works (`e2e/position-lock.ts`: a directory one process at a time can make, so a copy of the test
+from `--repeat-each` or a retry never moves the draft at once), and first returns the draft's task
+when an earlier run left it claimed, in review or with an approval. Covered end to end: an analyst
+claims a task from the queue (then marked as theirs), is offered no approval, edits the condition
+with the predicate editor (a predicate picked through the attribute's suggestions, the one an
+earlier run added removed first) and saves it; a reviewer approves with "mark high impact", so the
+round needs two approvals and stays open; the same reviewer approving again is told "a different
+reviewer must approve"; the return sends the version back to draft and opens its next task, which
+the next run claims; an analyst rejects another draft's task with a note, and "Open seed tasks"
+gives that draft its next task. The rule version page's approval is a reviewer's there too. No spec
+ever completes an approval round: a completed one marks the seed draft reviewed, which the memory
+store could not undo. Still covered only by unit and component tests over the rulebook's recorded
+shapes (`src/test/review-task-fixture.ts`): completing a round (a second reviewer), drafting from a
+candidate with the candidate pane, and the proposal's diff. The reading specs compare a page with
+the queue read either side of it, since the steps spec claims and decides meanwhile.
+Consequences: closing the rest needs a staging route in the rulebook for local and test (a
+candidate taken in without Kafka), or a spec on the product stack, which runs the worker, on a
+database of its own; on a stack that ran the steps spec, its draft keeps one added predicate and
+stays tagged high impact until the stack restarts.
 
 ## D-064: The condition in words is shared, and the predicate editor posts the kernel's mapping
 
