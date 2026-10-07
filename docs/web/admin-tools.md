@@ -388,9 +388,13 @@ opaque cursor (D-065). Read fresh on every visit.
   marked "Yours" instead.
 - **Claim** on an open row claims the task for the signed-in analyst; the answer is said above the
   list and the queue renders again.
-- **Keys** (optional, D-065): j and k move between the rows (one tab stop, a roving tabindex),
-  Enter opens the task, c claims it when it is open, ? lists the keys in a dialog; a key typed into
-  a form control or a dialog is the control's, and Tab leaves the list.
+- **Keys** (optional, D-065): while a row has the focus (its link or its claim button), j and k
+  move between the rows (one tab stop, a roving tabindex), Enter opens the task and ? lists the keys
+  in a dialog; a key typed elsewhere on the page, into a form control or a dialog is not theirs, a
+  key held down moves once, and Tab leaves the list. No key claims a task: claiming is the row's
+  button.
+- A later page whose read failed (the rulebook refuses a cursor from another filter) shows the
+  refusal with a link back to the first page.
 - A reviewer or an admin reads that review sampling, the queue's planned part
   (`admin.review-sampling`), waits for a route nobody has scheduled (D-039).
 

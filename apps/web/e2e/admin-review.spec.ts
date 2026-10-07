@@ -7,15 +7,26 @@ import {
   test,
   waitForHydration,
 } from "./fixtures";
-import { openSeedTasks, queuePage, reviewStats, type StatsBody } from "./review-helpers";
+import {
+  expectQueueShown,
+  openSeedTasks,
+  reviewStats,
+  taskDetail,
+  undecidedTaskOf,
+  type StatsBody,
+} from "./review-helpers";
+import { latestVersion } from "./rulebook-helpers";
 
 /**
  * The review queue against the rulebook `make web-stack` starts with the seed calendar's drafts.
- * Every task there is a seed task over one of those drafts, which no spec claims or decides
- * (D-063), so the queue's claim is covered by the unit tests; this spec opens the seed tasks
- * (idempotent), reads the queue in the rulebook's order through every filter, compares the strip
- * with the stats and drives the keyboard.
+ * Every task there is a seed task over one of those drafts; the workbench specs claim, edit and
+ * decide the tasks of drafts they own (D-063) while this spec runs, so it compares the page with
+ * the rulebook's queue read either side of it rather than with counts taken once. It opens the
+ * seed tasks (idempotent), reads the queue in the rulebook's order through every filter, compares
+ * the strip with the stats and drives the keyboard.
  */
+const EITHER_ANSWER =
+  /^(Review tasks opened for seed drafts: \d+\.|Every seed draft that needs review already has a task: nothing was opened\.)$/;
 test.describe("the review queue", () => {
   test.skip(
     !IS_CI && seededTenantId() === null,
@@ -26,20 +37,22 @@ test.describe("the review queue", () => {
     await signIn(ANALYST);
   });
 
-  test("opens the seed tasks once, and says so when every draft already has one", async ({
+  test("opens the seed tasks, and pressing again opens no second task for a draft", async ({
     page,
     checkA11y,
   }) => {
-    const first = await openSeedTasks(page);
-    expect(first).toMatch(
-      /^(Review tasks opened for seed drafts: \d+\.|Every seed draft that needs review already has a task: nothing was opened\.)$/,
+    // Other specs decide tasks meanwhile, and a rejected or returned draft gets a task on the next
+    // press, so either answer may come back each time; what must hold is one task per draft.
+    expect(await openSeedTasks(page)).toMatch(EITHER_ANSWER);
+    expect(await openSeedTasks(page)).toMatch(EITHER_ANSWER);
+    // The first rule's draft is one no spec moves (D-042): it has exactly one task waiting.
+    const draft = await latestVersion(0);
+    const task = await undecidedTaskOf(draft.rule_version_id);
+    if (task === null) throw new Error(`the draft of ${draft.rule_key} has a task waiting`);
+    const waiting = (await taskDetail(task.task_id)).tasks.filter(
+      (each) => each.status !== "decided",
     );
-    const again = await openSeedTasks(page);
-    expect(again).toBe(
-      "Every seed draft that needs review already has a task: nothing was opened.",
-    );
-    const open = await queuePage("status=open&kind=seed&limit=200");
-    expect(open.length).toBeGreaterThan(0);
+    expect(waiting.map((each) => each.task_id)).toEqual([task.task_id]);
     await checkA11y();
   });
 
@@ -49,13 +62,7 @@ test.describe("the review queue", () => {
   }) => {
     await openSeedTasks(page);
     await page.goto("/admin/review");
-    const expected = await queuePage("status=open&limit=25");
-    const rows = page.locator("[data-slot='queue-table'] tbody tr");
-    await expect(rows).toHaveCount(expected.length);
-    const ids = await rows.evaluateAll((elements) =>
-      elements.map((element) => element.getAttribute("data-task")),
-    );
-    expect(ids).toEqual(expected.map((task) => task.task_id));
+    const expected = await expectQueueShown(page, "status=open&limit=25");
     const first = expected[0];
     if (first === undefined) throw new Error("the queue holds an open task");
     const row = page.locator(`tr[data-task='${first.task_id}']`);
@@ -88,15 +95,14 @@ test.describe("the review queue", () => {
       "aria-current",
       "true",
     );
-    const every = await queuePage("limit=25");
-    await expect(page.locator("[data-slot='queue-table'] tbody tr")).toHaveCount(every.length);
+    await expectQueueShown(page, "limit=25");
 
     const kinds = page.getByRole("navigation", { name: "Show tasks by kind" });
     await kinds.getByRole("link", { name: "Seed draft" }).click();
     await expect(page).toHaveURL(/\/admin\/review\?status=all&kind=seed$/);
-    const seeds = await queuePage("kind=seed&limit=25");
+    const seeds = await expectQueueShown(page, "kind=seed&limit=25");
+    expect(seeds.map((task) => task.kind)).toEqual(seeds.map(() => "seed"));
     const seedRows = page.locator("[data-slot='queue-table'] tbody tr");
-    await expect(seedRows).toHaveCount(seeds.length);
     expect(
       await seedRows.evaluateAll((elements) =>
         elements.map((row) => row.getAttribute("data-kind")),
@@ -108,20 +114,18 @@ test.describe("the review queue", () => {
     await expect(page).toHaveURL(
       new RegExp(`/admin/review\\?status=all&kind=seed&regulator=${regulator}$`),
     );
-    const theirs = await queuePage(`kind=seed&regulator=${regulator}&limit=25`);
-    await expect(page.locator("[data-slot='queue-table'] tbody tr")).toHaveCount(theirs.length);
+    await expectQueueShown(page, `kind=seed&regulator=${regulator}&limit=25`);
 
     await kinds.getByRole("link", { name: "Rule candidate" }).click();
     await expect(page).toHaveURL(/kind=candidate/);
-    const candidates = await queuePage(`kind=candidate&regulator=${regulator}&limit=25`);
+    const candidates = await expectQueueShown(
+      page,
+      `kind=candidate&regulator=${regulator}&limit=25`,
+    );
     if (candidates.length === 0) {
       await expect(
         page.getByRole("heading", { name: "No task matches these filters" }),
       ).toBeVisible();
-    } else {
-      await expect(page.locator("[data-slot='queue-table'] tbody tr")).toHaveCount(
-        candidates.length,
-      );
     }
     await checkA11y();
   });
@@ -167,21 +171,32 @@ test.describe("the review queue", () => {
     await page.goto("/admin/review?status=all");
     await waitForHydration(page, "[data-slot='task-link']");
     const links = page.locator("[data-slot='task-link']");
-    expect(await links.count()).toBeGreaterThan(1);
+    expect(await links.count()).toBeGreaterThan(2);
     await expect(links.nth(0)).toHaveAttribute("tabindex", "0");
     await expect(links.nth(1)).toHaveAttribute("tabindex", "-1");
 
+    // Outside the list the keys are the page's: nothing moves and no dialog opens.
+    await page.keyboard.press("j");
+    await expect(links.nth(0)).not.toBeFocused();
+    await page.keyboard.press("?");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+
+    await links.nth(0).focus();
     await page.keyboard.press("?");
     const dialog = page.getByRole("dialog", { name: "Keyboard shortcuts" });
     await expect(dialog).toBeVisible();
     await expect(dialog).toContainText("Move to the next task");
+    await expect(dialog).toContainText("No key claims a task");
     await checkA11y();
     await page.keyboard.press("Escape");
     await expect(dialog).toBeHidden();
-
-    await page.keyboard.press("j");
     await expect(links.nth(0)).toBeFocused();
-    await page.keyboard.press("j");
+
+    // A key held down moves one task, not one per repeat.
+    await page.keyboard.down("j");
+    await page.keyboard.down("j");
+    await page.keyboard.down("j");
+    await page.keyboard.up("j");
     await expect(links.nth(1)).toBeFocused();
     await expect(links.nth(1)).toHaveAttribute("tabindex", "0");
     await expect(links.nth(0)).toHaveAttribute("tabindex", "-1");
@@ -198,10 +213,12 @@ test.describe("the review queue", () => {
     await page.goto("/admin/review?status=all");
     await waitForHydration(page, "[data-slot='task-link']");
     // With the shortcuts dialog open, j is the dialog's and moves nothing in the list.
+    const links = page.locator("[data-slot='task-link']");
+    await links.nth(0).focus();
     await page.keyboard.press("?");
     await expect(page.getByRole("dialog", { name: "Keyboard shortcuts" })).toBeVisible();
     await page.keyboard.press("j");
-    await expect(page.locator("[data-slot='task-link']").first()).not.toBeFocused();
+    await expect(links.nth(1)).not.toBeFocused();
   });
 });
 

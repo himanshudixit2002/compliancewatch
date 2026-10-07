@@ -1185,13 +1185,16 @@ as rows of chips in the address (open by default, since claimed and decided task
 work or done; the regulators are the ones the stats count), carries the cursor in the address for
 the next page and offers the first page from a later one, and marks the tasks the signed-in
 analyst claimed rather than offering a filter the route lacks. The keyboard is optional and stays
-out of the way: the rows' title links are one tab stop (a roving tabindex), j and k move between
-them, Enter opens one (the link's own key), c claims the current row when it is open, ? lists the
-keys in a dialog; a key typed into a form control or a dialog is the control's, a key with a
-modifier is the browser's, and Tab leaves the list as usual. The strip above the queue is the stats
-page's model in five figures. Consequences: a cursor from another filter is the rulebook's refusal,
-shown with the way to the first page; a claim's answer takes the focus, and k or j brings it back
-to the row.
+out of the way: the rows' title links are one tab stop (a roving tabindex), and the keys listen on
+the list alone, so they act only while the focus is on a row (its link or its claim button): j and
+k move between the rows, Enter opens one (the link's own key), ? lists the keys in a dialog. A key
+typed anywhere else on the page, into a form control or a dialog is not theirs, a key with a
+modifier is the browser's, a key held down moves once (its repeats are ignored), and Tab leaves the
+list as usual. No key claims: a claim cannot be undone, so a single key that took it from wherever
+the focus was would fail WCAG 2.1.4, and claiming is the row's button alone. The strip above the
+queue is the stats page's model in five figures. Consequences: a cursor from another filter (or an
+older queue) is the rulebook's refusal, shown with a "Back to the first page" link under it; a
+claim's answer takes the focus, and the row's link takes it back with Tab or a click.
 
 ## D-066: The diff is a line diff of words, and the previous version comes from the rule's versions
 

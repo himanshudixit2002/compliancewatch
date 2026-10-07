@@ -2,13 +2,7 @@
 
 import type { Route } from "next";
 import Link from "next/link";
-import {
-  useEffect,
-  useId,
-  useRef,
-  useState,
-  type KeyboardEvent as ReactKeyboardEvent,
-} from "react";
+import { useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   Badge,
   Button,
@@ -83,19 +77,29 @@ function inControl(target: EventTarget | null): boolean {
   return target.closest("[role='dialog']") !== null;
 }
 
+/** The row of the list the focused element sits in, by its position; null outside a row. */
+function rowOf(target: EventTarget | null): number | null {
+  if (!(target instanceof HTMLElement)) return null;
+  const row = target.closest<HTMLElement>("[data-row]");
+  const index = Number(row?.dataset.row);
+  return row === null || !Number.isInteger(index) ? null : index;
+}
+
 /**
  * The queue's rows with their keyboard: the rows' title links are one stop in the tab order (a
- * roving tabindex, the current row's link takes the stop), j and k move to the next and previous
- * row, Enter opens the task (the link's own behaviour), c claims the current row's task when it
- * is open, and ? lists the shortcuts in a dialog. A key typed into a form control is the
- * control's, the shortcuts ignore modifier keys, and Tab always leaves the list as usual.
+ * roving tabindex, the current row's link takes the stop), and while the focus is on a row (its
+ * link or its claim button) j and k move to the next and previous row, Enter opens the task (the
+ * link's own behaviour) and ? lists the shortcuts in a dialog. Nothing listens outside the list,
+ * so a key typed anywhere else on the page does nothing here; a key held down moves once, a key
+ * typed into a form control is the control's, the shortcuts ignore modifier keys, and Tab always
+ * leaves the list as usual. No key claims: a claim cannot be undone, so it is the row's button
+ * alone (WCAG 2.1.4, D-065).
  */
 export function QueueList({ rows, caption, claim }: QueueListProps) {
   const id = useId();
   const [active, setActive] = useState(0);
   const [help, setHelp] = useState(false);
   const links = useRef<(HTMLAnchorElement | null)[]>([]);
-  const forms = useRef<(HTMLFormElement | null)[]>([]);
   const fallback: WriteAction<WriteResult> = async (state) => state;
   const { attempt, send, pending, outcomeRef } = useWriteAction(claim ?? fallback);
   const current = Math.min(active, Math.max(rows.length - 1, 0));
@@ -106,31 +110,23 @@ export function QueueList({ rows, caption, claim }: QueueListProps) {
     links.current[target]?.focus();
   };
 
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
-      if (inControl(event.target)) return;
-      if (event.key === "?") {
-        event.preventDefault();
-        setHelp(true);
-        return;
-      }
-      if (rows.length === 0) return;
-      const inList = links.current.some((link) => link === document.activeElement);
-      if (event.key === "j") {
-        event.preventDefault();
-        focusRow(inList ? current + 1 : current);
-      } else if (event.key === "k") {
-        event.preventDefault();
-        focusRow(inList ? current - 1 : current);
-      } else if (event.key === "c" && claim !== null && rows[current]?.claimable === true) {
-        event.preventDefault();
-        forms.current[current]?.requestSubmit();
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  });
+  const onListKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.defaultPrevented || event.repeat) return;
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    if (inControl(event.target)) return;
+    const row = rowOf(event.target);
+    if (row === null) return;
+    if (event.key === "?") {
+      event.preventDefault();
+      setHelp(true);
+    } else if (event.key === "j") {
+      event.preventDefault();
+      focusRow(row + 1);
+    } else if (event.key === "k") {
+      event.preventDefault();
+      focusRow(row - 1);
+    }
+  };
 
   const onLinkKey = (event: ReactKeyboardEvent<HTMLAnchorElement>, index: number) => {
     if (event.key === "Home") {
@@ -162,154 +158,157 @@ export function QueueList({ rows, caption, claim }: QueueListProps) {
         slot="queue-claim-outcome"
         renderValue={(value) => <WriteResultView result={value} />}
       />
-      <Table scrollLabel={t("reviewQueue.tableRegion")} data-slot="queue-table">
-        <TableCaption className="text-left text-sm text-fg-muted">{caption}</TableCaption>
-        <TableHeader>
-          <TableRow>
-            <TableHead scope="col">{t("reviewQueue.column.task")}</TableHead>
-            <TableHead scope="col">{t("reviewQueue.column.version")}</TableHead>
-            <TableHead scope="col">{t("reviewQueue.column.candidate")}</TableHead>
-            <TableHead scope="col">{t("reviewQueue.column.claim")}</TableHead>
-            <TableHead scope="col">{t("reviewQueue.column.status")}</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {rows.map((row, index) => (
-            <TableRow
-              key={row.taskId}
-              data-task={row.taskId}
-              data-status={row.status}
-              data-kind={row.kind}
-              data-mine={row.mine || undefined}
-              data-current={index === current || undefined}
-            >
-              <TableCell className="align-top">
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs text-fg-muted">{row.kindLabel}</span>
-                  <Link
-                    ref={(element) => {
-                      links.current[index] = element;
-                    }}
-                    href={row.href as Route}
-                    tabIndex={index === current ? 0 : -1}
-                    aria-describedby={`${id}-hint`}
-                    onFocus={() => setActive(index)}
-                    onKeyDown={(event) => onLinkKey(event, index)}
-                    className="font-medium text-primary underline-offset-2 hover:underline"
-                    data-slot="task-link"
-                  >
-                    {row.title}
-                  </Link>
-                  {row.ruleLabel === null ? null : (
-                    <span className="font-mono text-xs text-fg-muted">
-                      {row.suggested
-                        ? t("reviewQueue.suggestedKey", { key: row.ruleLabel })
-                        : row.ruleLabel}
-                    </span>
-                  )}
-                </div>
-              </TableCell>
-              <TableCell className="align-top text-sm">
-                <div className="flex flex-col items-start gap-1">
-                  {row.versionStatus === null ? (
-                    <span className="text-fg-muted">{t("reviewQueue.notDrafted")}</span>
-                  ) : (
-                    <RuleVersionStatusChip status={row.versionStatus} />
-                  )}
-                  <span>{row.approvals}</span>
-                  {row.highImpact ? (
-                    <Badge tone="warning">{t("reviewQueue.highImpact")}</Badge>
-                  ) : null}
-                </div>
-              </TableCell>
-              <TableCell className="align-top text-sm">
-                {row.candidate === null ? (
-                  <span className="text-fg-muted">{t("reviewQueue.noCandidate")}</span>
-                ) : (
+      {/* The shortcuts listen here only, so they act only while the focus is in the list. */}
+      <div onKeyDown={onListKey} data-slot="queue-keys">
+        <Table scrollLabel={t("reviewQueue.tableRegion")} data-slot="queue-table">
+          <TableCaption className="text-left text-sm text-fg-muted">{caption}</TableCaption>
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">{t("reviewQueue.column.task")}</TableHead>
+              <TableHead scope="col">{t("reviewQueue.column.version")}</TableHead>
+              <TableHead scope="col">{t("reviewQueue.column.candidate")}</TableHead>
+              <TableHead scope="col">{t("reviewQueue.column.claim")}</TableHead>
+              <TableHead scope="col">{t("reviewQueue.column.status")}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((row, index) => (
+              <TableRow
+                key={row.taskId}
+                data-row={index}
+                data-task={row.taskId}
+                data-status={row.status}
+                data-kind={row.kind}
+                data-mine={row.mine || undefined}
+                data-current={index === current || undefined}
+              >
+                <TableCell className="align-top">
                   <div className="flex flex-col gap-1">
-                    <span className={row.candidate.unparseable ? "font-medium text-fg" : undefined}>
-                      {row.candidate.outcome}
-                    </span>
-                    <span>{row.candidate.confidence}</span>
-                    <span>{row.candidate.issues}</span>
-                    {row.candidate.needsReview ? (
-                      <span className="text-xs font-medium text-fg">
-                        {t("reviewQueue.candidate.needsReview")}
+                    <span className="text-xs text-fg-muted">{row.kindLabel}</span>
+                    <Link
+                      ref={(element) => {
+                        links.current[index] = element;
+                      }}
+                      href={row.href as Route}
+                      tabIndex={index === current ? 0 : -1}
+                      aria-describedby={`${id}-hint`}
+                      onFocus={() => setActive(index)}
+                      onKeyDown={(event) => onLinkKey(event, index)}
+                      className="font-medium text-primary underline-offset-2 hover:underline"
+                      data-slot="task-link"
+                    >
+                      {row.title}
+                    </Link>
+                    {row.ruleLabel === null ? null : (
+                      <span className="font-mono text-xs text-fg-muted">
+                        {row.suggested
+                          ? t("reviewQueue.suggestedKey", { key: row.ruleLabel })
+                          : row.ruleLabel}
                       </span>
+                    )}
+                  </div>
+                </TableCell>
+                <TableCell className="align-top text-sm">
+                  <div className="flex flex-col items-start gap-1">
+                    {row.versionStatus === null ? (
+                      <span className="text-fg-muted">{t("reviewQueue.notDrafted")}</span>
+                    ) : (
+                      <RuleVersionStatusChip status={row.versionStatus} />
+                    )}
+                    <span>{row.approvals}</span>
+                    {row.highImpact ? (
+                      <Badge tone="warning">{t("reviewQueue.highImpact")}</Badge>
                     ) : null}
                   </div>
-                )}
-              </TableCell>
-              <TableCell className="align-top text-sm">
-                <div className="flex flex-col items-start gap-1">
-                  {row.claimedBy === null ? (
-                    <span className="text-fg-muted">{t("reviewQueue.unclaimed")}</span>
+                </TableCell>
+                <TableCell className="align-top text-sm">
+                  {row.candidate === null ? (
+                    <span className="text-fg-muted">{t("reviewQueue.noCandidate")}</span>
                   ) : (
-                    <span>
-                      {t("reviewQueue.claimedBy")} <PersonName person={row.claimedBy} />
-                      {row.claimedAt === null ? null : (
-                        <span className="block text-xs text-fg-muted">{row.claimedAt}</span>
-                      )}
-                    </span>
-                  )}
-                  {row.mine ? (
-                    <Badge tone="info" data-slot="mine">
-                      {t("reviewQueue.mine")}
-                    </Badge>
-                  ) : null}
-                  {claim !== null && row.claimable ? (
-                    <form
-                      ref={(element) => {
-                        forms.current[index] = element;
-                      }}
-                      onSubmit={(event) => {
-                        event.preventDefault();
-                        setActive(index);
-                        send(new FormData(event.currentTarget));
-                      }}
-                    >
-                      <input type="hidden" name={CLAIM_FIELD} value={row.taskId} />
-                      <Button
-                        type="submit"
-                        size="sm"
-                        variant="secondary"
-                        disabled={pending}
-                        aria-busy={pending || undefined}
-                        aria-label={t("reviewQueue.claimNamed", { title: row.title })}
+                    <div className="flex flex-col gap-1">
+                      <span
+                        className={row.candidate.unparseable ? "font-medium text-fg" : undefined}
                       >
-                        {t("reviewQueue.claim")}
-                      </Button>
-                    </form>
-                  ) : null}
-                </div>
-              </TableCell>
-              <TableCell className="align-top text-sm">
-                <div className="flex flex-col items-start gap-1">
-                  <StatusChip
-                    status={row.status}
-                    tone={TONES[row.status as keyof typeof TONES] ?? "neutral"}
-                    label={row.statusLabel}
-                  />
-                  {row.decision === null ? null : (
-                    <span className="text-xs text-fg-muted">
-                      {row.decision.label}
-                      {row.decision.by === null ? null : (
-                        <>
-                          {" "}
-                          {t("reviewQueue.by")} <PersonName person={row.decision.by} />
-                        </>
-                      )}
-                      {row.decision.at === null ? null : (
-                        <span className="block">{row.decision.at}</span>
-                      )}
-                    </span>
+                        {row.candidate.outcome}
+                      </span>
+                      <span>{row.candidate.confidence}</span>
+                      <span>{row.candidate.issues}</span>
+                      {row.candidate.needsReview ? (
+                        <span className="text-xs font-medium text-fg">
+                          {t("reviewQueue.candidate.needsReview")}
+                        </span>
+                      ) : null}
+                    </div>
                   )}
-                </div>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+                </TableCell>
+                <TableCell className="align-top text-sm">
+                  <div className="flex flex-col items-start gap-1">
+                    {row.claimedBy === null ? (
+                      <span className="text-fg-muted">{t("reviewQueue.unclaimed")}</span>
+                    ) : (
+                      <span>
+                        {t("reviewQueue.claimedBy")} <PersonName person={row.claimedBy} />
+                        {row.claimedAt === null ? null : (
+                          <span className="block text-xs text-fg-muted">{row.claimedAt}</span>
+                        )}
+                      </span>
+                    )}
+                    {row.mine ? (
+                      <Badge tone="info" data-slot="mine">
+                        {t("reviewQueue.mine")}
+                      </Badge>
+                    ) : null}
+                    {claim !== null && row.claimable ? (
+                      <form
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          setActive(index);
+                          send(new FormData(event.currentTarget));
+                        }}
+                      >
+                        <input type="hidden" name={CLAIM_FIELD} value={row.taskId} />
+                        <Button
+                          type="submit"
+                          size="sm"
+                          variant="secondary"
+                          disabled={pending}
+                          aria-busy={pending || undefined}
+                          aria-label={t("reviewQueue.claimNamed", { title: row.title })}
+                        >
+                          {t("reviewQueue.claim")}
+                        </Button>
+                      </form>
+                    ) : null}
+                  </div>
+                </TableCell>
+                <TableCell className="align-top text-sm">
+                  <div className="flex flex-col items-start gap-1">
+                    <StatusChip
+                      status={row.status}
+                      tone={TONES[row.status as keyof typeof TONES] ?? "neutral"}
+                      label={row.statusLabel}
+                    />
+                    {row.decision === null ? null : (
+                      <span className="text-xs text-fg-muted">
+                        {row.decision.label}
+                        {row.decision.by === null ? null : (
+                          <>
+                            {" "}
+                            {t("reviewQueue.by")} <PersonName person={row.decision.by} />
+                          </>
+                        )}
+                        {row.decision.at === null ? null : (
+                          <span className="block">{row.decision.at}</span>
+                        )}
+                      </span>
+                    )}
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
       <Dialog open={help} onOpenChange={setHelp}>
         <DialogContent data-slot="shortcuts-dialog">
           <DialogHeader>
@@ -322,7 +321,6 @@ export function QueueList({ rows, caption, claim }: QueueListProps) {
                 ["j", t("reviewQueue.keys.next")],
                 ["k", t("reviewQueue.keys.previous")],
                 [t("reviewQueue.keys.enterKey"), t("reviewQueue.keys.open")],
-                ["c", t("reviewQueue.keys.claim")],
                 ["?", t("reviewQueue.keys.help")],
               ] as const
             ).map(([key, what]) => (

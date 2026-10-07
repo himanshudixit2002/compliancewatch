@@ -1,3 +1,5 @@
+import type { Route } from "next";
+import Link from "next/link";
 import { Banner, EmptyState, PageHeader } from "@compliancewatch/ui";
 import type { Crumb } from "@/shared/config/nav";
 import { t } from "@/shared/i18n";
@@ -9,6 +11,7 @@ import type { WriteAction } from "@/shared/ui/write-outcome";
 import {
   emptyText,
   kindChips,
+  queueHref,
   regulatorChips,
   statusChips,
   taskStatusLabel,
@@ -42,7 +45,8 @@ export interface QueueViewProps {
  * The review queue: the stats strip, opening the seed tasks, the filters (status, kind and
  * regulator, each a row of chips in the address) and a page of tasks in the rulebook's order with
  * their claim. The rows the signed-in analyst claimed are marked, since the rulebook has no
- * assignee filter.
+ * assignee filter. A later page whose read failed (a cursor the rulebook refuses, from another
+ * filter or an older queue) leads back to the first page.
  */
 export function QueueView({
   title,
@@ -82,6 +86,16 @@ export function QueueView({
         />
       </div>
       {error !== undefined ? <ServiceError error={error} /> : null}
+      {error !== undefined && filter.cursor !== null ? (
+        <p className="text-sm" data-slot="queue-first-page">
+          <Link
+            href={queueHref({ ...filter, cursor: null }) as Route}
+            className="text-primary underline-offset-2 hover:underline"
+          >
+            {t("reviewQueue.backToFirst")}
+          </Link>
+        </p>
+      ) : null}
       {view === null ? null : view.rows.length === 0 ? (
         <>
           <EmptyState title={empty.title} body={empty.body} />
