@@ -8,18 +8,50 @@ names who acted (``user:<uuid>``, ``service:<client>`` or ``anonymous``) and is 
 ``py_common.auth.context``, and a field nothing bound is null. ``service`` is the configured
 service name unless a ``service`` context variable is bound: a process that hosts several
 services binds the owning service per request, so its lines stay attributable.
+
+Every line is masked for personal identifiers (``redact_pii``, always on): GSTINs, PANs, Aadhaar
+numbers, phone numbers and email addresses become ``[GSTIN]``, ``[PAN]``, ``[AADHAAR]``,
+``[PHONE]`` and ``[EMAIL]`` (``domain_kernel.pii``) in the event text, in every other text field
+at any depth (inside dicts, lists and tuples) and, in JSON output, in the exception: its message
+and the locals of its frames. Masking runs last in the shared chain, so it covers structlog events
+and stdlib records alike. It leaves alone the fields every line carries (``timestamp``,
+``level``, ``logger``, ``service``, ``correlation_id``, ``tenant_id``, ``actor``, ``trace_id``,
+``span_id``) and the value of any key ending in ``_id`` or ``_ids``, at any depth. By design,
+any other ten-digit number from 6 to 9, and any twelve-digit one from 2 to 9, is masked as a
+phone or an Aadhaar number, whatever it is: an amount, a reference, or a piece of a UUID in a URL
+or in the event text. Log an id under a key ending in ``_id`` to keep it whole. Only text is
+masked: a number logged as an int stays as it is. The console renderer (``CW_LOG_JSON=false``,
+for a developer's terminal) formats a traceback after the chain, so its traceback is not masked.
 """
 
 import logging
 import sys
-from typing import TextIO
+from typing import Final, TextIO
 
 import structlog
 from opentelemetry import trace
 from opentelemetry.trace import format_span_id, format_trace_id
 from structlog.typing import EventDict, Processor, WrappedLogger
 
+from domain_kernel.pii import mask_pii_in
+
 _CONTEXT_FIELDS = ("correlation_id", "tenant_id", "actor")
+_UNMASKED_FIELDS: Final = frozenset(
+    {
+        "timestamp",
+        "level",
+        "logger",
+        "service",
+        "correlation_id",
+        "tenant_id",
+        "actor",
+        "trace_id",
+        "span_id",
+        # The console renderer formats the exception from it after the chain.
+        "exc_info",
+    }
+)
+"""The fields ``redact_pii`` leaves alone, besides any key ending in ``_id`` or ``_ids``."""
 
 
 def _add_service(service_name: str) -> Processor:
@@ -42,6 +74,16 @@ def add_trace_context(_: WrappedLogger, __: str, event_dict: EventDict) -> Event
     if context.is_valid:
         event_dict.setdefault("trace_id", format_trace_id(context.trace_id))
         event_dict.setdefault("span_id", format_span_id(context.span_id))
+    return event_dict
+
+
+def redact_pii(_: WrappedLogger, __: str, event_dict: EventDict) -> EventDict:
+    """Mask the personal identifiers in every text of the line (``domain_kernel.pii``), except
+    in the fields every line carries and under a key ending in ``_id`` or ``_ids``. Nested values
+    are masked as copies, so a dict or list the caller logged is never changed."""
+    masked = mask_pii_in(event_dict, keep=_UNMASKED_FIELDS)
+    if isinstance(masked, dict):  # a mapping always comes back as a dict
+        event_dict.update(masked)
     return event_dict
 
 
@@ -69,6 +111,8 @@ def configure_logging(
         renderer = structlog.processors.JSONRenderer()
     else:
         renderer = structlog.dev.ConsoleRenderer()
+    # Last, after _ensure_context_fields and the traceback: every field of the line is in place.
+    shared.append(redact_pii)
 
     handler = logging.StreamHandler(stream or sys.stdout)
     handler.setFormatter(

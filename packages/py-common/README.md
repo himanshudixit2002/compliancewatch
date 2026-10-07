@@ -16,7 +16,7 @@ src/py_common/
   kafka.py             # KafkaClientConfig: bootstrap servers, SASL/SCRAM and TLS for every Kafka client
   flags.py             # configure_flags, flag_enabled, flag_value: OpenFeature over the flag registry (env or Unleash)
   flags_registry.json  # generated from packages/flags/registry.json by make flags; never edited by hand
-  logging.py           # structlog JSON logging bridging stdlib records; correlation_id/tenant_id/actor contextvars
+  logging.py           # structlog JSON logging bridging stdlib records; correlation_id/tenant_id/actor contextvars; personal identifiers masked on every line
   health.py            # GET /health and GET /ready router with pluggable readiness checks
   request_context.py   # x-request-id middleware; correlation_id_of(request) for handlers and dependencies
   problems.py          # RFC 9457 problem+json handlers, Problem schema, problem_responses() for routers
@@ -243,6 +243,28 @@ built with `--no-dev`, and without the extra it would not start with `CW_FLAGS_P
 A malformed value or a flag Unleash does not hold answers the registry default, which is off,
 and logs `flag_evaluation_failed`.
 
+## Logging
+
+`configure_logging(service_name=...)`, which `create_app` and every worker call, renders structlog
+events and stdlib records (uvicorn, httpx, sqlalchemy) through one processor chain as JSON lines
+with `timestamp`, `level`, `logger`, `event`, `service`, `correlation_id`, `tenant_id` and
+`actor`, plus `trace_id` and `span_id` inside a span (`CW_LOG_JSON=false` prints them for a
+terminal instead).
+
+The last processor, `redact_pii`, masks personal identifiers on every line, always, with no
+setting to turn it off: GSTINs, PANs, Aadhaar numbers, phone numbers and email addresses become
+`[GSTIN]`, `[PAN]`, `[AADHAAR]`, `[PHONE]` and `[EMAIL]` (`domain_kernel.pii`, the patterns the
+llm-gateway masks prompts with). It masks the event text, every other text value at any depth
+(inside dicts, lists and tuples) and, in JSON output, the exception's message and the locals of
+its frames. What the caller logged is copied, never changed. It leaves alone the fields listed
+above and the value of any key ending in `_id` or `_ids`, at any depth.
+
+By design, any other ten-digit number that starts with 6 to 9, and any twelve-digit number that
+starts with 2 to 9, is masked as a phone or an Aadhaar number, whatever it is: an amount, a
+reference, or a piece of a UUID in a request path or in the event text. Log an id under a key
+ending in `_id` and a number as an int to keep it whole. The console renderer formats a traceback
+itself, after the chain, so a traceback printed with `CW_LOG_JSON=false` is not masked.
+
 ## Telemetry
 
 `create_app` calls `configure_telemetry`: with `CW_OTEL_ENDPOINT` set (the dev stack's
@@ -392,7 +414,6 @@ what the table refuses.
   reads the rows of no tenant yet.
 - `py_common.audit.testing` has `audit_entry(...)`, `install_audit_table(connection)` for a
   service's integration tests and `read_audit_entries(connection)`.
-
 Not built yet: the read route `GET /v1/identity/audit`, the NDJSON export, masking personal data,
 pseudonymising rows on a tenant's erasure, the call sites in every service and database roles that
 may only insert.
