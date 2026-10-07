@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from domain_kernel.access import Role, Scope
-from domain_kernel.ids import UserId
+from domain_kernel.ids import TenantId, UserId
 from obligation.application.export import SECTIONS
 from obligation.infrastructure.memory import MemoryStore
 from obligation.main import build_app
@@ -30,9 +30,17 @@ OWNER = bearer(ISSUER.user(TENANT, [Role.OWNER], user_id=OWNER_ID))
 CA_ADMIN = bearer(ISSUER.user(TENANT, [Role.CA_ADMIN], mfa=True))
 STAFF = bearer(ISSUER.user(TENANT, [Role.STAFF]))
 COMPLIANCE_LEAD = bearer(ISSUER.user(TENANT, [Role.COMPLIANCE_LEAD]))
-IDENTITY_EXPORTING = bearer(ISSUER.service("identity", [Scope.DATA_EXPORT, Scope.TENANT_ACT]))
 IDENTITY_ACTING = bearer(ISSUER.service("identity", [Scope.TENANT_ACT]))
-IDENTITY_UNSCOPED = bearer(ISSUER.service("identity", [Scope.DATA_EXPORT]))
+IDENTITY_UNBOUND = bearer(ISSUER.service("worker", [Scope.DATA_EXPORT, Scope.TENANT_ACT]))
+"""data:export and tenant:act, but no tenant in the token: refused."""
+
+
+def exporting(tenant: TenantId, audience: str = "obligation") -> dict[str, str]:
+    """Identity's export token for ``tenant``, addressed to ``audience``."""
+    return bearer(
+        ISSUER.service("identity", [Scope.DATA_EXPORT], acts_for=tenant, audience=audience)
+    )
+
 
 OURS = tenant_records(TENANT, MADE, closed_by=OWNER_ID)
 THEIRS = tenant_records(OTHER_TENANT, MADE)
@@ -107,7 +115,7 @@ def test_header_mode_exports_the_tenant_the_header_names(header_mode: TestClient
 
 def test_no_tenant_is_a_401(header_mode: TestClient, token_mode: TestClient) -> None:
     assert problem(header_mode.get(ROUTE)) == (401, "obligation-tenant-required")
-    assert problem(token_mode.get(ROUTE, headers=IDENTITY_EXPORTING)) == (
+    assert problem(token_mode.get(ROUTE, headers=IDENTITY_ACTING)) == (
         401,
         "obligation-tenant-required",
     )
@@ -136,16 +144,26 @@ def test_an_owner_naming_another_tenant_is_refused(token_mode: TestClient) -> No
     )
 
 
-def test_a_service_with_data_export_exports_the_tenant_it_names(token_mode: TestClient) -> None:
-    body = exported(token_mode.get(ROUTE, headers={**IDENTITY_EXPORTING, **AS_OTHER}))
+def test_identity_s_bound_token_exports_the_tenant_it_names(token_mode: TestClient) -> None:
+    body = exported(token_mode.get(ROUTE, headers={**exporting(OTHER_TENANT), **AS_OTHER}))
     assert body["tenant_id"] == str(OTHER_TENANT)
     assert obligation_ids(body) == [str(THEIRS.obligation.id.value)]
 
 
+def test_a_token_bound_to_one_tenant_is_refused_for_another(token_mode: TestClient) -> None:
+    replayed = token_mode.get(ROUTE, headers={**exporting(TENANT), **AS_OTHER})
+    assert problem(replayed) == (403, "auth-tenant-mismatch")
+
+
+def test_a_token_addressed_to_another_service_is_refused(token_mode: TestClient) -> None:
+    elsewhere = token_mode.get(ROUTE, headers={**exporting(TENANT, "profile"), **AS_TENANT})
+    assert problem(elsewhere) == (403, "auth-forbidden")
+
+
 @pytest.mark.parametrize(
-    "caller", [IDENTITY_ACTING, IDENTITY_UNSCOPED], ids=["no-data-export", "no-tenant-act"]
+    "caller", [IDENTITY_ACTING, IDENTITY_UNBOUND], ids=["no-data-export", "no-tenant-in-token"]
 )
-def test_a_service_without_both_scopes_is_refused(
+def test_a_service_without_a_bound_export_token_is_refused(
     token_mode: TestClient, caller: dict[str, str]
 ) -> None:
     assert problem(token_mode.get(ROUTE, headers={**caller, **AS_TENANT}))[0] == 403

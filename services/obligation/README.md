@@ -139,7 +139,8 @@ Design reference: Project Foundation guide, sections 7 and 14.
   say. A business with obligations on the page is the tenant's, so profile is not asked then.
 - `application/export.py`: `ExportTenantData`, the service's part of a tenant's data export, which
   identity assembles (`GET /v1/obligation/data-export`, for a user with owner or ca_admin and for
-  a service with data:export and tenant:act naming the tenant in `x-tenant-id`). Three sections,
+  identity's export token: data:export, bound to the tenant and addressed to `obligation`; a
+  token for another tenant or service is a 403). Three sections,
   always present: `obligations` (every obligation in any status), `changes` (the change log) and
   `comments`, each oldest first and then by id, read in keyset pages of `EXPORT_PAGE_SIZE` (500)
   rows in one unit of work of the tenant (`export_page` on the obligations, the change log and the

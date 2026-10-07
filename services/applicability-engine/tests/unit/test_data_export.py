@@ -273,11 +273,23 @@ def test_token_mode_serves_the_tenant_admins_and_the_exporting_service(
         assert len(response.json()["sections"]["decisions"]) == 3
     staff = bearer(ISSUER.user(FIRST, [Role.STAFF]))
     assert client.get(EXPORT, headers=staff).status_code == 403
-    exporting = bearer(ISSUER.service("identity", [Scope.DATA_EXPORT, Scope.TENANT_ACT]))
+    exporting = bearer(
+        ISSUER.service(
+            "identity", [Scope.DATA_EXPORT], acts_for=SECOND, audience="applicability-engine"
+        )
+    )
     acting = client.get(EXPORT, headers={**exporting, "x-tenant-id": str(SECOND)})
     assert acting.status_code == 200, acting.text
     assert acting.json()["tenant_id"] == str(SECOND)
     assert len(acting.json()["sections"]["review_items"]) == 1
+    replayed = client.get(EXPORT, headers={**exporting, "x-tenant-id": str(FIRST)})
+    assert replayed.status_code == 403, "a token bound to one tenant never reads another"
+    elsewhere = bearer(
+        ISSUER.service("identity", [Scope.DATA_EXPORT], acts_for=SECOND, audience="profile")
+    )
+    assert client.get(EXPORT, headers={**elsewhere, "x-tenant-id": str(SECOND)}).status_code == 403
+    unbound = bearer(ISSUER.service("worker", [Scope.DATA_EXPORT, Scope.TENANT_ACT]))
+    assert client.get(EXPORT, headers={**unbound, "x-tenant-id": str(FIRST)}).status_code == 403
     plain = bearer(ISSUER.service("identity", [Scope.TENANT_ACT]))
     assert client.get(EXPORT, headers={**plain, "x-tenant-id": str(FIRST)}).status_code == 403
     mismatch = client.get(EXPORT, headers={**owner, "x-tenant-id": str(SECOND)})

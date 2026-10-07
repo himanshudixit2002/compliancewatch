@@ -16,8 +16,8 @@ sets and releases the hold (``deps.FanOutAdmin``). Every control is audited the 
 tenant, and then signals the run's workflow.
 
 The data export acts for the request's tenant too, for its owner or CA admin or for identity's
-service token with data:export (``deps.ExportTenant``): every decision and review item of the
-tenant, for identity to put in the tenant's export.
+data:export token bound to the tenant and addressed to this service (``deps.ExportTenant``): every
+decision and review item of the tenant, for identity to put in the tenant's export.
 
 A dry run names no tenant either, unless its scope does: an admin (``deps.DryRunAdmin``) asks
 what a version or a specification would decide for the directory's businesses, and only its

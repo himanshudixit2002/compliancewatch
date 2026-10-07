@@ -136,7 +136,9 @@ Design reference: Project Foundation guide, sections 7, 8, 11 and 14.
   and keeps up to `sample_size` (0 to 50, 10) decisions, a result at a time.
 - `application/export.py`: `ExportTenantData`, the engine's part of a tenant's data export
   (`GET /v1/applicability-engine/data-export`, which identity calls on a download with a service
-  token holding data:export and tenant:act; an owner or a CA admin of the tenant may call it too).
+  token holding data:export only, bound to the tenant and addressed to `applicability-engine`, so
+  it is refused for another tenant or at another service; an owner or a CA admin of the tenant
+  may call it too).
   Section `decisions` holds every decision of the tenant, superseded and reviewers' ones included,
   with each predicate's outcome; section `review_items` the review queue's items, open and
   resolved. Both are read in one unit of work of the tenant, 500 rows a page (decided_at or

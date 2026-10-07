@@ -1444,7 +1444,7 @@
     },
     "/v1/obligation/data-export": {
       "get": {
-        "description": "The tenant's obligations in any status (``obligations``), the change log of each\n(``changes``) and the comments on them (``comments``), each oldest first and then by id,\nevery section present and empty when there is nothing. For a user with owner or ca_admin, and\nfor a service with data:export naming the tenant in ``x-tenant-id`` (with tenant:act);\nanyone else is a 403, and no tenant a 401.",
+        "description": "The tenant's obligations in any status (``obligations``), the change log of each\n(``changes``) and the comments on them (``comments``), each oldest first and then by id,\nevery section present and empty when there is nothing. For a user with owner or ca_admin, and\nfor identity's data:export token bound to the tenant and addressed to obligation; anyone\nelse (a token for another tenant or service included) is a 403, and no tenant a 401.",
         "operationId": "data_export_v1_obligation_data_export_get",
         "parameters": [
           {

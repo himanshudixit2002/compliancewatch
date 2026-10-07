@@ -13,7 +13,8 @@ API (tag ``public``), ``/v1/obligations/{obligation_id}``, with the roles that m
 ``/v1/businesses/{business_id}/obligations``, beside the profile service's business routes.
 
 ``/v1/obligation/data-export`` is the service's part of a tenant's data export, which identity
-assembles: for the tenant's admins and for a service with data:export (``deps.ExportTenant``).
+assembles: for the tenant's admins and for identity's data:export token bound to the tenant and
+addressed to this service (``deps.ExportTenant``).
 """
 
 from datetime import date
@@ -110,8 +111,8 @@ def data_export(tenant: ExportTenant, wired: Wired) -> DataExportOut:
     """The tenant's obligations in any status (``obligations``), the change log of each
     (``changes``) and the comments on them (``comments``), each oldest first and then by id,
     every section present and empty when there is nothing. For a user with owner or ca_admin, and
-    for a service with data:export naming the tenant in ``x-tenant-id`` (with tenant:act);
-    anyone else is a 403, and no tenant a 401."""
+    for identity's data:export token bound to the tenant and addressed to obligation; anyone
+    else (a token for another tenant or service included) is a 403, and no tenant a 401."""
     return DataExportOut.from_export(wired.export_tenant_data.run(tenant))
 
 

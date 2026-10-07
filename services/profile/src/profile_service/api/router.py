@@ -1,25 +1,25 @@
 """Routes of the profile service. Business logic lives in the application use cases.
 
 Every route but the ping acts for the request's tenant (``deps.Tenant``; the data export only
-for an owner, a ca_admin or a service with data:export). Who changed a value is
-the user an access token names; the body's ``changed_by`` counts only without a token."""
+for an owner, a ca_admin or identity's data:export token bound to the tenant and addressed to
+this service, ``deps.ExportTenant``). Who changed a value is the user an access token names; the
+body's ``changed_by`` counts only without a token."""
 
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Query, status
 
 from domain_kernel.financial_year import FinancialYear
 from domain_kernel.identifiers import Gstin, Pan
 from domain_kernel.ids import BusinessId
 from profile_service.api.deps import (
     Caller,
+    ExportTenant,
     Now,
-    RequiredTenant,
     Tenant,
     Wired,
     changed_by,
-    exporter,
 )
 from profile_service.api.schemas import (
     FY_PATTERN,
@@ -221,9 +221,8 @@ def confirm_financial_year(
     "/data-export",
     summary="Everything the profile holds for the tenant, for its data export",
     responses=problem_responses(401, 403),
-    dependencies=[Depends(exporter)],
 )
-def data_export(tenant: RequiredTenant, wired: Wired) -> DataExportOut:
+def data_export(tenant: ExportTenant, wired: Wired) -> DataExportOut:
     """The tenant's nodes (PAN and GSTIN included), attribute values, history and review tasks,
     read a page at a time. Identity calls it when the tenant downloads its export."""
     return DataExportOut.from_export(wired.export_data.run(tenant))

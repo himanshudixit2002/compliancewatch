@@ -74,8 +74,8 @@ export type paths = {
      * @description The tenant's obligations in any status (``obligations``), the change log of each
      *     (``changes``) and the comments on them (``comments``), each oldest first and then by id,
      *     every section present and empty when there is nothing. For a user with owner or ca_admin, and
-     *     for a service with data:export naming the tenant in ``x-tenant-id`` (with tenant:act);
-     *     anyone else is a 403, and no tenant a 401.
+     *     for identity's data:export token bound to the tenant and addressed to obligation; anyone
+     *     else (a token for another tenant or service included) is a 403, and no tenant a 401.
      */
     get: operations["data_export_v1_obligation_data_export_get"];
     put?: never;

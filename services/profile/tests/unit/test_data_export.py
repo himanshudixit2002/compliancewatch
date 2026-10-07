@@ -224,10 +224,28 @@ def test_header_mode_without_a_tenant_is_a_401(header_mode: TestClient) -> None:
         pytest.param(ISSUER.user(TENANT, [Role.CA_ADMIN]), None, 200, id="ca_admin"),
         pytest.param(ISSUER.user(TENANT, [Role.STAFF]), None, 403, id="staff"),
         pytest.param(
-            ISSUER.service("identity", [Scope.DATA_EXPORT, Scope.TENANT_ACT]),
+            ISSUER.service("identity", [Scope.DATA_EXPORT], acts_for=TENANT, audience="profile"),
             TENANT,
             200,
-            id="service with data:export",
+            id="identity's token bound to the tenant",
+        ),
+        pytest.param(
+            ISSUER.service("identity", [Scope.DATA_EXPORT], acts_for=TENANT, audience="profile"),
+            OTHER_TENANT,
+            403,
+            id="a token for one tenant against another",
+        ),
+        pytest.param(
+            ISSUER.service("identity", [Scope.DATA_EXPORT], acts_for=TENANT, audience="obligation"),
+            TENANT,
+            403,
+            id="a token addressed to another service",
+        ),
+        pytest.param(
+            ISSUER.service("worker", [Scope.DATA_EXPORT, Scope.TENANT_ACT]),
+            TENANT,
+            403,
+            id="a token without a tenant",
         ),
         pytest.param(
             ISSUER.service("pipeline", [Scope.TENANT_ACT]),
