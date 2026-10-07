@@ -6,17 +6,21 @@ internal listener, as it does in the product; the owners use the public listener
 server sets preferences on the internal one. Two business owners sign up. The first records its
 consent to WhatsApp reminders and opts its number in from the web (the notification service asks
 identity for that consent first; the second owner, without one, is refused), and registers its
-GSTIN. The first owner then asks for an export: the bundle holds identity's, profile's,
-obligation's, notification's and the engine's sections, each for that tenant only; the second tenant
-sees no request of the first and its own export holds none of the first's data. The request shows
-completed, and the owner's audit trail shows it was made and exported. A request made 40 days ago
-and never answered is counted as overdue by the directory the alert reads. Nothing reaches a real
-identity provider, model provider or regulator.
+GSTIN, and both owners register the first owner's number as a recipient of their own. The first
+owner then asks for an export, which is offered at once (in progress): the bundle holds identity's,
+profile's, obligation's, notification's and the engine's sections, each for that tenant only, with
+the preference its own user set. The second tenant sees no request of the first, and its own export
+holds none of the first's data, not even the preference of the number it registered. The request
+shows completed, and the owner's audit trail shows it was made and exported. An export offered 40
+days ago and never downloaded has expired quietly, while a request never answered for 40 days is
+counted as overdue by the directory the alert reads. Nothing reaches a real identity provider,
+model provider or regulator.
 """
 
 import json
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final
+from uuid import uuid4
 
 import httpx2
 
@@ -101,10 +105,24 @@ def run_the_journey(app: CombinedApp, client: httpx2.Client, internal: httpx2.Cl
         headers=owner,
     )
     assert registered.status_code in (200, 201), registered.text
+    for tenant in (owner, other):
+        recipient = client.put(
+            f"/v1/notification/recipients/{uuid4()}",
+            json={
+                "role": "owner",
+                "language": "en",
+                "digest_mode": "off",
+                "addresses": [{"channel": "whatsapp", "address": FIRST_PHONE}],
+                "businesses": [],
+            },
+            headers=tenant,
+        )
+        assert recipient.status_code in (200, 201), recipient.text
 
     made = client.post(REQUESTS, json={"kind": "export", "reason": "Example copy"}, headers=owner)
     assert made.status_code == 201, made.text
     request = made.json()
+    assert request["status"] == "in_progress", "the bundle is offered at once"
     assert request["services_pending"] == sorted(SERVICES)
     assert client.get(REQUESTS, headers=other).json()["items"] == []
     assert client.get(f"{REQUESTS}/{request['id']}/export", headers=other).status_code == 404
@@ -124,7 +142,16 @@ def run_the_journey(app: CombinedApp, client: httpx2.Client, internal: httpx2.Cl
     assert SECOND_PHONE not in text
     assert GSTIN in text, "profile's registration is there"
     preferences = bundle["services"]["notification"]["sections"]["preferences"]
-    assert preferences == [] or all(row["address"] != SECOND_PHONE for row in preferences)
+    assert preferences == [
+        {
+            "channel": "whatsapp",
+            "address": FIRST_PHONE,
+            "opted_in": True,
+            "language": "en",
+            "quiet_hours_start": "21:00",
+            "quiet_hours_end": "08:00",
+        }
+    ], "the preference its own user set on the web, and nothing of how or when"
     identity = bundle["services"]["identity"]["sections"]
     assert [user["id"] for user in identity["users"]] == [first_user]
     assert [c["purpose"] for c in identity["consents"]] == ["whatsapp_reminders"]
@@ -148,21 +175,45 @@ def run_the_journey(app: CombinedApp, client: httpx2.Client, internal: httpx2.Cl
     their_bundle = client.get(f"{REQUESTS}/{theirs['id']}/export", headers=other).json()
     assert first_id not in json.dumps(their_bundle)
     assert GSTIN not in json.dumps(their_bundle)
+    their_notification = their_bundle["services"]["notification"]["sections"]
+    assert their_notification["preferences"] == [], "the number it registered is not its consent"
+    assert FIRST_PHONE in json.dumps(their_notification["recipients"]), "its own recipient row"
 
     identity_app = app.services["identity"]
     store = identity_app.state.wiring.unit_of_work
     assert isinstance(store, IdentityStore)
     long_ago = datetime.now(UTC) - timedelta(days=40)
     with store(TenantId.parse(second_id)) as uow:
-        uow.data_requests.add(
-            DataRequest.new(
-                TenantId.parse(second_id),
-                DataRequestKind.EXPORT,
-                DataRequestSource.SELF_SERVICE,
-                requested_by="",
-                reason="",
-                at=long_ago,
+        for kind in (DataRequestKind.EXPORT, DataRequestKind.DELETION):
+            uow.data_requests.add(
+                DataRequest.new(
+                    TenantId.parse(second_id),
+                    kind,
+                    DataRequestSource.SELF_SERVICE,
+                    requested_by="",
+                    reason="",
+                    at=long_ago,
+                )
             )
-        )
     counts = identity_app.state.wiring.data_request_directory.open_counts()
-    assert counts[0] == OpenRequests(DataRequestKind.EXPORT, 1, 1), "the old one is overdue"
+    assert counts == [
+        OpenRequests(DataRequestKind.EXPORT, 0, 0),
+        OpenRequests(DataRequestKind.DELETION, 1, 1),
+    ], "the offered export expired; the request nobody answered is overdue"
+
+
+def test_in_token_mode_identity_s_bound_tokens_open_each_service_s_part() -> None:
+    """The same download with tokens required: identity mints each service a data:export token
+    bound to the tenant and addressed to that service, and every service accepts it."""
+    with running_app(auth_mode="token") as app:
+        public = f"http://127.0.0.1:{app.settings.mvp_public_port}"
+        with httpx2.Client(base_url=public, timeout=30.0) as client:
+            created = sign_up(client, FIRST_PHONE, "Example Traders")
+            owner = {"Authorization": f"Bearer {created['session']['access_token']}"}
+            made = client.post(REQUESTS, json={"kind": "export"}, headers=owner)
+            assert made.status_code == 201, made.text
+            download = client.get(f"{REQUESTS}/{made.json()['id']}/export", headers=owner)
+            assert download.status_code == 200, download.text
+            bundle = download.json()
+            assert (bundle["complete"], bundle["services_pending"]) == (True, [])
+            assert set(bundle["services"]) == set(SERVICES)
