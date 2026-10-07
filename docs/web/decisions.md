@@ -1056,7 +1056,7 @@ proxy in front of the app must allow bodies of the upload limit on `/api-bff/`, 
 limits bound an upload as Node's do (`next start` keeps Node's 300 seconds for receiving a whole
 request); a page that wants to show a stored PDF inside itself needs a framing decision first.
 
-## D-060: The web stack's pipeline has no Temporal, and the specs stage their own sources, never in Postgres
+## D-060: The web stack's pipeline and engine have no Temporal, and the specs stage their own sources, never in Postgres
 
 2026-10-07. `make web-stack` gives the pipeline a Temporal address nothing listens on
 (`127.0.0.1:1`) and, on the memory store, its raw files in memory. With the developer's Temporal
@@ -1064,7 +1064,12 @@ from `make dev`, an upload or a retry from the web stack would queue an ingest t
 worker runs against another store, which holds no such document; without one, the pipeline stores
 the document and answers 503, which the pages say as "stored, but its ingest did not start" and
 "Temporal did not answer: send the same request again", the same on CI, which runs no Temporal.
-The specs stage what they act on through the pipeline's routes with the write token (as
+The applicability engine gets the same address, so nothing of the web stack reaches the
+developer's Temporal: the engine's API connects to Temporal only to signal a fan-out run (its
+worker, which the stack does not run, starts them), never at boot; on the memory store it signals
+nothing (no run exists there, D-050), and on Postgres with the fan-out flag on, a control's signal
+is lost, which costs the run one poll (30 seconds), since the run's row decides what it does and
+the controls change the row first. The full e2e suite passes on it as before. The specs stage what they act on through the pipeline's routes with the write token (as
 `stageReview` does for the rulebook): an upload-only source of their own per test
 (`example_<nine digits>`) and synthetic PDF and HTML bytes, so they run again on the same stack and
 never touch a built-in source; a spec that lists every source counts the built-in ones exactly and

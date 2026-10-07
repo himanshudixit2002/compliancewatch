@@ -483,11 +483,12 @@ web-dev: check-pnpm ## next dev on WEB_PORT from .env; /admin lists the internal
 # GSTIN lookup (the demo GSTIN pre-fills), the billing provider "none" (subscribe answers 503;
 # BILLING=memory starts subscriptions in memory for a manual demo, and make web-e2e takes the
 # same BILLING so the billing spec expects that state), the KAG layer off, the pipeline's crawl
-# off (it would read the live regulator sites), the pipeline pointed at a Temporal address
-# nothing listens on (the stack has no worker: an upload, a retry or a task's resolution is
-# stored and answers that its ingest did not start, rather than queueing a workflow on a
-# developer's Temporal for some other worker to run against another store) with its raw files in
-# memory on the memory store, the inter-service URLs
+# off (it would read the live regulator sites), the pipeline and the applicability engine pointed
+# at a Temporal address nothing listens on (the stack has no worker: an upload, a retry or a task's
+# resolution is stored and answers that its ingest did not start, rather than queueing a workflow
+# on a developer's Temporal for some other worker to run against another store; the engine's API
+# only signals fan-outs, and a lost signal costs a run one poll of 30 seconds) with the
+# pipeline's raw files in memory on the memory store, the inter-service URLs
 # on the same base, and the rulebook's two tokens from .env or the placeholders local-write-token
 # and local-review-token (not secrets), as make product passes them. The rulebook publishes
 # (CW_RULEBOOK_PUBLISH_ENABLED=true) and, on the memory store, starts with the seed calendar's
@@ -522,7 +523,7 @@ web-stack: check-uv ## UI-only stack, no worker: every service on SERVICE_PORT_B
 	  if [ "$(STORE)" = "postgres" ]; then \
 	    url="postgresql+psycopg://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}?options=-csearch_path%3D$${schema}%2Cpublic"; \
 	  fi; \
-	  temporal="$${CW_TEMPORAL_ADDRESS:-localhost:7233}"; if [ "$$svc" = pipeline ]; then temporal=127.0.0.1:1; fi; \
+	  temporal="$${CW_TEMPORAL_ADDRESS:-localhost:7233}"; case "$$svc" in pipeline|applicability-engine) temporal=127.0.0.1:1 ;; esac; \
 	  CW_DATABASE_URL="$$url" CW_DB_SCHEMA="$$schema" CW_TEMPORAL_ADDRESS="$$temporal" CW_PIPELINE_RAW_STORE=$$raw \
 	  CW_IDENTITY_STORE=$(STORE) CW_PROFILE_STORE=$(STORE) CW_RULEBOOK_STORE=$(STORE) CW_OBLIGATION_STORE=$(STORE) CW_NOTIFICATION_STORE=$(STORE) CW_EVAL_STORE=$(STORE) CW_APPLICABILITY_ENGINE_STORE=$(STORE) CW_PIPELINE_STORE=$(STORE) CW_LLM_LEDGER=$(STORE) \
 	  CW_PROFILE_GSTIN_LOOKUP=static CW_BILLING_PROVIDER=$(BILLING) CW_RULEBOOK_PUBLISH_ENABLED=true CW_QA_KAG_ENABLED=false CW_PIPELINE_CRAWL_ENABLED=false \
