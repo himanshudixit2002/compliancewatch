@@ -292,6 +292,59 @@ def test_malformed_claims_are_refused(keys: KeySet, overrides: dict[str, Any]) -
         _verifier(keys).verify(_sign(keys, _claims(**overrides)))
 
 
+def test_a_bound_service_token_names_its_tenant_and_its_service(keys: KeySet) -> None:
+    bound = Principal.service(
+        "identity", [Scope.DATA_EXPORT], acts_for=_TENANT, audience="applicability-engine"
+    )
+    issued = _issuer(keys).issue(bound, timedelta(minutes=2))
+    claims = jwt.decode(issued.token, options={"verify_signature": False})
+    assert claims["aud"] == f"{_AUDIENCE}:applicability-engine"
+    assert (claims["kind"], claims["tid"]) == ("service", str(_TENANT))
+    assert claims["scp"] == ["data:export"]
+    verified = _verifier(keys).verify(issued.token)
+    assert verified == bound
+    assert (verified.tenant_id, verified.acts_for, verified.audience) == (
+        None,
+        _TENANT,
+        "applicability-engine",
+    )
+    platform = _verifier(keys).verify(
+        _issuer(keys).issue(Principal.service("qa", [Scope.TENANT_ACT]), timedelta(minutes=2)).token
+    )
+    assert (platform.acts_for, platform.audience) == (None, "")
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"aud": f"{_AUDIENCE}:"},
+        {"aud": "elsewhere:profile"},
+        {"aud": [_AUDIENCE, f"{_AUDIENCE}:profile"]},
+        {"aud": f"{_AUDIENCE}:Profile"},
+    ],
+)
+def test_an_audience_other_than_the_platform_or_one_of_its_services_is_refused(
+    keys: KeySet, overrides: dict[str, Any]
+) -> None:
+    claims = _claims(kind="service", sub="identity", roles=[], scp=["data:export"], **overrides)
+    with pytest.raises(AuthTokenInvalidError):
+        _verifier(keys).verify(_sign(keys, claims))
+
+
+def test_a_service_token_names_a_tenant_only_with_a_service_audience(keys: KeySet) -> None:
+    unaddressed = _claims(kind="service", sub="identity", roles=[], scp=["data:export"])
+    with pytest.raises(AuthTokenInvalidError, match="claims are malformed"):
+        _verifier(keys).verify(_sign(keys, unaddressed))
+    tenantless = _claims(
+        kind="service", sub="identity", tid=None, roles=[], aud=f"{_AUDIENCE}:profile"
+    )
+    with pytest.raises(AuthTokenInvalidError, match="claims are malformed"):
+        _verifier(keys).verify(_sign(keys, tenantless))
+    user = _claims(aud=f"{_AUDIENCE}:profile")
+    with pytest.raises(AuthTokenInvalidError, match="claims are malformed"):
+        _verifier(keys).verify(_sign(keys, user))
+
+
 def test_unknown_roles_and_scopes_grant_nothing() -> None:
     principal = principal_from_claims(_claims(roles=["owner", "partner"]))
     assert principal.roles == {Role.OWNER}

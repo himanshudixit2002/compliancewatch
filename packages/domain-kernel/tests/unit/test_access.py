@@ -102,6 +102,15 @@ def test_a_service_principal() -> None:
     assert principal.actor_label == "service:pipeline"
 
 
+def test_a_bound_service_principal() -> None:
+    principal = Principal.service(
+        "identity", [Scope.DATA_EXPORT], acts_for=_TENANT, audience="applicability-engine"
+    )
+    assert (principal.tenant_id, principal.acts_for) == (None, _TENANT)
+    assert principal.audience == "applicability-engine"
+    assert principal.actor_label == "service:identity"
+
+
 def test_the_anonymous_principal() -> None:
     assert ANONYMOUS.kind is PrincipalKind.ANONYMOUS
     assert Principal(PrincipalKind.ANONYMOUS) == ANONYMOUS
@@ -140,6 +149,8 @@ def test_has_scope() -> None:
         ({"mfa": 1}, "mfa must be bool"),
         ({"session_version": -1}, "at least 0"),
         ({"kind": "user"}, "kind must be PrincipalKind"),
+        ({"acts_for": _TENANT}, "only a service token is bound"),
+        ({"audience": "profile"}, "only a service token is bound"),
     ],
 )
 def test_user_invariants(overrides: dict[str, object], message: str) -> None:
@@ -156,6 +167,12 @@ def test_user_invariants(overrides: dict[str, object], message: str) -> None:
         ({"subject": "pipeline", "tenant_id": _TENANT}, "belongs to no tenant"),
         ({"subject": "pipeline", "roles": frozenset({Role.ADMIN})}, "scopes, not roles"),
         ({"subject": "pipeline", "scopes": frozenset({"llm:call"})}, "Scope members"),
+        ({"subject": "identity", "acts_for": _TENANT}, "names both its tenant"),
+        ({"subject": "identity", "audience": "profile"}, "names both its tenant"),
+        ({"subject": "identity", "acts_for": UUID(int=5), "audience": "x"}, "must be TenantId"),
+        ({"subject": "identity", "acts_for": _TENANT, "audience": "Profile"}, "service name"),
+        ({"subject": "identity", "acts_for": _TENANT, "audience": "a b"}, "service name"),
+        ({"subject": "identity", "acts_for": _TENANT, "audience": "p" * 65}, "service name"),
     ],
 )
 def test_service_invariants(values: dict[str, object], message: str) -> None:
@@ -172,6 +189,8 @@ def test_service_invariants(values: dict[str, object], message: str) -> None:
         {"scopes": frozenset({Scope.TENANT_ACT})},
         {"mfa": True},
         {"session_version": 1},
+        {"acts_for": _TENANT},
+        {"audience": "profile"},
     ],
 )
 def test_the_anonymous_principal_carries_nothing(values: dict[str, object]) -> None:

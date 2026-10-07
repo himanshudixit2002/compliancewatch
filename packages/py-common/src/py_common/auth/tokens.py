@@ -2,10 +2,11 @@
 
 A token is an ES256 JWT whose header names its key (``kid``) and whose claims are:
 
-- ``iss`` and ``aud``: the identity service's issuer and the platform audience;
+- ``iss`` and ``aud``: the identity service's issuer and the platform audience, or for a bound
+  service token ``<platform audience>:<service>``, the one service it is addressed to;
 - ``sub``: the user id, or the service client id;
 - ``kind``: ``user`` or ``service``;
-- ``tid``: the user's tenant (users only);
+- ``tid``: the user's tenant, or the one tenant a bound service token acts for;
 - ``roles`` (users) and ``scp`` (services): lists of ``Role`` and ``Scope`` values;
 - ``sv``: the user's session version when the token was issued;
 - ``mfa``: whether the person signed in with a second factor;
@@ -42,6 +43,8 @@ from py_common.logging import get_logger
 from py_common.settings import Settings
 
 REQUIRED_CLAIMS: Final = ("iss", "aud", "sub", "kind", "iat", "exp", "jti")
+AUDIENCE_SEPARATOR: Final = ":"
+"""Between the platform audience and the service a bound token is addressed to."""
 JWKS_CACHE_SECONDS: Final = 3600.0
 """How long a fetched key set is used before it is fetched again."""
 UNKNOWN_KID_REFETCH_SECONDS: Final = 30.0
@@ -96,9 +99,12 @@ class TokenIssuer:
         issued_at = self._clock().astimezone(UTC).replace(microsecond=0)
         expires_at = issued_at + ttl
         jti = uuid.uuid4().hex
+        audience = self._audience
+        if principal.audience:
+            audience = f"{self._audience}{AUDIENCE_SEPARATOR}{principal.audience}"
         claims = {
             "iss": self._issuer,
-            "aud": self._audience,
+            "aud": audience,
             "iat": int(issued_at.timestamp()),
             "exp": int(expires_at.timestamp()),
             "jti": jti,
@@ -122,22 +128,30 @@ def claims_of(principal: Principal) -> dict[str, Any]:
     }
     if principal.tenant_id is not None:
         claims["tid"] = str(principal.tenant_id)
+    if principal.acts_for is not None:
+        claims["tid"] = str(principal.acts_for)
     return claims
 
 
-def principal_from_claims(claims: Mapping[str, Any]) -> Principal:
-    """The principal verified claims name. Role and scope values this code does not know are
-    left out, so a token from a newer identity service grants nothing unexpected; anything else
-    malformed makes the token invalid."""
+def principal_from_claims(claims: Mapping[str, Any], *, audience: str = "") -> Principal:
+    """The principal verified claims name; ``audience`` is the service a bound token is
+    addressed to ('' for a token of the whole platform). A service's ``tid`` is the tenant its
+    bound token acts for, and needs ``audience``. Role and scope values this code does not know
+    are left out, so a token from a newer identity service grants nothing unexpected; anything
+    else malformed makes the token invalid."""
     try:
         kind = PrincipalKind(claims["kind"])
         if kind is PrincipalKind.ANONYMOUS:
             raise ValueError("tokens name users and services only")
-        tenant = claims.get("tid")
+        tid = claims.get("tid")
+        tenant = None if tid is None else TenantId.parse(_text(tid, "tid"))
+        service = kind is PrincipalKind.SERVICE
         return Principal(
             kind,
             subject=claims["sub"],
-            tenant_id=None if tenant is None else TenantId.parse(_text(tenant, "tid")),
+            tenant_id=None if service else tenant,
+            acts_for=tenant if service else None,
+            audience=audience,
             roles=_known(Role, claims.get("roles", []), "roles"),
             scopes=_known(Scope, claims.get("scp", []), "scp"),
             mfa=claims.get("mfa", False),
@@ -352,13 +366,25 @@ class TokenVerifier:
                 token,
                 key.key,
                 algorithms=[ALGORITHM],
-                audience=self._audience,
                 issuer=self._issuer,
                 leeway=self._leeway,
-                options={"require": list(REQUIRED_CLAIMS), "strict_aud": True},
+                # The audience is checked below: the platform's, or the platform's with a service.
+                options={"require": list(REQUIRED_CLAIMS), "verify_aud": False},
             )
         except jwt.ExpiredSignatureError as exc:
             raise AuthTokenInvalidError("the access token has expired") from exc
         except jwt.PyJWTError as exc:
             raise AuthTokenInvalidError("the access token failed verification") from exc
-        return principal_from_claims(claims)
+        return principal_from_claims(claims, audience=self._service_of(claims["aud"]))
+
+    def _service_of(self, audience: object) -> str:
+        """The service a token's ``aud`` addresses: '' for the platform audience itself, the
+        name after it for ``<platform>:<service>``. Anything else, a list included, is refused."""
+        if audience == self._audience:
+            return ""
+        prefix = f"{self._audience}{AUDIENCE_SEPARATOR}"
+        if isinstance(audience, str) and audience.startswith(prefix):
+            service = audience[len(prefix) :]
+            if service:
+                return service
+        raise AuthTokenInvalidError("the access token failed verification")

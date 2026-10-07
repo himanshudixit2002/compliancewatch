@@ -3,9 +3,10 @@ verified access token names.
 
 A person belongs to one tenant and holds roles in it (guide sections 6 and 10). A service client,
 such as the pipeline or the WhatsApp bot, holds scopes instead and belongs to no tenant; it acts
-for one only with ``Scope.TENANT_ACT`` and the tenant named on the request. A request with no
-verified token has the anonymous principal, which is what every request has while
-``CW_AUTH_MODE`` is ``header``.
+for one only with ``Scope.TENANT_ACT`` and the tenant named on the request, or, holding a token
+bound to one tenant and addressed to one service (``acts_for`` and ``audience``), for that tenant
+at that service only. A request with no verified token has the anonymous principal, which is what
+every request has while ``CW_AUTH_MODE`` is ``header``.
 """
 
 from collections.abc import Iterable
@@ -20,6 +21,8 @@ from domain_kernel.ids import TenantId, UserId
 
 MAX_CLIENT_ID_CHARS: Final = 128
 """The longest service client id a principal carries."""
+MAX_AUDIENCE_CHARS: Final = 64
+"""The longest service name a bound token is addressed to."""
 
 
 class Role(StrEnum):
@@ -91,6 +94,12 @@ class Principal:
     ``mfa`` says the person signed in with a second factor. ``session_version`` is the user's
     session version when the token was issued; changing the user's roles or disabling the user
     bumps it, which revokes older tokens where the version is checked.
+
+    A service's token may be bound: ``acts_for`` names the one tenant it acts for (the token's
+    ``tid``) and ``audience`` the one service it is addressed to (the token's ``aud`` is
+    ``<platform>:<service>``). Identity mints such a token for each service an export reads, so
+    a token that leaks cannot be replayed for another tenant or at another service. A user's
+    tenant is ``tenant_id``; ``acts_for`` and ``audience`` are a service's only.
     """
 
     kind: PrincipalKind
@@ -100,6 +109,8 @@ class Principal:
     scopes: frozenset[Scope] = frozenset()
     mfa: bool = False
     session_version: int = 0
+    acts_for: TenantId | None = None
+    audience: str = ""
 
     def __post_init__(self) -> None:
         require_instance(self.kind, PrincipalKind, "kind")
@@ -110,6 +121,9 @@ class Principal:
         _require_members(self.scopes, Scope, "scopes")
         require_bool(self.mfa, "mfa")
         require_int(self.session_version, "session_version", minimum=0)
+        if self.acts_for is not None:
+            require_instance(self.acts_for, TenantId, "acts_for")
+        require_instance(self.audience, str, "audience")
         if self.kind is PrincipalKind.USER:
             self._check_user()
         elif self.kind is PrincipalKind.SERVICE:
@@ -123,6 +137,10 @@ class Principal:
             raise InvariantViolationError("a user principal belongs to a tenant")
         if self.scopes:
             raise InvariantViolationError("a user principal holds roles, not scopes")
+        if self.acts_for is not None or self.audience:
+            raise InvariantViolationError(
+                "a user principal acts for its own tenant; only a service token is bound"
+            )
 
     def _check_service(self) -> None:
         require_text(self.subject, "subject")
@@ -136,6 +154,18 @@ class Principal:
             )
         if self.roles:
             raise InvariantViolationError("a service principal holds scopes, not roles")
+        if (self.acts_for is None) != (not self.audience):
+            raise InvariantViolationError(
+                "a bound service token names both its tenant and the service it is addressed to"
+            )
+        if self.audience and (
+            len(self.audience) > MAX_AUDIENCE_CHARS
+            or not self.audience.replace("-", "").isalpha()
+            or not self.audience.islower()
+        ):
+            raise InvariantViolationError(
+                f"a bound token's audience is a service name, got {self.audience!r}"
+            )
 
     def _check_anonymous(self) -> None:
         if (
@@ -145,6 +175,8 @@ class Principal:
             or self.scopes
             or self.mfa
             or self.session_version
+            or self.acts_for is not None
+            or self.audience
         ):
             raise InvariantViolationError(
                 "the anonymous principal has no subject, tenant, roles, scopes or session"
@@ -172,9 +204,23 @@ class Principal:
         )
 
     @classmethod
-    def service(cls, client_id: str, scopes: Iterable[Scope]) -> Self:
-        """A service client holding ``scopes``."""
-        return cls(PrincipalKind.SERVICE, subject=client_id, scopes=frozenset(scopes))
+    def service(
+        cls,
+        client_id: str,
+        scopes: Iterable[Scope],
+        *,
+        acts_for: TenantId | None = None,
+        audience: str = "",
+    ) -> Self:
+        """A service client holding ``scopes``; with ``acts_for`` and ``audience`` a token bound
+        to that tenant and addressed to that service."""
+        return cls(
+            PrincipalKind.SERVICE,
+            subject=client_id,
+            scopes=frozenset(scopes),
+            acts_for=acts_for,
+            audience=audience,
+        )
 
     @property
     def is_authenticated(self) -> bool:
