@@ -159,6 +159,26 @@ def test_staging_runs_dual_or_token(monkeypatch: pytest.MonkeyPatch, mode: str, 
 
 
 @pytest.mark.parametrize("base", [STAGING, PRODUCTION], ids=["staging", "prod"])
+def test_console_log_lines_are_refused(
+    monkeypatch: pytest.MonkeyPatch, base: dict[str, str]
+) -> None:
+    assert report(monkeypatch, base, log_json="true").ok
+    found = report(monkeypatch, base, log_json="false")
+    assert only(found) == Problem(
+        SHARED,
+        "CW_LOG_JSON=false prints console lines, whose tracebacks are formatted after the "
+        f"masking and keep their personal identifiers; CW_ENV={base['CW_ENV']} needs JSON lines",
+    )
+
+
+def test_local_and_test_may_print_console_lines(monkeypatch: pytest.MonkeyPatch) -> None:
+    local = {"CW_LLM_PROVIDER": "fake", "CW_NOTIFICATION_CHANNELS": "sink", "CW_LOG_JSON": "false"}
+    for env in ("local", "test"):
+        found = report(monkeypatch, local, env=env)
+        assert found.ok, lines(found)
+
+
+@pytest.mark.parametrize("base", [STAGING, PRODUCTION], ids=["staging", "prod"])
 def test_the_fake_model_is_refused(monkeypatch: pytest.MonkeyPatch, base: dict[str, str]) -> None:
     found = report(monkeypatch, base, llm_provider="fake", ai_gateway_api_key=None)
     assert only(found).where == "llm-gateway"

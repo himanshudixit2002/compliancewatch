@@ -19,6 +19,8 @@ In staging and production (``CW_ENV`` staging or prod) it then refuses what no c
 there:
 
 - ``header`` mode in staging (staging runs ``dual``, then ``token``, before production);
+- console log lines (``CW_LOG_JSON=false``): the console renderer formats a traceback after the
+  masking, so its personal identifiers would reach the log collector as they are;
 - fake providers: the gateway's ``fake`` model (under ``CW_LLM_RESIDENCY=india_only`` too, which
   refuses every real model call and is the maintainer's choice, not a problem), identity's
   ``fake`` sign-in in staging (production's is identity's own rule), the profile's ``static`` demo
@@ -178,6 +180,11 @@ def _shared(root: MvpSettings) -> Iterator[str]:
         yield (
             f"CW_ENV=staging needs CW_AUTH_MODE dual or token, got {root.auth_mode}: staging "
             "proves the access tokens before production, which takes token only"
+        )
+    if not root.log_json:
+        yield (
+            "CW_LOG_JSON=false prints console lines, whose tracebacks are formatted after the "
+            f"masking and keep their personal identifiers; CW_ENV={root.env} needs JSON lines"
         )
     worker_calls = root.worker_kafka_enabled or root.worker_temporal_enabled
     if root.auth_mode == "token" and worker_calls and not _set(root.service_client_secret):

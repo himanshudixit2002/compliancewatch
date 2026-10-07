@@ -37,8 +37,9 @@ A JSON traceback carries the locals of its frames only where ``env`` is local or
 (``FRAME_LOCALS_ENVIRONMENTS``): anywhere else a local may hold a request body, a token or a
 secret, which the collector must never get. Where they are carried, each is cut to 80 characters
 before it is masked, so an identifier cut in two may show in part; that stays on a developer's
-machine. The console renderer (``CW_LOG_JSON=false``, for a developer's terminal) formats a
-traceback after the chain, so its traceback is not masked.
+machine. The console renderer (``CW_LOG_JSON=false``, for a developer's terminal, and refused in
+staging and production by ``cw-mvp check-config``) formats a traceback after the chain, so its
+traceback is not masked.
 """
 
 import contextlib

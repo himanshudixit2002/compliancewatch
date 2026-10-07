@@ -250,7 +250,7 @@ and logs `flag_evaluation_failed`.
 renders structlog events and stdlib records (uvicorn, httpx, sqlalchemy) through one processor
 chain as JSON lines with `timestamp`, `level`, `logger`, `event`, `service`, `correlation_id`,
 `tenant_id` and `actor`, plus `trace_id` and `span_id` inside a span (`CW_LOG_JSON=false` prints
-them for a terminal instead).
+them for a terminal instead; `cw-mvp check-config` refuses it in staging and production).
 
 The last processor, `redact_pii`, masks personal identifiers on every line, always, with no
 setting to turn it off: GSTINs, PANs, Aadhaar numbers, phone numbers and email addresses become
