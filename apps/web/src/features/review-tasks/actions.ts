@@ -10,6 +10,7 @@ import type {
 import { rulebookWorkflowAccess, rulebookWrites } from "@/server/api/rulebook-write";
 import { afterMutation } from "@/server/cache";
 import { requireScreenSession } from "@/server/dal";
+import { getOntology } from "@/server/ontology";
 import type { ApiError } from "@/server/result";
 import { can } from "@/shared/config/permissions";
 import { hrefFor, screenById } from "@/shared/config/screens";
@@ -24,7 +25,6 @@ import { formatDateTime } from "@/shared/lib/dates";
 import { isHexUuid } from "@/shared/lib/identifiers";
 import { ruleVersionStatusLabel } from "@/shared/ui/rule-version-status";
 import { candidateStatusLabel } from "./model/candidate";
-import { getOntology } from "@/server/ontology";
 import { valueNowWords, versionValues } from "./model/content";
 import {
   changedMeanwhile,
@@ -51,11 +51,13 @@ import type { WriteResult } from "./ui/form-shared";
  * The review steps: claim a task (from the queue or the workbench), open the seed tasks, draft a
  * version from a candidate, edit a draft, and decide. Each action runs the page's gate again (the
  * proxy is not on an action's path), checks the task id and the form's shape, and checks the role
- * the step needs (approving is a reviewer's or an admin's, D-061), then goes to the rulebook
+ * the step needs (approving is a reviewer's or an admin's, D-061) and, for a decision that moves
+ * the version, web.publish_actions; a draft's relations are checked against the ones the form
+ * offers and an edit against the draft as it is now, both read again. Then it goes to the rulebook
  * through `server/api/rulebook-write.ts`, which checks the role, web.admin_rulebook_writes and the
  * review token and names the session's user as the actor. The rulebook owns the rules; its
  * refusals come back in plain words (model/refusals.ts). A step the rulebook says was taken
- * already (a task claimed by someone else, decided before the decision arrived) is read again and
+ * already (a task claimed by someone else, decided before the step arrived) is read again and
  * said with who holds or decided it. On success the queue, the task and the stats render again.
  */
 const QUEUE = screenById("admin.review");
