@@ -20,7 +20,8 @@ The impact of a change reads the tenant's decisions and the directory in a unit 
 tenant and the run in one of no tenant. A dry run reads the business directory across tenants
 (``PostgresBusinessDirectory``, or the memory store's), the profiles and the rule version through
 the same readers as an evaluation, at most ``CW_APPLICABILITY_DRY_RUN_MAX`` businesses, and writes
-its audit entry through a unit of no tenant.
+its audit entry through a unit of no tenant. The data export reads the tenant's decisions and
+review items in a unit of work of the tenant.
 """
 
 from collections.abc import Callable
@@ -33,6 +34,7 @@ from applicability_engine.api.changes import public_router
 from applicability_engine.api.router import router
 from applicability_engine.application.dry_run import DryRun
 from applicability_engine.application.evaluate import EvaluateRule
+from applicability_engine.application.export import ExportTenantData
 from applicability_engine.application.fanout import (
     CancelFanOut,
     ListFanOuts,
@@ -180,6 +182,7 @@ def wire(
             ontology,
             max_businesses=settings.applicability_dry_run_max,
         ),
+        export_data=ExportTenantData(unit_of_work),
     )
 
 

@@ -155,6 +155,17 @@ class SqlAlchemyDecisionRepository:
             )
         return [_to_decision(row) for row in self._session.scalars(statement).all()]
 
+    def export_decisions(self, *, after: DecisionKey | None, limit: int) -> Sequence[Decision]:
+        statement = (
+            select(DecisionRow).order_by(DecisionRow.decided_at, DecisionRow.id).limit(limit)
+        )
+        if after is not None:
+            statement = statement.where(
+                tuple_(DecisionRow.decided_at, DecisionRow.id)
+                > tuple_(after.decided_at, after.decision_id.value)
+            )
+        return [_to_decision(row) for row in self._session.scalars(statement).all()]
+
 
 class SqlAlchemyDirectoryRepository:
     def __init__(self, session: Session) -> None:

@@ -36,6 +36,12 @@ hold) the way a resolution is: an admin a token names; the anonymous caller only
 mode, and a 401 without a token in ``dual`` mode. ``DryRunAdmin`` guards a dry run the same way:
 it reads every tenant's profiles, so only an admin runs one.
 
+``Exporter`` guards the tenant's data export, which identity assembles on a download: an owner or
+a CA admin of the tenant (a header naming another tenant is a 403), a service with data:export
+(and tenant:act, which naming the tenant needs) naming it in ``x-tenant-id``, or the anonymous
+caller of ``header`` mode naming it; anyone else is a 403, and no tenant at all the service's
+own 401.
+
 ``PUBLIC_ROUTE`` is the ``openapi_extra`` of a route of the public API every member of the tenant
 may call (the impact of a change): the member roles as ``x-roles``.
 """
@@ -51,6 +57,7 @@ from applicability_engine.domain.errors import ApplicabilityTenantRequiredError
 from applicability_engine.wiring import Wiring
 from domain_kernel.access import (
     REGULATORY_ROLES,
+    TENANT_ADMIN_ROLES,
     TENANT_MEMBER_ROLES,
     Principal,
     PrincipalKind,
@@ -82,6 +89,9 @@ member = require_roles(TENANT_MEMBER_ROLES, scopes={Scope.TENANT_ACT})
 """A user with a tenant member role or a service with tenant:act; the anonymous principal of
 ``header`` mode passes."""
 tenant_of_request = tenant_scope(True, ApplicabilityTenantRequiredError)
+exporter = require_roles(TENANT_ADMIN_ROLES, scopes=[Scope.DATA_EXPORT])
+"""An owner or a CA admin, or a service with data:export; the anonymous principal of ``header``
+mode passes."""
 
 
 async def member_tenant(
@@ -89,6 +99,14 @@ async def member_tenant(
     tenant: Annotated[TenantId, Depends(tenant_of_request)],
 ) -> TenantId:
     """The request's tenant, once the caller is known to be one of its members."""
+    return tenant
+
+
+async def export_tenant(
+    principal: Annotated[Principal, Depends(exporter)],
+    tenant: Annotated[TenantId, Depends(tenant_of_request)],
+) -> TenantId:
+    """The tenant whose data is exported, once the caller may export it."""
     return tenant
 
 
@@ -178,6 +196,7 @@ def wiring(request: Request) -> Wiring:
 
 
 Tenant = Annotated[TenantId, Depends(member_tenant)]
+ExportTenant = Annotated[TenantId, Depends(export_tenant)]
 ReviewTenant = Annotated[TenantId, Depends(review_tenant)]
 Resolver = Annotated[Principal, Depends(resolver)]
 FanOutReader = Annotated[Principal, Depends(fan_out_reader)]

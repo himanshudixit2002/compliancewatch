@@ -48,6 +48,12 @@ class DecisionRepository(Protocol):
         then id, both descending), starting after ``after``, at most ``limit``."""
         ...
 
+    def export_decisions(self, *, after: DecisionKey | None, limit: int) -> Sequence[Decision]:
+        """Every decision of the tenant, superseded ones included, oldest first (decided_at,
+        then id), starting after ``after``, at most ``limit``: a page of the tenant's data
+        export."""
+        ...
+
 
 class DirectoryRepository(Protocol):
     """The tenant's entries of the business directory; written once per node."""

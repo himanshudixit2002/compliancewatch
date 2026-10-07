@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from applicability_engine.application.dry_run import DryRun
 from applicability_engine.application.evaluate import EvaluateRule
+from applicability_engine.application.export import ExportTenantData
 from applicability_engine.application.fanout import (
     CancelFanOut,
     ListFanOuts,
@@ -54,3 +55,4 @@ class Wiring:
     release_hold: ReleaseHold
     read_change_impact: ReadChangeImpact
     dry_run: DryRun
+    export_data: ExportTenantData

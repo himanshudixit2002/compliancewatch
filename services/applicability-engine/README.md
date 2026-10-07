@@ -134,6 +134,15 @@ Design reference: Project Foundation guide, sections 7, 8, 11 and 14.
   attribute that decided a result (`domain.evaluation.deciding_attributes`: the predicates that
   made the result, those that ruled it out, made it apply or left it unsure), by result again,
   and keeps up to `sample_size` (0 to 50, 10) decisions, a result at a time.
+- `application/export.py`: `ExportTenantData`, the engine's part of a tenant's data export
+  (`GET /v1/applicability-engine/data-export`, which identity calls on a download with a service
+  token holding data:export and tenant:act; an owner or a CA admin of the tenant may call it too).
+  Section `decisions` holds every decision of the tenant, superseded and reviewers' ones included,
+  with each predicate's outcome; section `review_items` the review queue's items, open and
+  resolved. Both are read in one unit of work of the tenant, 500 rows a page (decided_at or
+  opened_at, then id), oldest first; each is present even when empty. The fan-out runs, the hold
+  and the business directory, which the engine keeps across tenants, are left out, and no audit
+  entry is written (identity writes `data_request.exported`).
 - `infrastructure/`: the HTTP clients (`profile_client.py`, `rulebook_client.py`; a 404 is
   `None`, anything else unexpected is `DependencyUnavailableError`, 503); the rulebook's listings,
   in force on a day (paged by rule key) and superseded since a day (paged by rule key and version,
