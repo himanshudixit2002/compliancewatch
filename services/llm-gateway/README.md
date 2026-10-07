@@ -289,9 +289,13 @@ numbers, ten-digit Indian phone numbers and email addresses, in that order (a GS
 PAN). The count per kind comes back as `pii_masked` and goes onto the trace; the masked text is
 what the cache key, the trace and the provider see. This is pattern matching, not a guarantee:
 callers still keep personal data out of prompts where they can. Phone numbers are masked as ten digits with an optional `+91` or `0` prefix; the split form (`98765 43210`) is masked only behind that prefix, so two adjacent five-digit amounts in regulator text are left alone.
+A `+91` number is masked even when it follows another digit, and masking runs until nothing more
+is found, so a PAN glued to a phone number (`ABCDE1234F09876543210`) comes out as `[PAN][PHONE]`.
 The patterns, their order and the tokens are the kernel's (`domain_kernel.pii.mask_pii`);
 `llm_gateway.domain.scrub` keeps the gateway's names for them (`scrub`, `ScrubResult`,
-`PII_KINDS`). py-common's logging and the audit writer mask with the same patterns.
+`PII_KINDS`). py-common's logging and the audit writer mask the same five kinds in wider shapes
+(`mask_pii_in`: lower case, glued, URL-encoded), which prompts do not use yet: a lower-case PAN
+still reaches the model as written.
 
 ## Residency
 

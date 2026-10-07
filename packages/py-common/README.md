@@ -254,19 +254,46 @@ terminal instead).
 
 The last processor, `redact_pii`, masks personal identifiers on every line, always, with no
 setting to turn it off: GSTINs, PANs, Aadhaar numbers, phone numbers and email addresses become
-`[GSTIN]`, `[PAN]`, `[AADHAAR]`, `[PHONE]` and `[EMAIL]` (`domain_kernel.pii`, the patterns the
-llm-gateway masks prompts with). It masks the event text, every other text value at any depth
-(inside dicts, lists and tuples) and, in JSON output, the exception's message and the locals of
-its frames. What the caller logged is copied, never changed. It leaves alone the fields listed
-above, the value of any key ending in `_id` or `_ids` at any depth, and every UUID in its
-canonical form wherever it stands (a request path, the event text), whose digit runs would
-otherwise read as Aadhaar or phone numbers in about one random UUID in seventy.
+`[GSTIN]`, `[PAN]`, `[AADHAAR]`, `[PHONE]` and `[EMAIL]` (`domain_kernel.pii.mask_pii_in`). It
+masks the event text, every other value at any depth (inside dicts, lists and tuples) and, in
+JSON output, the exception. A value that is not text, a number, a boolean or None (an exception,
+a pydantic model, a dataclass, a set, bytes) is masked as its `repr`, which is what the JSON
+renderer would print. What the caller logged is copied, never changed. It leaves alone, at the
+top of the line only, the fields listed above; the value of any key ending in `_id` or `_ids` at
+any depth; and, wherever they stand (a request path, a workflow id, the event text), every UUID
+in its canonical form and every lower-case hex id of 16 or more with a letter in it (a SHA-256
+digest, a `uuid4().hex`, a span id), with no letter or digit next to it. Their digit runs would
+otherwise read as Aadhaar or phone numbers in about one UUID in 70, one digest in 31, one
+`.hex` in 61 and one span id in 152. Inside the exception nothing is left alone.
+
+The log line takes identifiers in more shapes than a prompt does, since URLs, keys and file names
+carry them. Each shape was checked against the repository's regulatory texts (the recorded
+notifications and listings, the golden sets, the seed calendar's quotes), where it masks nothing
+the prompt patterns leave, and is taken:
+
+- an email address URL-encoded, as in a query string: `owner%40example.com`;
+- an identifier glued to an underscore or to digits: `pan_ABCDE1234F`, `gstin_29ABCDE1234F1Z5`,
+  `ABCDE1234F09876543210`, `owner@example.com_old`;
+- a PAN or GSTIN in lower case (all of it; mixed case is left);
+- `+91 (987) 654 3210` (three, three and four digits behind a prefix) and `00919876543210`.
+
+Masking is idempotent (a second pass changes nothing) and linear in time: 64 KB of `a.a.a.…@` in
+a request path takes about 2 ms to mask, where it took 2.2 s and blocked the event loop.
+
+`redact_pii` never raises into the code that logs. A value it cannot mask (a `repr` that raises,
+say) turns the line into `log_redaction_failed`, with the fields above, the masked event text and
+the error's type; a value inside itself, or nested deeper than 32 levels, is cut there with
+`[CYCLE]` or `[TOO DEEP]`.
+
+In JSON output the exception carries the locals of its frames, each cut to 80 characters before
+it is masked.
 
 By design, any other ten-digit number that starts with 6 to 9, and any twelve-digit number that
 starts with 2 to 9, is masked as a phone or an Aadhaar number, whatever it is: an amount or a
 reference. Log such an id under a key ending in `_id`, and a number as an int, to keep it whole.
-The console renderer formats a traceback itself, after the chain, so a traceback printed with
-`CW_LOG_JSON=false` is not masked.
+Masking is pattern matching, so a name, an address or free text is not masked. The console
+renderer formats a traceback itself, after the chain, so a traceback printed with
+`CW_LOG_JSON=false` is not masked. OpenTelemetry spans are not masked either.
 
 ## Telemetry
 

@@ -1,11 +1,23 @@
+import hashlib
 import io
 import json
 import logging
+import timeit
+from dataclasses import dataclass
 from typing import Any
 
 import structlog
+from hypothesis import given
+from hypothesis import strategies as st
+from pydantic import BaseModel
 
-from py_common.logging import configure_logging, get_logger
+from domain_kernel.pii import CYCLE, MAX_DEPTH, TOO_DEEP
+from py_common.logging import (
+    REDACTION_FAILED,
+    configure_logging,
+    get_logger,
+    redact_pii,
+)
 
 
 def _last_record(buffer: io.StringIO) -> dict[str, object]:
@@ -208,7 +220,8 @@ def test_ten_and_twelve_digit_numbers_outside_id_keys_are_masked_by_design() -> 
 
 def _refuse(contact: str) -> None:
     email = "owner@example.com"
-    raise ValueError(f"refused {contact} ({len(email)})")
+    tenant_id = "9876543210"
+    raise ValueError(f"refused {contact} ({len(email)}, {len(tenant_id)})")
 
 
 def test_an_exceptions_message_and_its_frames_locals_are_masked() -> None:
@@ -223,13 +236,16 @@ def test_an_exceptions_message_and_its_frames_locals_are_masked() -> None:
     except ValueError:
         logging.getLogger("httpx").error("foreign refused", exc_info=True)
     for line, message in zip(
-        _lines(buffer)[-2:], ["refused PAN [PAN] (17)", "refused phone [PHONE] (17)"], strict=True
+        _lines(buffer)[-2:],
+        ["refused PAN [PAN] (17, 10)", "refused phone [PHONE] (17, 10)"],
+        strict=True,
     ):
         [exception] = line["exception"]
         assert exception["exc_value"] == message
         frame = exception["frames"][-1]
         assert frame["name"] == "_refuse"
         assert frame["locals"]["email"] == "'[EMAIL]'"
+        assert frame["locals"]["tenant_id"] == "'[PHONE]'", "nothing in the exception is exempt"
         assert "[" in frame["locals"]["contact"]
     assert "ABCDE1234F" not in buffer.getvalue()
     assert "owner@example.com" not in buffer.getvalue()
@@ -246,3 +262,159 @@ def test_console_output_is_masked_too() -> None:
     assert "from [PAN]" in output
     assert "owner@example.com" not in output
     assert "9876543210" not in output
+
+
+def test_the_fields_every_line_carries_are_left_alone_at_the_top_of_the_line_only() -> None:
+    buffer = io.StringIO()
+    configure_logging(service_name="test-svc", stream=buffer)
+    get_logger("py_common.tests").info(
+        "stored",
+        payload={"service": "9876543210", "actor": "owner@example.com", "level": "234567890123"},
+    )
+    record = _last_record(buffer)
+    assert record["payload"] == {"service": "[PHONE]", "actor": "[EMAIL]", "level": "[AADHAAR]"}
+
+
+@dataclass
+class _Contact:
+    email: str
+
+
+class _Profile(BaseModel):
+    pan: str
+
+
+def test_a_value_that_is_not_text_is_masked_as_its_repr() -> None:
+    buffer = io.StringIO()
+    configure_logging(service_name="test-svc", stream=buffer)
+    get_logger("py_common.tests").info(
+        "values",
+        error=ValueError("no account for owner@example.com"),
+        model=_Profile(pan="ABCDE1234F"),
+        contact=_Contact(email="owner@example.com"),
+        phones={"9876543210"},
+        frozen=frozenset({"234567890123"}),
+        raw=b"PAN ABCDE1234F",
+        nested={"items": [_Contact(email="a@b.co")]},
+        count=7,
+        ratio=0.5,
+        flag=True,
+        nothing=None,
+    )
+    record = _last_record(buffer)
+    assert record["error"] == "ValueError('no account for [EMAIL]')"
+    assert record["model"] == "_Profile(pan='[PAN]')"
+    assert record["contact"] == "_Contact(email='[EMAIL]')"
+    assert record["phones"] == "{'[PHONE]'}"
+    assert record["frozen"] == "frozenset({'[AADHAAR]'})"
+    assert record["raw"] == "b'PAN [PAN]'"
+    assert record["nested"] == {"items": ["_Contact(email='[EMAIL]')"]}
+    assert [record[key] for key in ("count", "ratio", "flag", "nothing")] == [7, 0.5, True, None]
+    for raw in ("owner@example.com", "ABCDE1234F", "9876543210", "234567890123", "a@b.co"):
+        assert raw not in buffer.getvalue()
+
+
+def test_a_value_inside_itself_or_nested_too_deep_is_cut_and_the_line_still_written() -> None:
+    """Before, these raised RecursionError out of the log call."""
+    buffer = io.StringIO()
+    configure_logging(service_name="test-svc", stream=buffer)
+    looped: list[object] = ["9876543210"]
+    looped.append(looped)
+    deep: object = "owner@example.com"
+    for _ in range(2_000):
+        deep = {"inner": deep}
+    tuples: object = "ABCDE1234F"
+    for _ in range(1_000):
+        tuples = (tuples,)
+    get_logger("py_common.tests").info("values", looped=looped, deep=deep, tuples=tuples)
+    record = _last_record(buffer)
+    assert record["looped"] == ["[PHONE]", CYCLE]
+    for key in ("deep", "tuples"):
+        value, depth = record[key], 0
+        while isinstance(value, dict | list):
+            value = value["inner"] if isinstance(value, dict) else value[0]
+            depth += 1
+        assert (value, depth) == (TOO_DEEP, MAX_DEPTH)
+
+
+class _Unprintable:
+    def __repr__(self) -> str:
+        raise RuntimeError("no repr of 9876543210")
+
+
+def test_a_line_it_cannot_mask_is_replaced_and_the_log_call_never_raises() -> None:
+    buffer = io.StringIO()
+    configure_logging(service_name="test-svc", stream=buffer)
+    with structlog.contextvars.bound_contextvars(correlation_id="c-1", actor="anonymous"):
+        get_logger("py_common.tests").warning(
+            "profile of owner@example.com", value=_Unprintable(), phone="9876543210"
+        )
+    record = _last_record(buffer)
+    assert record["event"] == REDACTION_FAILED
+    assert record["error_type"] == "RuntimeError"
+    assert record["logged_event"] == "profile of [EMAIL]"
+    assert (record["correlation_id"], record["actor"]) == ("c-1", "anonymous")
+    assert (record["level"], record["service"]) == ("warning", "test-svc")
+    assert "value" not in record
+    assert "phone" not in record
+    assert "9876543210" not in buffer.getvalue()
+
+
+def test_a_stdlib_records_own_keys_survive_a_line_it_cannot_mask() -> None:
+    """ProcessorFormatter adds _record and _from_structlog to a stdlib record's line and removes
+    them after the chain, so the line that stands in keeps them."""
+    record = logging.LogRecord("httpx", logging.INFO, __file__, 1, "msg", (), None)
+    line = redact_pii(
+        None,
+        "info",
+        {"event": "msg", "_record": record, "_from_structlog": False, "value": _Unprintable()},
+    )
+    assert line["_record"] is record
+    assert line["_from_structlog"] is False
+    assert line["event"] == REDACTION_FAILED
+
+
+def test_a_64_kb_request_path_is_logged_in_well_under_50_ms() -> None:
+    """The email pattern before the fix took 2.2 s on this line, blocking the event loop."""
+    buffer = io.StringIO()
+    configure_logging(service_name="test-svc", stream=buffer)
+    access = logging.getLogger("uvicorn.access")
+    path = "/v1/" + "a." * 32_768 + "@"
+    best = min(
+        timeit.repeat(lambda: access.info('"GET %s HTTP/1.1" 404', path), number=1, repeat=3)
+    )
+    assert best < 0.05, f"{best * 1000:.1f} ms"
+    assert _last_record(buffer)["event"] == f'"GET {path} HTTP/1.1" 404'
+
+
+_HEX = "0123456789abcdef"
+_IDS = st.one_of(
+    st.binary(max_size=64).map(lambda data: hashlib.sha256(data).hexdigest()),
+    st.uuids().map(lambda value: value.hex),
+    st.integers(min_value=1, max_value=2**64 - 1).map(lambda span: f"{span:016x}"),
+    st.builds(
+        lambda head, letter, tail: head + letter + tail,
+        st.text(alphabet=_HEX, min_size=15, max_size=40),
+        st.sampled_from("abcdef"),
+        st.text(alphabet=_HEX, max_size=40),
+    ),
+    st.uuids().map(str),
+)
+"""SHA-256 digests, ``.hex`` ids, 16-hex span ids, other lower-case hex ids and UUIDs."""
+
+
+@given(_IDS)
+def test_hex_ids_and_uuids_are_never_altered_on_a_line(value: str) -> None:
+    buffer = io.StringIO()
+    configure_logging(service_name="test-svc", stream=buffer)
+    get_logger("py_common.tests").info(
+        f"workflow pipeline-triage-{value} ended",
+        key=f"ab/{value}",
+        workflows=[f"extract-knowledge-{value}", f"{value}-v2", f"tenant-{value}"],
+    )
+    logging.getLogger("uvicorn.access").info('"GET /v1/documents/%s HTTP/1.1" 200', value)
+    first, second = _lines(buffer)[-2:]
+    assert first["event"] == f"workflow pipeline-triage-{value} ended"
+    assert first["key"] == f"ab/{value}"
+    assert first["workflows"] == [f"extract-knowledge-{value}", f"{value}-v2", f"tenant-{value}"]
+    assert second["event"] == f'"GET /v1/documents/{value} HTTP/1.1" 200'
