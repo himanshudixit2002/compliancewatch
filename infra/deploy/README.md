@@ -50,20 +50,25 @@ service as its own `cw_<schema>` role instead needs a database URL per service i
    (`infra/dev/postgres/roles.sql`, plain SQL, safe to repeat):
    - Run the file as the role that owns the service schemas and runs the migrations, after the
      first release has created the schemas:
-     `psql "<owner URL>" -v ON_ERROR_STOP=1 -1 -f infra/dev/postgres/roles.sql`. It makes one
-     login role per schema, `cw_<schema>`, that is neither a superuser nor BYPASSRLS, with its
-     own schema, public and INSERT on the audit log (`cw_identity` also reads it), and default
-     privileges for the tables later migrations by that owner create. A schema the release has
-     not made yet is skipped with a notice, so run it again after a release that adds one.
+     `psql "<owner URL>" -v ON_ERROR_STOP=1 -1 -f infra/dev/postgres/roles.sql`, with the URL in
+     libpq's form (`postgresql://...`, not the `postgresql+psycopg://...` of the services'
+     settings). It makes one login role per schema, `cw_<schema>`, that is neither a superuser
+     nor BYPASSRLS, with its own schema, public and INSERT on the audit log (`cw_identity` also
+     reads it), and default privileges for the tables later migrations by that owner create. A
+     schema the release has not made yet is skipped with a notice, so run it again after a
+     release that adds one.
    - The owner needs CREATEROLE to create the roles; otherwise an administrator creates the ten
      roles (LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT) and the file then
      only grants. It sets no password and refuses to leave a role with SUPERUSER or BYPASSRLS.
    - Set each role's password from the secret store; never run `dev-passwords.sql`, which holds
      the dev stack's placeholders.
-   - Point each service's `CW_DATABASE_URL` at its own role. The migrations run as the owner:
-     `cw-mvp release` reads the owner's URL from `CW_MIGRATION_DATABASE_URL`, and a service's
-     `alembic upgrade head` release command needs `CW_DATABASE_URL` overridden with the owner's
-     URL (its `CW_DB_SCHEMA` stays), since the service's role cannot change its schema.
+   - Point each service's `CW_DATABASE_URL` at its own role wherever the migrations run with
+     another URL. The combined image does: `cw-mvp release` reads the owner's URL from
+     `CW_MIGRATION_DATABASE_URL`. The per-service Fly apps do not yet: their release command,
+     `alembic -c alembic.ini upgrade head`, runs with the app's own secrets, and each service's
+     `migrations/env.py` reads only `CW_DATABASE_URL`. A role's URL there fails the release (the
+     role may not create tables or write `alembic_version`), so on that path `CW_DATABASE_URL`
+     stays the owner's URL until package M5-2 moves the migrations out of the release command.
 4. Vercel: import the repository, set the project root to `apps/web`, add the public API base URL
    as `NEXT_PUBLIC_API_URL` when the web app starts calling services.
 5. DNS: `app.<domain>` to Vercel, `api.<domain>` to the gateway app (the identity service fronts the
@@ -155,11 +160,11 @@ nor the machine is needed while `CW_RULEBOOK_PUBLISH_ENABLED` is off.
 
 The rulebook's search index needs pgvector: its migration 0006, run by the release command,
 creates the extension with `CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public`. Check that
-the Postgres provider offers pgvector, and either let the rulebook's database role create
-extensions or have an administrator run that statement once before the first deploy. `public`
-must stay on the search path, as the `CW_DATABASE_URL` options above keep it. Clauses registered
-before the pipeline embedded them are caught up by running `pipeline-embed` once from the
-pipeline image, with the pipeline's secrets.
+the Postgres provider offers pgvector, and either let the schemas' owner, which runs the
+migrations, create extensions or have an administrator run that statement once before the first
+deploy. `public` must stay on the search path, as the `CW_DATABASE_URL` options above keep it.
+Clauses registered before the pipeline embedded them are caught up by running `pipeline-embed`
+once from the pipeline image, with the pipeline's secrets.
 
 The WhatsApp bot records keyword opt-ins and opt-outs in identity: give identity
 `CW_IDENTITY_CHANNEL_TOKEN` and the bot the same value as `IDENTITY_SERVICE_TOKEN`, with

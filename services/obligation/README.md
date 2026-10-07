@@ -262,9 +262,9 @@ the table says. `make run`, `make worker` and `make web-stack STORE=postgres` co
 `cw_obligation` (`infra/dev/postgres/roles.sql`), which is neither, so locally the policy holds
 as in a deployment; `DB_ROLE=owner` connects as `cw`, the container's superuser, which bypasses
 it. The integration tests prove the isolation through `cw_obligation`, and every deployment must
-give the service a role that is neither a superuser nor the table owner. The policy reads `app.tenant_id` through `NULLIF(current_setting(...), '')`
-because Postgres reports a custom setting as an empty string between transactions once it has
-been used in a session.
+give the service a role that is neither a superuser nor the table owner. The policy reads
+`app.tenant_id` through `NULLIF(current_setting(...), '')` because Postgres reports a custom
+setting as an empty string between transactions once it has been used in a session.
 
 ## Layout
 

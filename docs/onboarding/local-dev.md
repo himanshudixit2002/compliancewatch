@@ -231,34 +231,56 @@ owner, and so do the operators' tools that read a schema directly (`make crawl-r
 the same roles: `py_common.db_roles.apply_roles` gives a test container the same two files, and
 `composition/mvp/tests/integration/test_database_roles.py` checks the file on every schema.
 
-`make db-roles` creates the roles, or brings them back to what the file says, on the running
-Postgres; it is safe to repeat. `make dev` runs it once the stack is up and `make migrate` after
-the migrations: a schema's first migration makes its `alembic_version`, which the roles' default
-privileges reach until the file runs again. A fresh volume also gets the roles from the compose
-mounts, after `init.sql`.
+`make db-roles` creates the roles, or brings their attributes and grants back to what the file
+says, on the running Postgres, in one transaction; it is safe to repeat. It does not undo what
+was granted by hand: a membership in another role, or a grant on another schema, stays until it
+is revoked (CI checks that no `cw_` role is a member of another role). `make dev` runs it once
+the stack is up, `make migrate` after the migrations (a schema's first migration makes its
+`alembic_version`, which the roles' default privileges reach until the file runs again),
+`make dev-restore` after a restore (a dump taken before the roles restores without their
+grants) and `make product-image` after the image's release. A fresh volume also gets the roles
+from the compose mounts, after `init.sql`.
 
 `DB_ROLE=owner` connects those five targets as `cw` instead, which bypasses every policy, as they
 did before the roles: `make run SERVICE=profile DB_ROLE=owner`. It is for looking at every
-tenant's rows while debugging, never for testing what a tenant sees.
+tenant's rows while debugging, never for testing what a tenant sees, and never for seeding or
+clicking through flows: as the owner, the repositories that rely on row-level security alone also
+write across tenants (a registration attaches to another tenant's business with the same GSTIN,
+and a review item is resolved by its id whatever tenant it belongs to).
 
 `make product` keeps one role, `cw_app` (`make product-role`, `infra/dev/postgres/50-app-role.sql`):
 one process hosts every service there, so its role has every service schema. It is not a
 superuser either.
 
-What changes for a stack that is already running: nothing until it restarts, since a process
-keeps the connections it opened. The next `make dev` recreates the Postgres container once (its
-compose definition gained the two files; the data stays in the volume) and creates the roles, and
-the next `make web-stack STORE=postgres` starts every service as its role. From then on a service
-reads only the tenant a request names, as the API allows and as the product already does:
+What changes for a stack that is already running: nothing until each service restarts, since a
+process keeps the login it started with. The next `make dev` recreates the Postgres container
+once (its compose definition gained the two files; the data stays in the volume), which drops
+every open connection: running services, Temporal and the product reconnect, still as the login
+they started with, and a `make dev` that times out while Temporal reconnects can simply be run
+again. `make web-stack STORE=postgres` leaves a service that is still running alone, and says
+so; stop the stack first, `make web-stack-down`, and the next `make web-stack STORE=postgres`
+starts every service as its role. From then on a service reads only the tenant a request names,
+as the API allows and as the product already does:
 
 - an admin page that read across tenants only because the superuser bypassed row-level security
   now shows what the API allows: the decision review queue lists only the tenant the page names
   (the superuser listed every tenant's items whatever tenant was named), a business's
   notifications or a profile looked up under a tenant that is not theirs come back empty or not
   found, and a CA firm's change impact lists only its own clients;
+- the business list shows only the signed-in tenant's businesses, and an obligation or a
+  decision read by its id under another tenant comes back not found;
+- registering a PAN or GSTIN that another tenant registered makes this tenant's own business
+  instead of attaching to theirs;
 - a read of a tenant table that names no tenant answers an empty list;
 - the platform data (the rulebook, the pipeline, the eval runs, the LLM spend ledger) and the
   routing directories read as before.
+
+Demo data that `make web-seed` wrote as the superuser may not survive the switch. The seed
+registers the same GSTIN for a new tenant on every run, and as the superuser every run after the
+first attached its answers, decisions and obligations to the first run's business. Under the
+roles those later tenants read their business as not found, and the development sign-in uses
+the latest of them (`var/seed/last.json`). Run `make web-seed` once more after the switch: the
+new tenant's rows are all its own.
 
 ## Traces and metrics
 
@@ -289,7 +311,7 @@ Settings, routes, budgets and errors: [services/llm-gateway/README.md](../../ser
 
 ## Migrations
 
-`make migrate` (all services) or `make migrate SERVICE=<dir>`, as `cw`, the schemas' owner, then `make db-roles`. Each service owns one schema and its own `alembic_version` table inside it (`version_table_schema`), so services never see each other's tables. Each service's `migrations/env.py` refuses to run without `CW_DB_SCHEMA` and puts that schema first on the URL's search path, so a migration never lands its tables in `public`. `pgvector` lives in `public`, which stays on every search path. Schemas are created once per volume by `infra/dev/postgres/init.sql`; clusters create them through migrations and Helm jobs instead.
+`make migrate` (all services) or `make migrate SERVICE=<dir>`, as `cw`, the schemas' owner, then `make db-roles`. Each service owns one schema and its own `alembic_version` table inside it (`version_table_schema`), so services never see each other's tables. Each service's `migrations/env.py` refuses to run without `CW_DB_SCHEMA` and puts that schema first on the URL's search path, so a migration never lands its tables in `public`. `pgvector` lives in `public`, which stays on every search path. Schemas are created once per volume by `infra/dev/postgres/init.sql`; clusters create them through migrations and Helm jobs instead. The last step, `make db-roles`, runs through the compose Postgres container; against a Postgres outside compose it fails after the migrations succeed, so run `infra/dev/postgres/roles.sql` there yourself, as the owner.
 
 ## Reset
 
