@@ -252,6 +252,7 @@ Tenant data is never cached; a handful of records every tenant sees the same way
 | a rulebook clause                                             | `cachedRead([tags.rulebook.clause(id)])`            | `rulebook:clause:<id>`                                                                |
 | rule versions, citations, relations, entities                 | `uncachedRead()`                                    | none: versions move through review outside this server, and an action renders the page again |
 | the entity and relation review queues                         | `uncachedRead()`                                    | none: the pipeline fills them and decisions empty them outside this server (D-036, D-055) |
+| the review tasks, a task, the review stats                    | `uncachedRead()`                                    | none: the intake opens tasks and analysts claim and decide them outside this server |
 | the pipeline's sources, runs, documents, tasks and dead outbox | `uncachedRead()`                                   | none: crawls, ingests, the relay and people's writes move them outside this server   |
 | notification templates                                        | `cachedRead([tags.notification.templates()])`       | `notification:templates`                                                              |
 | the ontology (`server/ontology.ts`)                           | `cachedRead([tags.profile.ontology()], 3600)`       | `profile:ontology`                                                                    |
@@ -564,6 +565,37 @@ facts (a token only as set or not). `server/telemetry.ts` decides at startup whe
 registers and exports, and `server/telemetry-redaction.ts` takes every query and personal value
 out of a span's URLs before export (D-057).
 
+## Review tasks
+
+`features/review-tasks/gateway.ts` reads the review queue (`GET /v1/rulebook/review/tasks` with
+`status`, `regulator`, `kind`, `limit` and the rulebook's opaque `cursor`), one task with its
+version, citations, documents, audit, tasks and candidate (`GET .../review/tasks/{task_id}`), the
+stats (`GET .../review/stats`), each document a task rests on (`GET /v1/rulebook/documents/{id}`,
+cached under its tag) with the pipeline's record of its stored file (`GET
+/v1/pipeline/documents/{document_id}`, a 404 meaning none is stored), and for a candidate's draft
+form the document's open relation candidates (`GET .../review/relations?document_id=`), the rules
+(cached under `rulebook:rules`) and each rule's versions; the rule's versions also give the previous
+version the diff compares with (D-066). Everything but the documents and the rules is read fresh,
+over `rulebookClient` and `pipelineClient` with no tenant header and no token. The DTOs map through
+`entities/rule-version/mappers.ts`, which holds the review task shapes beside the versions they
+review.
+
+The steps (claim, open the seed tasks, draft from a candidate, edit the draft, decide) are server
+actions that run the page's gate again, check the task id and the form's shape (`model/forms.ts`:
+only the content fields that changed from the values the form was rendered with are sent, D-064)
+and, for an approval, the role (`admin.review.approve`, D-061), then go through `rulebookWrites(ctx)`
+in `server/api/rulebook-write.ts` like the entity and relation decisions: the role,
+`web.admin_rulebook_writes` and the review token, with the session's user as `actor_id`. The routes
+take no Idempotency-Key and each is safe to send again: claiming one's own task changes nothing, a
+second draft is refused as drafted already, an edit with the same values records nothing, and a
+second decision is refused as decided. On a refusal that a task moved (decided, or claimed by
+someone else), the action reads the task again and says who decided it (as information) or who holds
+it, and renders the pages again; the other refusals are said plainly (`model/refusals.ts`, an
+incomplete draft with every problem the rulebook listed). On success the queue, the task and the
+stats render again (`afterMutation({ paths })`). The client panels use `useWriteAction` and
+`WriteOutcome` from `shared/ui/write-outcome.tsx`, so a request whose answer never came is kept
+whole for "Try again".
+
 ## Sources and the pipeline
 
 `features/admin-sources/gateway.ts` reads the sources (`GET /v1/pipeline/sources`), a source's
@@ -715,12 +747,14 @@ component handles one.
   it, never its value.
 - **Rulebook review token** (`CW_WEB_RULEBOOK_REVIEW_TOKEN`, the rulebook's
   `CW_RULEBOOK_REVIEW_TOKEN`): the rulebook's analyst routes (entity decisions, relation
-  approvals and rejections, a rule version's citations and the steps of its publish workflow)
+  approvals and rejections, a review task's claim, draft, edit and decision and the seed tasks, a
+  rule version's citations and the steps of its publish workflow)
   need `x-cw-review-token` (ADR-018), and the write token does not open them.
   `server/api/rulebook-write.ts` is the only module that sends it. `rulebookReviewClient(ctx)`
   (and `rulebookWriteClient(ctx)`, the same over the write token) refuses a session without a
   regulatory role and an unset token as `rulebookAdmin` does. `rulebookWrites(ctx)` gives an
-  admin action the decisions port only for a regulatory role, with `web.admin_rulebook_writes`
+  admin action the decisions port (the entity and relation decisions and a review task's steps)
+  only for a regulatory role, with `web.admin_rulebook_writes`
   on for the session's tenant and the review token set, checked in that order; otherwise every
   method of the port answers that refusal without a request, and `rulebookWriteAccess(ctx)` tells
   a form which one applies. `rulebookWorkflow(ctx)` and `rulebookWorkflowAccess(ctx)` do the same

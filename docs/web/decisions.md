@@ -1097,3 +1097,103 @@ depends on no guard, and the CI web-e2e job's memory stack passes it. Consequenc
 task end to end needs a staging route in the pipeline for local and test, or a spec on the product
 stack, which runs the worker; a stack started some other way than `make web-stack` has no record,
 so the suite refuses it until it is restarted that way or allowed.
+
+## D-061: Every regulatory role works a review task; approving is a reviewer's or an admin's
+
+2026-10-07. The rulebook's review task routes take an analyst a token names for the claim and the
+draft's edits (`AnalystWork`) and any regulatory role for the decision and the seed tasks
+(`AnalystWrite`); without a token, in `header` and `dual` mode, the shared review token opens
+every one of them and the body names the actor, so the rulebook cannot tell an analyst's approval
+from a reviewer's. The role table says "reviewer: approves and publishes". Settled: analysts,
+reviewers and admins read the queue, a task and the stats, claim a task, draft a version from a
+candidate, edit the draft, return and reject it, and open the seed tasks (capability
+`admin.review`); approving is the reviewer's or the admin's (`admin.review.approve`), offered only
+to them on the page and checked again in the action before any request. Every step goes through
+`rulebookWrites` in `server/api/rulebook-write.ts`, behind `web.admin_rulebook_writes` and the
+review token like the entity and relation decisions, with the session's user as `actor_id`.
+Drafting and editing are the claimant's alone (the rulebook's rule); deciding needs no claim, so a
+second reviewer approves a task the first approval left open again. Consequences, for the M3
+security review: through the shared token the rulebook would still take an analyst's approval,
+and a drafter may approve their own draft when it is not high impact (one approver suffices); in
+token mode the rulebook takes a claim and an edit from an analyst alone, so a reviewer or an admin
+claiming would then get the rulebook's 403, shown as it comes.
+
+## D-062: The workbench never frames the stored file
+
+2026-10-07. The source pane shows each document the draft rests on as the rulebook stores it, every
+clause with its anchor and each cited quote marked where its clause holds it word for word (the
+whole clause marked, saying the span did not match, when it does not: the rulebook verifies a quote
+by a match score). The original file is a link to the stored-file handler
+(`/api-bff/pipeline/documents/[documentId]/raw`, D-059) in a new tab (`rel="noopener"`), offered once
+the pipeline's record of the document is read (`GET /v1/pipeline/documents/{document_id}`; a
+document the rulebook received another way, as the web seed registers the recorded notification,
+says the pipeline stores no file for it). Nothing is embedded: the app answers every response with
+`X-Frame-Options: DENY`, and a PDF in a frame would need `frame-ancestors 'self'` on the raw route
+alone plus a sandboxed `iframe`, a framing decision left for when someone asks for it.
+Consequences: the analyst compares the clause text with the file in two tabs; the page makes one
+pipeline read per document it shows.
+
+## D-063: The UI-only stack cannot stage a review task of a spec's own
+
+2026-10-07. The brief staged a synthetic draft per run through the rulebook's write API. No route
+creates a rule version: the versions on `make web-stack` are the seed calendar's drafts the
+rulebook loads at start (D-042), and a candidate's draft (`POST .../draft`) needs a rule candidate,
+which arrives only through the worker's intake of `rule.candidate.created` (Kafka, on Postgres,
+behind `rulebook.candidate_intake`), none of which the stack runs; no route was added for tests.
+Every task on the stack therefore reviews one of the seed calendar's own drafts, which no spec
+claims, edits or decides. The e2e suite opens the seed tasks (idempotent) and reads: the queue in
+the rulebook's order through every filter, the strip against the stats, the keyboard, the stats
+page, a seed task's workbench read-only with what each role is offered (without taking it), the
+original file's link when a draft cites a document, and the not-found page. Claiming, drafting
+from a candidate with the candidate pane, editing with the predicate editor, the two approvals and
+"a different reviewer must approve", the return, the rejection and the proposal's diff are covered
+by unit and component tests over the rulebook's recorded shapes (`src/test/review-task-fixture.ts`).
+Consequences: closing the gap needs a staging route in the rulebook for local and test (a draft of
+a spec's own, or a candidate taken in without Kafka), or a spec on the product stack, which runs
+the worker, on a database of its own.
+
+## D-064: The condition in words is shared, and the predicate editor posts the kernel's mapping
+
+2026-10-07. The rule version page and the workbench say a condition the same way, and the editor's
+live preview runs in the browser; a feature may not import another and a client component imports
+only `shared`, `entities` and its own directory, so `describeSpecification` and
+`SpecificationView` moved from `features/rule-versions` to `shared/ui/specification.tsx`, over
+structural types (shared code reads no entity). The editor builds the kernel's grammar (all of, at
+least one of, not, a predicate's attribute with an operator and a value or free text, or both):
+attributes suggested from `GET /v1/ontology` in an ARIA combobox, the operators the ontology allows
+on the attribute's type, its option labels for the values; a part of a shape it cannot read is kept
+as stored. The JSON view round-trips and is checked for shape only; the rulebook checks the
+condition against the ontology when the draft is saved. The form posts the mapping in a hidden
+field beside the mapping it was rendered with, and the action sends a content field only when it
+changed from that base (as the source settings form does, D-058), so an edit names what it
+changes and the audit says so. Consequences: the shape rules live twice (the editor's and the
+kernel's), the kernel's winning; a field nobody touched is never overwritten.
+
+## D-065: The queue pages by the rulebook's cursor, marks "mine", and has keys that keep out of the way
+
+2026-10-07. `GET /v1/rulebook/review/tasks` filters by status, regulator and kind, pages with an
+opaque `cursor` bound to the filter, and has no assignee filter. The queue keeps the three filters
+as rows of chips in the address (open by default, since claimed and decided tasks are someone's
+work or done; the regulators are the ones the stats count), carries the cursor in the address for
+the next page and offers the first page from a later one, and marks the tasks the signed-in
+analyst claimed rather than offering a filter the route lacks. The keyboard is optional and stays
+out of the way: the rows' title links are one tab stop (a roving tabindex), j and k move between
+them, Enter opens one (the link's own key), c claims the current row when it is open, ? lists the
+keys in a dialog; a key typed into a form control or a dialog is the control's, a key with a
+modifier is the browser's, and Tab leaves the list as usual. The strip above the queue is the stats
+page's model in five figures. Consequences: a cursor from another filter is the rulebook's refusal,
+shown with the way to the first page; a claim's answer takes the focus, and k or j brings it back
+to the row.
+
+## D-066: The diff is a line diff of words, and the previous version comes from the rule's versions
+
+2026-10-07. The workbench compares the candidate's proposal with the draft made of it and the
+rule's previous version with the draft, field by field (title, summary, period, recurrence, the
+obligation, the open questions, the condition), each field as the lines it reads in (the condition
+as the lines `specificationText` gives the words), with `shared/lib/diff.ts`, a longest common
+subsequence over lines and no library. The previous version is the latest earlier one of the rule
+that is not a closed draft, read from `GET /v1/rulebook/rules/{rule_key}/versions`: the as-of
+list (`GET /v1/rulebook/rule-versions`) holds only published and superseded versions on a date.
+A removed line is marked "-" and an added one "+", with the change said in words for a screen
+reader. Consequences: one rulebook read per drafted task; a long field diffs coarsely past the
+diff's table limit rather than slowly.

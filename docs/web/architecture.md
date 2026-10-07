@@ -88,7 +88,8 @@ apps/web/
                                boundaries, rulebook/documents (open by id) and its [documentId] viewer,
                                rulebook/versions ((list) and [ruleVersionId]), rulebook/entities ((queue),
                                group, canonical ((resolve) and [entityId])), rulebook/relations ((queue),
-                               [candidateId], graph), rulebook/rules, rulebook/search, decisions, fan-outs
+                               [candidateId], graph), rulebook/rules, rulebook/search, review ((queue),
+                               [taskId], stats), decisions, fan-outs
                                ((list) and [ruleVersionId]), impact, llm/prompts, llm/models, llm/usage,
                                profiles/review-tasks, system, sources ((list) and [key]), pipeline
                                ((operations), documents/[documentId], tasks), the catch-all [...slug]
@@ -113,7 +114,9 @@ apps/web/
                                (the dry run), change-impact (a CA firm's affected clients and the bulk
                                change card), entity-review (the queue and a group's decision),
                                relation-review (the queue, a candidate read through the list's keyset,
-                               approve and reject), rulebook-rules (the rule list), llm-registry (the
+                               approve and reject), review-tasks (the review queue and its keys, a task's
+                               workbench with its three panes, the predicate editor, the diff, the history and
+                               the review steps, the stats), rulebook-rules (the rule list), llm-registry (the
                                gateway's prompts, model routes and usage), profile-review-tasks (a tenant's
                                node, its review tasks and snapshot), system (the probes, the registry's
                                view, the web server's facts), admin-sources (the sources with the crawl

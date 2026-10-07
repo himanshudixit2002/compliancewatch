@@ -7,10 +7,11 @@ format, the check and the two SDKs. `apps/web/src/shared/config/flags.ts` keeps 
 list of the web flag names, and `apps/web/src/server/flags.ts` is the reader. Five flags are
 read: `web.analytics_enabled`, by the product events (`server/analytics.ts`);
 `web.admin_rulebook_writes` and `web.publish_actions`, by `server/api/rulebook-write.ts` before it
-sends an analyst's decision (an entity group, a relation candidate), or a rule version's citations
-or workflow step, to the rulebook; `web.qa_enabled`, by the ask screen; and `web.otel_enabled`, by
-`server/telemetry.ts` when a server starts. The navigation still hides every flagged registry
-entry, since no shell passes it the reader (the ask screen is reached from a business's tabs).
+sends an analyst's decision (an entity group, a relation candidate, a review task's claim, draft,
+edit or decision, the seed tasks), or a rule version's citations or workflow step, to the
+rulebook; `web.qa_enabled`, by the ask screen; and `web.otel_enabled`, by `server/telemetry.ts`
+when a server starts. The navigation still hides every flagged registry entry, since no shell
+passes it the reader (the ask screen is reached from a business's tabs).
 
 ## An entry
 
@@ -54,22 +55,22 @@ files together.
 
 ## Declared today
 
-| Name                        | Owner                   | What it will gate                                                             |
-| --------------------------- | ----------------------- | ----------------------------------------------------------------------------- |
-| `web.admin_rulebook_writes` | regulatory-intelligence | Entity and relation decisions from `/admin`, sent with the review token       |
-| `web.analytics_enabled`     | core-product            | Product events for sessions that granted the analytics consent                |
-| `web.otel_enabled`          | platform                | OpenTelemetry registration in `instrumentation.ts`                            |
-| `web.publish_actions`       | regulatory-intelligence | Citations and the publish workflow on a rule version's page                   |
-| `web.qa_enabled`            | ai-platform             | The ask screen                                                                |
-| `web.tenant_header_off`     | identity-partner        | Stops sending `x-tenant-id` once services take the tenant from a token        |
+| Name                        | Owner                   | What it will gate                                                                    |
+| --------------------------- | ----------------------- | ------------------------------------------------------------------------------------ |
+| `web.admin_rulebook_writes` | regulatory-intelligence | Entity, relation and review task decisions from `/admin`, sent with the review token |
+| `web.analytics_enabled`     | core-product            | Product events for sessions that granted the analytics consent                       |
+| `web.otel_enabled`          | platform                | OpenTelemetry registration in `instrumentation.ts`                                   |
+| `web.publish_actions`       | regulatory-intelligence | Citations and the publish workflow on a rule version's page                          |
+| `web.qa_enabled`            | ai-platform             | The ask screen                                                                       |
+| `web.tenant_header_off`     | identity-partner        | Stops sending `x-tenant-id` once services take the tenant from a token               |
 
 `web.analytics_enabled` is read by `server/analytics.ts`, `web.admin_rulebook_writes` and
 `web.publish_actions` by `server/api/rulebook-write.ts`, `web.qa_enabled` by the ask screen and
 `web.otel_enabled` by `server/telemetry.ts`; `web.tenant_header_off` is not read yet. The e2e run
 turns `web.publish_actions`, `web.admin_rulebook_writes` and `web.qa_enabled` on through their
 overrides (the Playwright config), so the rule version specs can cite, submit, approve and return
-drafts, the review specs can decide entity groups and relation candidates, and the ask specs can
-ask.
+drafts, the review specs can decide entity groups and relation candidates and open the review
+queue's seed tasks, and the ask specs can ask.
 
 `web.otel_enabled` is read once, when a Node.js server starts (`instrumentation.ts` calls
 `registerTelemetry()`), without a tenant. Off, nothing is loaded. On, `@vercel/otel` registers a

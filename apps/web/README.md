@@ -34,9 +34,11 @@ src/app/            route files only: page.tsx is gate, query, render; layouts, 
                     and a version's run with the hold, the controls and the rollback), impact (the dry
                     run), rulebook/entities and its group page (the entity review and its decisions),
                     rulebook/relations and [candidateId] (the relation candidates, approve and reject),
-                    rulebook/rules, llm/prompts, llm/models and llm/usage (the gateway's registries and
-                    spend), profiles/review-tasks (the lookup), system (the services' health and
-                    readiness); [...slug] serves unbuilt tools
+                    review ((queue), [taskId] and stats: the review queue, the workbench with its
+                    source, candidate and rule panes, and the stats), rulebook/rules, llm/prompts,
+                    llm/models and llm/usage (the gateway's registries and spend), profiles/review-tasks
+                    (the lookup), system (the services' health and readiness); [...slug] serves
+                    unbuilt tools
   sign-out/         POST handler: clears the session cookie and returns to /sign-in (GET is a 405)
   api/health/       liveness handler {status, version, commit}
 src/features/       one directory per screen family: model/, ui/, index.ts (ports, gateway, queries and
@@ -69,7 +71,10 @@ src/features/       one directory per screen family: model/, ui/, index.ts (port
                     settling one), impact-explorer (the admin's dry run), change-impact (a CA firm's
                     affected clients and the bulk change card with its key), entity-review and
                     relation-review (the review queues and their decisions through
-                    server/api/rulebook-write.ts), rulebook-rules, llm-registry, profile-review-tasks
+                    server/api/rulebook-write.ts), review-tasks (the review queue with its keys, a
+                    task's workbench with the predicate editor, the diff and the history, the claim,
+                    draft, edit and decision through server/api/rulebook-write.ts, and the stats),
+                    rulebook-rules, llm-registry, profile-review-tasks
                     and system (the probes, the registry's view, the web server's facts); and the parked
                     folders of screens not built yet, which no page imports (docs/web/architecture.md,
                     "Parked feature folders")
@@ -102,9 +107,9 @@ src/server/         server-only modules; every file starts with `import "server-
                     api/services.ts: the client factories (tenant header from the session; rulebookAdmin() adds
                     the write token after a regulatory-role check)
                     api/rulebook-write.ts: the rulebook's write and review tokens, the analyst decisions
-                    (entity groups, relation candidates) behind the role, web.admin_rulebook_writes and the
-                    review token, and a rule version's citations and workflow steps behind
-                    web.publish_actions
+                    (entity groups, relation candidates, a review task's claim, draft, edit and decision,
+                    the seed tasks) behind the role, web.admin_rulebook_writes and the review token, and a
+                    rule version's citations and workflow steps behind web.publish_actions
                     api/idempotency.ts: the per-render Idempotency-Key input and header (sent only for the routes
                     that require it, the business API's two creating POSTs; the natural keys are listed in the module)
                     cache.ts: the cache tags, cachedRead() for global reads (five minutes under tags), uncachedRead()
