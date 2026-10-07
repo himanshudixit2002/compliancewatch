@@ -160,7 +160,7 @@ describe("SubscribeForm", () => {
       { status: "error", problem: { type: "urn:example", title: "Example outage" } },
       { status: "error", problem: { type: "urn:example", title: "Example outage" } },
     ];
-    render(
+    const { container } = render(
       <SubscribeForm
         action={async (_state, formData) => {
           keys.push(String(formData.get("idempotency_key")));
@@ -173,17 +173,26 @@ describe("SubscribeForm", () => {
     );
     const user = userEvent.setup();
     const submit = () => user.click(screen.getByRole("button", { name: "Start the subscription" }));
+    // The fields remount once the answer renders, with the values that were sent; typing before
+    // that lands in the fields the answer replaces, so each step waits for the answer's attempt.
+    const answered = (count: number) =>
+      waitFor(() => {
+        expect(keys).toHaveLength(count);
+        expect(container.querySelector("[data-attempt]")?.getAttribute("data-attempt")).toBe(
+          String(count),
+        );
+      });
     await fillAndSubmit(); // a failure
-    await waitFor(() => expect(keys).toHaveLength(1));
+    await answered(1);
     await submit(); // the same values again: a retry
-    await waitFor(() => expect(keys).toHaveLength(2));
+    await answered(2);
     await submit(); // still the same: succeeds
-    await waitFor(() => expect(keys).toHaveLength(3));
+    await answered(3);
     await fillAndSubmit(); // after a success: a new attempt
-    await waitFor(() => expect(keys).toHaveLength(4));
+    await answered(4);
     await user.type(screen.getByLabelText(/Billing name/), " Two");
     await submit(); // the values changed: a new attempt
-    await waitFor(() => expect(keys).toHaveLength(5));
+    await answered(5);
     expect(keys).toEqual([
       "example-key-1",
       "example-key-1",

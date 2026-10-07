@@ -157,7 +157,7 @@ export function SubscribeForm({
         data-slot="subscribe-form"
         className="flex max-w-xl flex-col gap-4"
       >
-        <div key={attempt.count} className="contents">
+        <div key={attempt.count} data-attempt={attempt.count} className="contents">
           <div className="grid gap-2">
             <span id={planLabel} className="text-sm font-medium text-fg">
               {t("billing.plan")}
