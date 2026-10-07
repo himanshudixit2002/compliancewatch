@@ -100,7 +100,11 @@ export type paths = {
     };
     get?: never;
     put?: never;
-    /** Start a subscription with the billing provider */
+    /**
+     * Start a subscription with the billing provider
+     * @description A retry with the same Idempotency-Key and body gets the first answer back for 24 hours
+     *     and starts nothing at the provider; the same key with another body is a 422.
+     */
     post: operations["start_subscription_v1_identity_billing_subscriptions_post"];
     delete?: never;
     options?: never;
@@ -117,7 +121,12 @@ export type paths = {
     };
     get?: never;
     put?: never;
-    /** Provider webhook: verified against the webhook secret before it is read */
+    /**
+     * Provider webhook: verified against the webhook secret before it is read
+     * @description A verified webhook that names no tenant in its notes is answered with ``ignored``; a body
+     *     the tenant received before with ``duplicate``. Either way the answer is 200, so the provider
+     *     stops redelivering it.
+     */
     post: operations["billing_webhook_v1_identity_billing_webhook_post"];
     delete?: never;
     options?: never;
@@ -192,6 +201,28 @@ export type paths = {
     put?: never;
     /** Sign a fake provider token (fake provider, local and test only) */
     post: operations["dev_provider_token_v1_identity_dev_provider_tokens_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/identity/entitlements": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * What the tenant's plan entitles it to: its registrations and seats
+     * @description The plan of the tenant's current subscription (the newest active or past-due one) times
+     *     its quantity, or the free allowance; the internal tenant has no limits. ``enforced`` says
+     *     whether going over them is refused (the flag identity.plan_limits for the tenant).
+     */
+    get: operations["read_entitlements_v1_identity_entitlements_get"];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -651,6 +682,25 @@ export type components = {
       /** Subject */
       subject: string;
     };
+    /** EntitlementsOut */
+    EntitlementsOut: {
+      /**
+       * Enforced
+       * @description Whether going over the limits is refused (the flag identity.plan_limits)
+       */
+      enforced: boolean;
+      limits: components["schemas"]["LimitsOut"];
+      /**
+       * Plan Key
+       * @description The current plan; free without a paid subscription
+       */
+      plan_key: string;
+      /**
+       * Status
+       * @description The subscription's status, or free
+       */
+      status: string;
+    };
     /** HealthResponse */
     HealthResponse: {
       /** Service */
@@ -704,6 +754,19 @@ export type components = {
     JwksOut: {
       /** Keys */
       keys: components["schemas"]["JwkOut"][];
+    };
+    /** LimitsOut */
+    LimitsOut: {
+      /**
+       * Registrations
+       * @description GSTIN registrations across the tenant's businesses; null is no limit
+       */
+      registrations: number | null;
+      /**
+       * Seats
+       * @description Active users; null is no limit
+       */
+      seats: number | null;
     };
     /**
      * MembershipOut
@@ -776,6 +839,8 @@ export type components = {
       description: string;
       /** Key */
       key: string;
+      /** @description What one unit of the plan's quantity allows (placeholders until decided) */
+      limits: components["schemas"]["LimitsOut"];
       /** Name */
       name: string;
       /** Period */
@@ -941,6 +1006,12 @@ export type components = {
       name: string;
       /** Plan Key */
       plan_key: string;
+      /**
+       * Quantity
+       * @description Units of the plan: businesses for the owner plan, seats for the CA plan
+       * @default 1
+       */
+      quantity?: number;
     };
     /** SubscriptionOut */
     SubscriptionOut: {
@@ -950,6 +1021,8 @@ export type components = {
       plan_key: string;
       /** Provider Subscription Id */
       provider_subscription_id: string;
+      /** Quantity */
+      quantity: number;
       /**
        * Started At
        * Format: date-time
@@ -1068,6 +1141,18 @@ export type components = {
     };
     /** WebhookOut */
     WebhookOut: {
+      /**
+       * Duplicate
+       * @description The same body was received before; nothing changed
+       * @default false
+       */
+      duplicate?: boolean;
+      /**
+       * Ignored
+       * @description The webhook names no tenant, so nothing was recorded
+       * @default false
+       */
+      ignored?: boolean;
       /** Kind */
       kind: string;
       /** Provider Subscription Id */
@@ -1241,7 +1326,9 @@ export interface operations {
   start_subscription_v1_identity_billing_subscriptions_post: {
     parameters: {
       query?: never;
-      header?: {
+      header: {
+        /** @description A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours */
+        "Idempotency-Key": string;
         /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
         "x-tenant-id"?: string | null;
       };
@@ -1290,8 +1377,26 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Unprocessable Entity */
       422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Required */
+      428: {
         headers: {
           [name: string]: unknown;
         };
@@ -1651,6 +1756,56 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  read_entitlements_v1_identity_entitlements_get: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
+        "x-tenant-id"?: string | null;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["EntitlementsOut"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -2043,6 +2198,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Payment Required */
+      402: {
         headers: {
           [name: string]: unknown;
         };
