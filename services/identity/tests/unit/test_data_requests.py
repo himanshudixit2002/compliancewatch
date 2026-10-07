@@ -784,3 +784,35 @@ def test_the_admin_makes_a_support_request_through_the_route() -> None:
         assert support.status_code == 201, support.text
         assert support.json()["source"] == "support"
         assert client.get(REQUESTS, headers=admin).status_code == 403
+
+
+# ---------------------------------------------------------------- the address check
+
+
+def test_the_consent_summary_says_whether_an_address_is_the_subject_s(
+    header_mode: tuple[TestClient, FakeSource],
+) -> None:
+    client, _ = header_mode
+    created = signed_up_tenant(client)
+    as_tenant = {"x-tenant-id": created["tenant"]["id"]}
+    user = created["user"]["id"]
+
+    def matches(**params: str) -> object:
+        answer = client.get("/v1/identity/consents", params=params, headers=as_tenant)
+        assert answer.status_code == 200, answer.text
+        return answer.json()["address_matches"]
+
+    assert matches(subject=user, channel="whatsapp", address="+91 98765 43210") is True
+    assert matches(subject=user, channel="whatsapp", address=OTHER_PHONE) is False
+    assert matches(subject=user, channel="email", address="owner@example.org") is None, (
+        "identity holds no email for this user"
+    )
+    assert matches(subject="not-a-user", channel="whatsapp", address=OWNER_PHONE) is None
+    assert matches(subject=user) is None, "not asked"
+    other = {"x-tenant-id": signed_up_tenant(client, OTHER_PHONE)["tenant"]["id"]}
+    elsewhere = client.get(
+        "/v1/identity/consents",
+        params={"subject": user, "channel": "whatsapp", "address": OWNER_PHONE},
+        headers=other,
+    ).json()
+    assert elsewhere["address_matches"] is None, "another tenant's user is unknown here"

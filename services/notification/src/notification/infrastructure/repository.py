@@ -101,6 +101,9 @@ class SqlAlchemyPreferenceRepository:
             updated_at=row.updated_at.astimezone(UTC),
             language=row.language,
             quiet_hours=QuietHours(row.quiet_hours_start, row.quiet_hours_end),
+            set_for_tenant=None
+            if row.set_for_tenant_id is None
+            else TenantId(row.set_for_tenant_id),
         )
 
     def save(self, preference: ChannelPreference) -> None:
@@ -111,6 +114,9 @@ class SqlAlchemyPreferenceRepository:
             "quiet_hours_start": preference.quiet_hours.start,
             "quiet_hours_end": preference.quiet_hours.end,
             "updated_at": preference.updated_at,
+            "set_for_tenant_id": None
+            if preference.set_for_tenant is None
+            else preference.set_for_tenant.value,
         }
         statement = insert(ChannelPreferenceRow).values(
             channel=preference.channel.value, address=preference.address, **values
@@ -308,8 +314,9 @@ class SqlAlchemyRecipientRepository:
     def export_preferences(
         self, after: tuple[Channel, str] | None, limit: int
     ) -> Sequence[PreferenceRecord]:
-        """channel_preference has no row-level security, so the statement names the tenant's
-        addresses: those in its recipient_address rows (which row-level security scopes too)."""
+        """channel_preference has no row-level security, so the statement names the tenant twice:
+        the rows its users set on the web (``set_for_tenant_id``), of the addresses in its
+        recipient_address rows (which row-level security scopes too)."""
         held = exists().where(
             RecipientAddressRow.tenant_id == self._tenant,
             RecipientAddressRow.channel == ChannelPreferenceRow.channel,
@@ -317,7 +324,7 @@ class SqlAlchemyRecipientRepository:
         )
         statement = (
             select(ChannelPreferenceRow)
-            .where(held)
+            .where(held, ChannelPreferenceRow.set_for_tenant_id == self._tenant)
             .order_by(ChannelPreferenceRow.channel, ChannelPreferenceRow.address)
             .limit(limit)
         )
@@ -330,12 +337,9 @@ class SqlAlchemyRecipientRepository:
             PreferenceRecord(
                 channel=Channel(row.channel),
                 address=row.address,
-                opted_in=row.opted_in,
-                source=None if row.source is None else ConsentSource(row.source),
+                opted_in=bool(row.opted_in),
                 language=row.language,
                 quiet_hours=QuietHours(row.quiet_hours_start, row.quiet_hours_end),
-                updated_at=_utc(row.updated_at),
-                last_inbound_at=_utc(row.last_inbound_at),
             )
             for row in self._session.scalars(statement)
         ]

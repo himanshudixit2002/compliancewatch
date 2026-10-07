@@ -6,10 +6,12 @@ Postgres, the tenant's rows only in memory):
 
 - ``recipients``: the tenant's recipients with their addresses in order and the businesses each
   hears about, oldest first;
-- ``preferences``: the channel_preference rows of the addresses the tenant's recipients hold
-  (consent, source, language, quiet hours, the last time the address wrote to us), by channel and
-  address. Preferences belong to no tenant, so they are selected by those addresses and no other
-  address's is read;
+- ``preferences``: of the addresses the tenant's recipients hold, the channel_preference rows the
+  tenant's own users set on the web (``set_for_tenant``), with only what that opt-in or opt-out
+  wrote: the consent, the language and the quiet hours, by channel and address. Preferences
+  belong to no tenant: a row set by the WhatsApp keyword, the API, support or another tenant's
+  user, or one no tenant can be said to have set, is never exported, and nothing is exported of
+  how or when the consent came or when the address last wrote to us, which may be anyone's;
 - ``notifications``: the tenant's notifications, oldest first, with their template values and
   delivery history. The dedupe key, an internal key of the occasion, is left out.
 
@@ -151,12 +153,9 @@ def _preference(record: PreferenceRecord) -> Row:
         "channel": record.channel.value,
         "address": record.address,
         "opted_in": record.opted_in,
-        "source": None if record.source is None else record.source.value,
         "language": record.language,
         "quiet_hours_start": start,
         "quiet_hours_end": end,
-        "updated_at": _moment(record.updated_at),
-        "last_inbound_at": _moment(record.last_inbound_at),
     }
 
 

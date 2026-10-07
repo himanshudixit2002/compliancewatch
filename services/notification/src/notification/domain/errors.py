@@ -164,6 +164,20 @@ class ConsentNotRecordedError(DomainError):
         )
 
 
+class ConsentAddressNotTheirsError(DomainError):
+    """A web opt-in for an address that identity knows is not the subject's own contact on the
+    channel. The detail names neither address, which are personal data."""
+
+    type_slug: ClassVar[str] = "notification-consent-address-not-theirs"
+    title: ClassVar[str] = "The address is not the person's"
+
+    def __init__(self, channel: str) -> None:
+        super().__init__(
+            f"the {channel} address is not the one identity holds for the subject; a person opts "
+            "in only their own address"
+        )
+
+
 class ConsentSubjectRequiredError(DomainError):
     """A web opt-in that names no consent subject, from a caller whose token names no user."""
 

@@ -474,6 +474,18 @@
       },
       "ConsentSummaryOut": {
         "properties": {
+          "address_matches": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Asked with channel and address: whether the address is the subject's own contact on that channel (true or false), or null when identity knows no such contact",
+            "title": "Address Matches"
+          },
           "history": {
             "items": {
               "$ref": "#/components/schemas/ConsentOut"
@@ -2573,6 +2585,48 @@
             }
           },
           {
+            "description": "With address: ask whether the address is the subject's own contact",
+            "in": "query",
+            "name": "channel",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "whatsapp",
+                    "email"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "With address: ask whether the address is the subject's own contact",
+              "title": "Channel"
+            }
+          },
+          {
+            "description": "An address on channel; address_matches says whether it is the subject's",
+            "in": "query",
+            "name": "address",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 254,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "An address on channel; address_matches says whether it is the subject's",
+              "title": "Address"
+            }
+          },
+          {
             "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
             "in": "header",
             "name": "x-tenant-id",
@@ -3033,7 +3087,7 @@
     },
     "/v1/identity/data-requests/{request_id}/export": {
       "get": {
-        "description": "409 identity-export-not-ready for a request that is not an export. The file name is\nbuilt from the request id alone.",
+        "description": "409 identity-export-not-ready for a request that is not an export. The bundle is\nassembled before the answer starts (a refusal is still a problem) and then written a service\nat a time. The file name is built from the request id alone.",
         "operationId": "download_export_v1_identity_data_requests__request_id__export_get",
         "parameters": [
           {

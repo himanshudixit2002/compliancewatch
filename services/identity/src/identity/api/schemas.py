@@ -105,6 +105,13 @@ class ConsentSummaryOut(BaseModel):
     subject: str
     states: list[ConsentStateOut]
     history: list[ConsentOut]
+    address_matches: bool | None = Field(
+        default=None,
+        description=(
+            "Asked with channel and address: whether the address is the subject's own contact "
+            "on that channel (true or false), or null when identity knows no such contact"
+        ),
+    )
 
     @classmethod
     def from_summary(cls, summary: ConsentSummary) -> "ConsentSummaryOut":
@@ -112,6 +119,7 @@ class ConsentSummaryOut(BaseModel):
             subject=summary.subject,
             states=[ConsentStateOut.from_state(state) for state in summary.states],
             history=[ConsentOut.from_record(r) for r in summary.history],
+            address_matches=summary.address_matches,
         )
 
 

@@ -24,7 +24,7 @@ from domain_kernel.ids import BusinessId, NotificationId, ObligationId, TenantId
 from notification.domain.ids import DispatchId, RecipientId
 from notification.domain.notification import DeliveryState, Notification
 from notification.domain.policy import WORK_LEASE
-from notification.domain.preferences import DEFAULT_QUIET_HOURS, ChannelPreference, Suppression
+from notification.domain.preferences import ChannelPreference, Suppression
 from notification.domain.recipients import Recipient, RecipientAddress
 from notification.domain.repository import (
     DirectoryEntry,
@@ -173,7 +173,12 @@ class MemoryRecipientRepository:
             for address in recipient.addresses
         }
         keys = sorted(
-            (key for key in held if key in self._state.preferences or key in self._state.inbound),
+            (
+                key
+                for key in held
+                if (found := self._state.preferences.get(key)) is not None
+                and found.set_for_tenant == self._tenant_id
+            ),
             key=_address_key,
         )
         if after is not None:
@@ -181,16 +186,13 @@ class MemoryRecipientRepository:
         return [self._record(key) for key in keys[:limit]]
 
     def _record(self, key: AddressKey) -> PreferenceRecord:
-        preference = self._state.preferences.get(key)
+        preference = self._state.preferences[key]
         return PreferenceRecord(
             channel=key[0],
             address=key[1],
-            opted_in=None if preference is None else preference.opted_in,
-            source=None if preference is None else preference.source,
-            language="en" if preference is None else preference.language,
-            quiet_hours=DEFAULT_QUIET_HOURS if preference is None else preference.quiet_hours,
-            updated_at=None if preference is None else preference.updated_at,
-            last_inbound_at=self._state.inbound.get(key),
+            opted_in=preference.opted_in,
+            language=preference.language,
+            quiet_hours=preference.quiet_hours,
         )
 
 

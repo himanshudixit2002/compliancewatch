@@ -1,8 +1,9 @@
 """A web opt-in needs identity's consent: ``PUT /v1/notification/preferences/{channel}/{recipient}``
 with ``opted_in`` and source web_onboarding or web_settings asks identity (a
 ``FakeConsentReader`` here) whether the subject's consent for the channel's purpose is granted in
-the request's tenant, and records nothing when it is not. Opt-outs and the other sources never
-ask."""
+the request's tenant, and whether the address is the subject's own where identity knows their
+contact, and records nothing when either fails. Opt-outs and the other sources never ask. A
+change given on the web keeps the tenant it was given for."""
 
 from collections.abc import Iterator
 from typing import Any
@@ -10,12 +11,13 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from domain_kernel.access import Principal, Role, Scope
+from domain_kernel.access import ANONYMOUS, Principal, Role, Scope
 from domain_kernel.channels import Channel
 from domain_kernel.ids import TenantId, UserId
 from notification.api.deps import OptInCaller
 from notification.application.preferences import SetOptIn, SetPreference
 from notification.domain.errors import (
+    ConsentAddressNotTheirsError,
     ConsentNotRecordedError,
     ConsentSubjectRequiredError,
     DependencyUnavailableError,
@@ -25,7 +27,7 @@ from notification.domain.preferences import ConsentSource
 from notification.infrastructure.memory import MemoryStore
 from notification.main import build_app
 from notification.testing import NOON_IST, FakeConsentReader, notification_settings
-from py_common.auth.errors import AuthForbiddenError
+from py_common.auth.errors import AuthTokenRequiredError
 from py_common.auth.testing import TestIssuer, bearer
 
 TENANT = TenantId.new()
@@ -192,17 +194,57 @@ def test_a_service_token_names_the_tenant_with_tenant_act(consents: FakeConsentR
     assert consents.asked == [(TENANT, SUBJECT, WHATSAPP)]
 
 
-def test_a_users_token_names_the_subject_and_refuses_another() -> None:
-    user_id = UserId.new()
-    user = OptInCaller(Principal.user(user_id, TENANT, [Role.OWNER]))
-    assert user.subject(None) == str(user_id)
-    assert user.subject(str(user_id)) == str(user_id)
-    with pytest.raises(AuthForbiddenError):
-        user.subject(SUBJECT)
-    assert user.tenant() == TENANT
+def test_an_address_identity_knows_is_not_the_subject_s_is_a_409(
+    client: TestClient, consents: FakeConsentReader
+) -> None:
+    consents.grant(TENANT, SUBJECT, WHATSAPP)
+    consents.contacts[(TENANT, SUBJECT, Channel.WHATSAPP)] = "+919812345678"
+    refused = client.put(WA_PATH, json=web_opt_in(), headers=AS_TENANT)
+    assert (refused.status_code, problem(refused)) == (
+        409,
+        "notification-consent-address-not-theirs",
+    )
+    assert "98" not in refused.json()["detail"], "neither address is named"
+    assert client.get(WA_PATH).status_code == 404, "nothing was recorded"
+    consents.contacts[(TENANT, SUBJECT, Channel.WHATSAPP)] = PHONE
+    assert client.put(WA_PATH, json=web_opt_in(), headers=AS_TENANT).status_code == 200
+    unknown = client.put(MAIL_PATH, json=web_opt_in(), headers=AS_TENANT)
+    assert unknown.status_code == 409, "no email consent yet"
+    consents.grant(TENANT, SUBJECT, "email_reminders")
+    known_nowhere = client.put(MAIL_PATH, json=web_opt_in(), headers=AS_TENANT)
+    assert known_nowhere.status_code == 200, "identity knows no email for the subject"
+
+
+def test_a_web_change_keeps_the_tenant_it_was_given_for(
+    client: TestClient, consents: FakeConsentReader
+) -> None:
+    consents.grant(TENANT, SUBJECT, WHATSAPP)
+    store = client.app.state.wiring.unit_of_work  # type: ignore[attr-defined]
+    assert isinstance(store, MemoryStore)
+
+    def kept() -> TenantId | None:
+        with store.shared() as unit:
+            found = unit.preferences.get(Channel.WHATSAPP, PHONE)
+        assert found is not None
+        return found.set_for_tenant
+
+    assert client.put(WA_PATH, json=web_opt_in(), headers=AS_TENANT).status_code == 200
+    assert kept() == TENANT
+    other = {"opted_in": False, "source": "web_settings"}
+    assert client.put(WA_PATH, json=other, headers={"x-tenant-id": str(OTHER)}).status_code == 200
+    assert kept() == OTHER, "the last web change names its own tenant"
+    keyword = {"opted_in": True, "source": "whatsapp_keyword"}
+    assert client.put(WA_PATH, json=keyword, headers=AS_TENANT).status_code == 200
+    assert kept() is None, "a keyword belongs to no tenant, whatever header came with it"
+
+
+def test_the_caller_names_the_tenant_and_a_service_source_needs_a_token() -> None:
     service = OptInCaller(Principal.service("web", [Scope.TENANT_ACT]), TENANT)
-    assert (service.subject(SUBJECT), service.subject(None)) == (SUBJECT, None)
     assert service.tenant() == TENANT
+    service.require_service("api")
+    OptInCaller(ANONYMOUS, TENANT, header_mode=True).require_service("api")
+    with pytest.raises(AuthTokenRequiredError):
+        OptInCaller(ANONYMOUS, TENANT).require_service("support")
 
 
 def test_the_use_case_checks_before_it_saves() -> None:
@@ -226,6 +268,12 @@ def test_the_use_case_checks_before_it_saves() -> None:
         opt_in(subject=None)
     with pytest.raises(ConsentNotRecordedError):
         opt_in()
+    consents.grant(TENANT, SUBJECT, "email_reminders")
+    consents.contacts[(TENANT, SUBJECT, Channel.EMAIL)] = "someone.else@example.com"
+    with pytest.raises(ConsentAddressNotTheirsError):
+        opt_in()
+    del consents.contacts[(TENANT, SUBJECT, Channel.EMAIL)]
+    consents.withdraw(TENANT, SUBJECT, "email_reminders")
     consents.down = True
     with pytest.raises(DependencyUnavailableError):
         opt_in()
@@ -239,4 +287,5 @@ def test_the_use_case_checks_before_it_saves() -> None:
     assert saved is not None
     assert saved.opted_in
     use_case.run(Channel.EMAIL, MAIL, opted_in=False, source=ConsentSource.WEB_SETTINGS)
-    assert len(consents.asked) == 3, "the opt-out asked nothing"
+    assert saved.set_for_tenant == TENANT
+    assert len(consents.asked) == 4, "the opt-out asked nothing"

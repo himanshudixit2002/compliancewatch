@@ -28,6 +28,7 @@ from notification.composition import wire
 from notification.domain.channels import ChannelAdapter
 from notification.domain.errors import (
     BulkNotificationsDisabledError,
+    ConsentAddressNotTheirsError,
     ConsentNotRecordedError,
     ConsentSubjectRequiredError,
     DependencyUnavailableError,
@@ -75,6 +76,7 @@ PROBLEM_STATUS: dict[type[DomainError], int] = {
     EmailFeedbackUnauthorizedError: 401,
     BulkNotificationsDisabledError: 503,
     ConsentNotRecordedError: 409,
+    ConsentAddressNotTheirsError: 409,
     ConsentSubjectRequiredError: 422,
 }
 

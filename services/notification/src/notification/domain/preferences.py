@@ -14,11 +14,12 @@ the preference says, until it is lifted.
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
 from enum import StrEnum
-from typing import Self
+from typing import Final, Self
 
 from domain_kernel._validation import require_aware, require_bool, require_instance, require_text
 from domain_kernel.channels import Channel
 from domain_kernel.errors import InvariantViolationError
+from domain_kernel.ids import TenantId
 
 IST = timezone(timedelta(hours=5, minutes=30), "IST")
 
@@ -32,6 +33,12 @@ class ConsentSource(StrEnum):
     SUPPORT = "support"
     WEB_SETTINGS = "web_settings"
     """Changed later on the web settings pages, not at onboarding."""
+
+
+WEB_SOURCES: Final = frozenset({ConsentSource.WEB_ONBOARDING, ConsentSource.WEB_SETTINGS})
+"""A tenant's user gave these on the web, for the tenant."""
+SERVICE_SOURCES: Final = frozenset({ConsentSource.API, ConsentSource.SUPPORT})
+"""A service records these on a person's behalf (an integration, the support team)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +86,11 @@ DEFAULT_QUIET_HOURS = QuietHours(time(21, 0), time(8, 0))
 
 @dataclass(frozen=True, slots=True)
 class ChannelPreference:
+    """An address's consent on a channel. Preferences belong to no tenant: ``set_for_tenant``
+    only says which tenant's user set this one on the web (a ``web_*`` source with the tenant's
+    consent behind it), so that tenant's data export may show it; it is None for the keyword,
+    the API and support, which no tenant caused."""
+
     channel: Channel
     address: str
     """Normalised (``normalise_address``)."""
@@ -87,6 +99,7 @@ class ChannelPreference:
     updated_at: datetime
     language: str = "en"
     quiet_hours: QuietHours = DEFAULT_QUIET_HOURS
+    set_for_tenant: TenantId | None = None
 
     def __post_init__(self) -> None:
         require_instance(self.channel, Channel, "channel")
@@ -96,6 +109,12 @@ class ChannelPreference:
         require_aware(self.updated_at, "updated_at")
         require_text(self.language, "language")
         require_instance(self.quiet_hours, QuietHours, "quiet_hours")
+        if self.set_for_tenant is not None:
+            require_instance(self.set_for_tenant, TenantId, "set_for_tenant")
+            if self.source not in WEB_SOURCES:
+                raise InvariantViolationError(
+                    "only a preference set on the web names the tenant whose user set it"
+                )
 
 
 class SuppressionReason(StrEnum):

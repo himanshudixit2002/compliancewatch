@@ -1,7 +1,8 @@
 """The tenant's data export on Postgres, as the notification service's own role cw_notification
 (not the container's superuser, which would bypass row-level security): two tenants' recipients,
-preferences and notifications, and the export of one holds only its own rows, the preferences of
-its own recipients' addresses included and no other address's. Needs Docker."""
+preferences and notifications, and the export of one holds only its own rows: of the preferences,
+only those its own users set on the web for its recipients' addresses, never one the keyword, the
+API or another tenant's user set, even when it registered the same number. Needs Docker."""
 
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -116,17 +117,28 @@ def test_the_export_as_the_service_role_holds_only_the_tenants_rows(
     inbound_only = "+919876543223"
     register(factory, tenant, [(Channel.WHATSAPP, phone), (Channel.EMAIL, mail)])
     register(factory, tenant, [(Channel.WHATSAPP, inbound_only)], at=WHEN + timedelta(hours=1))
-    register(factory, other, [(Channel.WHATSAPP, other_phone)])
+    register(factory, other, [(Channel.WHATSAPP, other_phone), (Channel.WHATSAPP, phone)])
     opt_in = SetOptIn(factory, clock=lambda: WHEN)
-    for channel, address in (
-        (Channel.WHATSAPP, phone),
-        (Channel.EMAIL, mail),
-        (Channel.WHATSAPP, other_phone),
-        (Channel.WHATSAPP, stranger),
-    ):
-        opt_in.run(channel, address, opted_in=True, source=ConsentSource.API)
+    opt_in.run(
+        Channel.WHATSAPP,
+        phone,
+        opted_in=True,
+        source=ConsentSource.WEB_ONBOARDING,
+        language="hi",
+        set_for_tenant=tenant,
+    )
+    opt_in.run(
+        Channel.EMAIL,
+        mail,
+        opted_in=False,
+        source=ConsentSource.WEB_SETTINGS,
+        set_for_tenant=tenant,
+    )
+    opt_in.run(Channel.WHATSAPP, other_phone, opted_in=True, source=ConsentSource.API)
+    opt_in.run(Channel.WHATSAPP, stranger, opted_in=True, source=ConsentSource.WHATSAPP_KEYWORD)
     with factory.shared() as unit:
         unit.preferences.record_inbound(Channel.WHATSAPP, inbound_only, WHEN)
+        unit.preferences.record_inbound(Channel.WHATSAPP, phone, WHEN + timedelta(hours=3))
     mine = [
         notify(factory, tenant, phone, at=WHEN + timedelta(minutes=2)),
         notify(factory, tenant, phone, at=WHEN + timedelta(minutes=1)),
@@ -139,21 +151,17 @@ def test_the_export_as_the_service_role_holds_only_the_tenants_rows(
     assert [r["addresses"][0]["address"] for r in recipients] == [phone, inbound_only]
     assert {r["tenant_id"] for r in recipients} == {str(tenant.value)}
     preferences = export.sections["preferences"]
-    assert [(p["channel"], p["address"]) for p in preferences] == [
-        ("email", mail),
-        ("whatsapp", phone),
-        ("whatsapp", inbound_only),
-    ]
-    assert preferences[2] == {
+    assert [(p["channel"], p["address"], p["opted_in"]) for p in preferences] == [
+        ("email", mail, False),
+        ("whatsapp", phone, True),
+    ], "the inbound-only number was set by no one"
+    assert preferences[1] == {
         "channel": "whatsapp",
-        "address": inbound_only,
-        "opted_in": None,
-        "source": None,
-        "language": "en",
+        "address": phone,
+        "opted_in": True,
+        "language": "hi",
         "quiet_hours_start": "21:00",
         "quiet_hours_end": "08:00",
-        "updated_at": None,
-        "last_inbound_at": WHEN.isoformat(),
     }
     assert [n["id"] for n in export.sections["notifications"]] == [
         str(mine[1].id.value),
@@ -166,3 +174,34 @@ def test_the_export_as_the_service_role_holds_only_the_tenants_rows(
 
     paged = ExportTenantData(factory, clock=lambda: WHEN, page_size=1).run(tenant)
     assert paged.sections == export.sections, "pages of one row join to the same export"
+
+    theirs = ExportTenantData(factory, clock=lambda: WHEN).run(other)
+    assert theirs.sections["preferences"] == [], (
+        "the other tenant holds phone too, but its preference is the first tenant's doing and "
+        "other_phone's came through the API"
+    )
+    assert (WHEN + timedelta(hours=3)).isoformat() not in repr(theirs.sections)
+
+
+def test_the_tenant_a_web_preference_was_set_for_round_trips(
+    factory: PostgresUnitOfWorkFactory,
+) -> None:
+    tenant = TenantId.new()
+    address = "+919876543230"
+    opt_in = SetOptIn(factory, clock=lambda: WHEN)
+    opt_in.run(
+        Channel.WHATSAPP,
+        address,
+        opted_in=True,
+        source=ConsentSource.WEB_SETTINGS,
+        set_for_tenant=tenant,
+    )
+    with factory.shared() as unit:
+        saved = unit.preferences.get(Channel.WHATSAPP, address)
+    assert saved is not None
+    assert saved.set_for_tenant == tenant
+    opt_in.run(Channel.WHATSAPP, address, opted_in=False, source=ConsentSource.WHATSAPP_KEYWORD)
+    with factory.shared() as unit:
+        saved = unit.preferences.get(Channel.WHATSAPP, address)
+    assert saved is not None
+    assert saved.set_for_tenant is None, "the keyword's opt-out belongs to no tenant"

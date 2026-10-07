@@ -6,9 +6,12 @@ either way. The address in the path is normalised first, so ``919876543210`` and
 ``+91 98765 43210`` are one record; an address that cannot be normalised is a 422 problem.
 A service token needs the notification:preferences scope for them. An opt-in given on the web
 (source web_onboarding or web_settings) is recorded only when identity holds the subject's
-granted consent for the channel's purpose in the request's tenant: without one it is a 409,
-without a tenant a 401, without a subject a 422, and an identity that cannot answer a 503;
-nothing is recorded in any of those cases. Sends are tenant data and need a tenant; a service
+granted consent for the channel's purpose in the request's tenant and, where identity knows the
+subject's contact on the channel, for that address: without a consent or for another address it
+is a 409, without a tenant a 401, without a subject a 422, and an identity that cannot answer a
+503; nothing is recorded in any of those cases. A change given on the web keeps the tenant it was
+given for, which the tenant's data export shows. Outside header mode the api and support sources
+need a service token (401 without one). Sends are tenant data and need a tenant; a service
 token needs notification:send, and tenant:act to name the tenant. The data export answers the
 tenant's recipients, the preferences of their addresses and its notifications.
 """
@@ -34,7 +37,7 @@ from notification.api.schemas import (
 )
 from notification.application.preferences import needs_consent
 from notification.domain.model import NotificationRequest
-from notification.domain.preferences import QuietHours
+from notification.domain.preferences import SERVICE_SOURCES, WEB_SOURCES, QuietHours
 from notification.domain.templates import TEMPLATES
 from py_common.problems import problem_responses
 
@@ -63,9 +66,12 @@ def set_preference(
     if body.quiet_hours_start and body.quiet_hours_end:
         quiet_hours = QuietHours.parse(body.quiet_hours_start, body.quiet_hours_end)
     tenant_id = subject = None
-    if needs_consent(body.opted_in, body.source):
+    if body.source in SERVICE_SOURCES:
+        caller.require_service(body.source.value)
+    if body.source in WEB_SOURCES:
         tenant_id = caller.tenant()
-        subject = caller.subject(body.subject)
+    if needs_consent(body.opted_in, body.source):
+        subject = body.subject
     preference = wired.set_preference.run(
         channel,
         recipient,

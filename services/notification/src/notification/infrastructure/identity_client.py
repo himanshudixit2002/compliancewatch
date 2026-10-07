@@ -1,12 +1,13 @@
 """The identity service's consent summary as the notification service's ``ConsentReader``.
 
-``GET {CW_IDENTITY_URL}/v1/identity/consents?subject=`` with the tenant in ``x-tenant-id``
-answers the subject's current state per purpose (``states``, each with ``purpose`` and
-``granted``) and its history, as that tenant recorded them. A purpose missing from ``states`` was
-never recorded; one whose state is not granted was withdrawn. Identity serves the route to a
-service acting for the tenant, so in ``dual`` and ``token`` mode every call carries this
-service's own access token (``auth``, from ``py_common.auth.service_auth_from``), whose client
-needs the tenant:act scope.
+``GET {CW_IDENTITY_URL}/v1/identity/consents?subject=&channel=&address=`` with the tenant in
+``x-tenant-id`` answers the subject's current state per purpose (``states``, each with ``purpose``
+and ``granted``) and its history, as that tenant recorded them, and ``address_matches``: whether
+the address is the subject's own contact on the channel (null when identity knows none). A
+purpose missing from ``states`` was never recorded; one whose state is not granted was withdrawn.
+Identity serves the route to a service acting for the tenant, so in ``dual`` and ``token`` mode
+every call carries this service's own access token (``auth``, from
+``py_common.auth.service_auth_from``), whose client needs the tenant:act scope.
 
 Anything but a 200 with the summary the client expects, a transport error, or a service token
 the identity service could not issue raises ``DependencyUnavailableError``: the service cannot
@@ -17,8 +18,10 @@ from typing import Any, Final
 
 import httpx2
 
+from domain_kernel.channels import Channel
 from domain_kernel.ids import TenantId
 from notification.domain.errors import DependencyUnavailableError
+from notification.domain.ports import ConsentAnswer
 from py_common.auth import ServiceTokenUnavailableError
 
 CONSENTS_PATH: Final = "/v1/identity/consents"
@@ -42,8 +45,10 @@ class HttpConsentReader:
         self._client = client or httpx2.Client(base_url=base_url, timeout=timeout_seconds)
         self._auth = auth
 
-    def granted(self, tenant_id: TenantId, subject: str, purpose: str) -> bool:
-        params = {"subject": subject}
+    def check(
+        self, tenant_id: TenantId, subject: str, purpose: str, *, channel: Channel, address: str
+    ) -> ConsentAnswer:
+        params = {"subject": subject, "channel": channel.value, "address": address}
         headers = {TENANT_HEADER: str(tenant_id)}
         try:
             if self._auth is None:
@@ -67,11 +72,15 @@ class HttpConsentReader:
             states = [(str(s["purpose"]), s["granted"]) for s in summary["states"]]
             if any(not isinstance(granted, bool) for _, granted in states):
                 raise TypeError("granted is not a boolean")
+            matches = summary.get("address_matches")
+            if matches is not None and not isinstance(matches, bool):
+                raise TypeError("address_matches is not a boolean")
         except (ValueError, TypeError, KeyError) as exc:
             raise DependencyUnavailableError(
                 f"identity service answered a consent summary the client cannot read: {exc}"
             ) from exc
-        return any(found == purpose and granted for found, granted in states)
+        granted = any(found == purpose and given for found, given in states)
+        return ConsentAnswer(granted=granted, address_is_theirs=matches)
 
     def close(self) -> None:
         self._client.close()

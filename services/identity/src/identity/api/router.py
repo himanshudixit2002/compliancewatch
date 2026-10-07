@@ -1,7 +1,7 @@
 """Routes of the identity service. Business logic lives in application use cases."""
 
 from functools import partial
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Header, Path, Query, Request, Response, status
 from fastapi.responses import JSONResponse
@@ -71,9 +71,26 @@ def record_consent(
     responses=problem_responses(401, 403),
 )
 def consent_status(
-    subject: Annotated[str, Query(min_length=1, max_length=254)], tenant: Tenant, wired: Wired
+    subject: Annotated[str, Query(min_length=1, max_length=254)],
+    tenant: Tenant,
+    wired: Wired,
+    channel: Annotated[
+        Literal["whatsapp", "email"] | None,
+        Query(description="With address: ask whether the address is the subject's own contact"),
+    ] = None,
+    address: Annotated[
+        str | None,
+        Query(
+            min_length=1,
+            max_length=254,
+            description="An address on channel; address_matches says whether it is the subject's",
+        ),
+    ] = None,
 ) -> ConsentSummaryOut:
-    return ConsentSummaryOut.from_summary(wired.consent_status.run(tenant, subject))
+    summary = wired.consent_status.run(
+        tenant, subject, channel=channel or "", address=address or ""
+    )
+    return ConsentSummaryOut.from_summary(summary)
 
 
 @router.post(

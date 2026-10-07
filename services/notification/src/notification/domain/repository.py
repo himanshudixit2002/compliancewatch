@@ -19,8 +19,9 @@ unit of work of that tenant sees only its own (row-level security in Postgres).
   notification. Each entry keeps the moment it was planned to go out (``planned_at``), which a
   retry or a rulebook outage does not move, so how long pending work has waited past it can be
   read across tenants (``WorkIndex.oldest_due``).
-- A tenant's data export reads its recipients, its notifications and the preferences of the
-  addresses its recipients hold, each a page at a time (``export_*``), in a tenant unit.
+- A tenant's data export reads its recipients, its notifications and the preferences the
+  tenant's own users set on the web for the addresses its recipients hold, each a page at a time
+  (``export_*``), in a tenant unit.
 """
 
 from collections.abc import Mapping, Sequence
@@ -41,7 +42,6 @@ from notification.domain.ids import DispatchId, RecipientId
 from notification.domain.notification import DeliveryState, Notification
 from notification.domain.preferences import (
     ChannelPreference,
-    ConsentSource,
     QuietHours,
     Suppression,
 )
@@ -114,30 +114,23 @@ class ExportAfter:
 
 @dataclass(frozen=True, slots=True)
 class PreferenceRecord:
-    """A channel_preference row as a data export shows it: the consent, when one was given
-    (``opted_in``, ``source`` and ``updated_at`` are None for an address that only wrote to us),
-    and when the address last wrote to us."""
+    """A channel_preference row as the data export of the tenant that set it shows it: only what
+    the tenant's own opt-in or opt-out on the web wrote (the consent, the language and the quiet
+    hours). How and when it was given and when the address last wrote to us are left out: the row
+    is global, and those may come from anyone's action."""
 
     channel: Channel
     address: str
-    opted_in: bool | None
-    source: ConsentSource | None
+    opted_in: bool
     language: str
     quiet_hours: QuietHours
-    updated_at: datetime | None
-    last_inbound_at: datetime | None
 
     def __post_init__(self) -> None:
         require_instance(self.channel, Channel, "channel")
         require_text(self.address, "address")
-        if self.source is not None:
-            require_instance(self.source, ConsentSource, "source")
+        require_instance(self.opted_in, bool, "opted_in")
         require_text(self.language, "language")
         require_instance(self.quiet_hours, QuietHours, "quiet_hours")
-        for name in ("updated_at", "last_inbound_at"):
-            moment = getattr(self, name)
-            if moment is not None:
-                require_aware(moment, name)
 
     @property
     def key(self) -> tuple[Channel, str]:
@@ -241,9 +234,10 @@ class RecipientRepository(Protocol):
     def export_preferences(
         self, after: tuple[Channel, str] | None, limit: int
     ) -> Sequence[PreferenceRecord]:
-        """The preferences of the addresses the tenant's recipients hold, by channel and
-        address, at most ``limit``, starting after the key ``after``. Preferences belong to no
-        tenant, so they are selected by those addresses; no other address's is read."""
+        """The preferences set on the web for the unit's tenant (``set_for_tenant``) of the
+        addresses the tenant's recipients hold, by channel and address, at most ``limit``,
+        starting after the key ``after``. Preferences belong to no tenant: a row someone else
+        set, or that no tenant can be said to have set, is never read."""
         ...
 
 

@@ -82,18 +82,24 @@ def notify(store: UnitOfWorkFactory, tenant: TenantId, n: int, *, at: datetime =
 
 
 def fill(store: MemoryStore) -> None:
-    """Two tenants: TENANT holds PHONE and MAIL, OTHER holds OTHER_PHONE; STRANGER_PHONE belongs
-    to nobody. Every address has a preference, and PHONE a suppression."""
+    """Two tenants: TENANT holds PHONE and MAIL, OTHER holds OTHER_PHONE and registered PHONE too;
+    STRANGER_PHONE belongs to nobody. TENANT's user opted PHONE in on the web; MAIL was opted in
+    through the API and OTHER_PHONE and STRANGER_PHONE by the WhatsApp keyword, which no tenant
+    caused. PHONE also wrote to us and has a suppression."""
     register(store, TENANT, [(Channel.WHATSAPP, PHONE), (Channel.EMAIL, MAIL)])
-    register(store, OTHER, [(Channel.WHATSAPP, OTHER_PHONE)])
+    register(store, OTHER, [(Channel.WHATSAPP, OTHER_PHONE), (Channel.WHATSAPP, PHONE)])
     opt_in = SetOptIn(store, clock=lambda: WHEN)
-    for channel, address in (
-        (Channel.WHATSAPP, PHONE),
-        (Channel.EMAIL, MAIL),
-        (Channel.WHATSAPP, OTHER_PHONE),
-        (Channel.WHATSAPP, STRANGER_PHONE),
-    ):
-        opt_in.run(channel, address, opted_in=True, source=ConsentSource.API)
+    opt_in.run(
+        Channel.WHATSAPP,
+        PHONE,
+        opted_in=True,
+        source=ConsentSource.WEB_ONBOARDING,
+        language="hi",
+        set_for_tenant=TENANT,
+    )
+    opt_in.run(Channel.EMAIL, MAIL, opted_in=True, source=ConsentSource.API)
+    for address in (OTHER_PHONE, STRANGER_PHONE):
+        opt_in.run(Channel.WHATSAPP, address, opted_in=True, source=ConsentSource.WHATSAPP_KEYWORD)
     with store.shared() as unit:
         unit.preferences.record_inbound(Channel.WHATSAPP, PHONE, WHEN + timedelta(hours=1))
         unit.suppressions.add(
@@ -119,22 +125,16 @@ def test_the_export_holds_only_the_tenants_rows_in_every_section() -> None:
         {"business_id": str(BUSINESS.value), "label": "Example Traders"}
     ]
     assert recipient["created_at"] == WHEN.isoformat()
-    preferences = export.sections["preferences"]
-    assert [(p["channel"], p["address"]) for p in preferences] == [
-        ("email", MAIL),
-        ("whatsapp", PHONE),
-    ], "only the addresses the tenant's recipients hold, by channel and address"
-    assert preferences[1] == {
-        "channel": "whatsapp",
-        "address": PHONE,
-        "opted_in": True,
-        "source": "api",
-        "language": "en",
-        "quiet_hours_start": "21:00",
-        "quiet_hours_end": "08:00",
-        "updated_at": WHEN.isoformat(),
-        "last_inbound_at": (WHEN + timedelta(hours=1)).isoformat(),
-    }
+    assert export.sections["preferences"] == [
+        {
+            "channel": "whatsapp",
+            "address": PHONE,
+            "opted_in": True,
+            "language": "hi",
+            "quiet_hours_start": "21:00",
+            "quiet_hours_end": "08:00",
+        }
+    ], "only what the tenant's own web opt-in wrote; MAIL's came through the API"
     [notification] = export.sections["notifications"]
     assert notification["tenant_id"] == str(TENANT.value)
     assert notification["params"] == {
@@ -150,6 +150,36 @@ def test_the_export_holds_only_the_tenants_rows_in_every_section() -> None:
     assert "suppress" not in text, "suppressions are not exported"
 
 
+def test_another_tenant_holding_the_address_sees_no_preference_it_did_not_set() -> None:
+    store = MemoryStore()
+    fill(store)
+    theirs = ExportTenantData(store, clock=lambda: WHEN).run(OTHER)
+    held = [a["address"] for r in theirs.sections["recipients"] for a in r["addresses"]]
+    assert sorted(held) == sorted([OTHER_PHONE, PHONE]), "its own recipient rows"
+    assert theirs.sections["preferences"] == [], (
+        "PHONE was set by TENANT's user and OTHER_PHONE by the keyword: neither is OTHER's"
+    )
+    text = repr(theirs.sections)
+    assert "web_onboarding" not in text
+    assert "whatsapp_keyword" not in text
+    assert (WHEN + timedelta(hours=1)).isoformat() not in text, "when PHONE last wrote to us"
+
+
+def test_a_keyword_opt_in_is_never_exported_to_a_tenant_that_registers_the_number() -> None:
+    store = MemoryStore()
+    SetOptIn(store, clock=lambda: WHEN).run(
+        Channel.WHATSAPP,
+        STRANGER_PHONE,
+        opted_in=True,
+        source=ConsentSource.WHATSAPP_KEYWORD,
+        language="hi",
+    )
+    with store.shared() as unit:
+        unit.preferences.record_inbound(Channel.WHATSAPP, STRANGER_PHONE, WHEN)
+    register(store, OTHER, [(Channel.WHATSAPP, STRANGER_PHONE)])
+    assert ExportTenantData(store).run(OTHER).sections["preferences"] == []
+
+
 def test_an_empty_tenant_has_every_section_empty() -> None:
     store = MemoryStore()
     fill(store)
@@ -163,7 +193,11 @@ def test_the_sections_are_read_a_page_at_a_time_and_joined_oldest_first() -> Non
     for n, phone in enumerate(phones):
         register(store, TENANT, [(Channel.WHATSAPP, phone)], at=WHEN + timedelta(minutes=5 - n))
         SetOptIn(store, clock=lambda: WHEN).run(
-            Channel.WHATSAPP, phone, opted_in=False, source=ConsentSource.WHATSAPP_KEYWORD
+            Channel.WHATSAPP,
+            phone,
+            opted_in=False,
+            source=ConsentSource.WEB_SETTINGS,
+            set_for_tenant=TENANT,
         )
         notify(store, TENANT, n, at=WHEN + timedelta(minutes=5 - n))
     assert EXPORT_PAGE_SIZE == 500
@@ -220,9 +254,14 @@ def test_header_mode_exports_the_tenant_the_header_names(header_mode: TestClient
     assert (body["service"], body["tenant_id"]) == ("notification", str(TENANT.value))
     assert datetime.fromisoformat(body["generated_at"]).tzinfo is not None
     assert set(body["sections"]) == SECTIONS
-    assert [p["address"] for p in body["sections"]["preferences"]] == [MAIL, PHONE]
+    assert [p["address"] for p in body["sections"]["preferences"]] == [PHONE]
     missing = header_mode.get(ROUTE)
     assert (missing.status_code, problem(missing)) == (401, "notification-tenant-required")
+
+
+def bound(tenant: TenantId, audience: str = "notification") -> str:
+    """Identity's export token for ``tenant``, addressed to ``audience``."""
+    return ISSUER.service("identity", [Scope.DATA_EXPORT], acts_for=tenant, audience=audience)
 
 
 def test_token_mode_exports_to_a_tenant_admin_or_a_service_with_data_export(
@@ -232,7 +271,8 @@ def test_token_mode_exports_to_a_tenant_admin_or_a_service_with_data_export(
     allowed = (
         bearer(ISSUER.user(TENANT, [Role.OWNER])),
         bearer(ISSUER.user(TENANT, [Role.CA_ADMIN], mfa=True)),
-        {**bearer(ISSUER.service("identity", [Scope.DATA_EXPORT, Scope.TENANT_ACT])), **as_tenant},
+        {**bearer(bound(TENANT)), **as_tenant},
+        bearer(bound(TENANT)),
     )
     for headers in allowed:
         response = token_mode.get(ROUTE, headers=headers)
@@ -242,6 +282,8 @@ def test_token_mode_exports_to_a_tenant_admin_or_a_service_with_data_export(
     refused = (
         bearer(ISSUER.user(TENANT, [Role.STAFF])),
         {**bearer(ISSUER.service("identity", [Scope.TENANT_ACT])), **as_tenant},
+        {**bearer(ISSUER.service("worker", [Scope.DATA_EXPORT, Scope.TENANT_ACT])), **as_tenant},
+        {**bearer(bound(TENANT, "profile")), **as_tenant},
     )
     for headers in refused:
         response = token_mode.get(ROUTE, headers=headers)
@@ -250,7 +292,7 @@ def test_token_mode_exports_to_a_tenant_admin_or_a_service_with_data_export(
         ROUTE, headers={**bearer(ISSUER.user(TENANT, [Role.OWNER])), "x-tenant-id": str(OTHER)}
     )
     assert (other.status_code, problem(other)) == (403, "auth-tenant-mismatch")
-    unnamed = token_mode.get(
-        ROUTE, headers=bearer(ISSUER.service("identity", [Scope.DATA_EXPORT, Scope.TENANT_ACT]))
-    )
+    replayed = token_mode.get(ROUTE, headers={**bearer(bound(TENANT)), "x-tenant-id": str(OTHER)})
+    assert (replayed.status_code, problem(replayed)) == (403, "auth-tenant-mismatch")
+    unnamed = token_mode.get(ROUTE, headers=bearer(ISSUER.service("identity", [Scope.TENANT_ACT])))
     assert (unnamed.status_code, problem(unnamed)) == (401, "notification-tenant-required")

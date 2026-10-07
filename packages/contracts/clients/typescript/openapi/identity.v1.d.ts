@@ -241,8 +241,9 @@ export type paths = {
     };
     /**
      * Download the tenant's data as a JSON file, assembled now
-     * @description 409 identity-export-not-ready for a request that is not an export. The file name is
-     *     built from the request id alone.
+     * @description 409 identity-export-not-ready for a request that is not an export. The bundle is
+     *     assembled before the answer starts (a refusal is still a problem) and then written a service
+     *     at a time. The file name is built from the request id alone.
      */
     get: operations["download_export_v1_identity_data_requests__request_id__export_get"];
     put?: never;
@@ -705,6 +706,11 @@ export type components = {
     };
     /** ConsentSummaryOut */
     ConsentSummaryOut: {
+      /**
+       * Address Matches
+       * @description Asked with channel and address: whether the address is the subject's own contact on that channel (true or false), or null when identity knows no such contact
+       */
+      address_matches?: boolean | null;
       /** History */
       history: components["schemas"]["ConsentOut"][];
       /** States */
@@ -1795,6 +1801,10 @@ export interface operations {
   consent_status_v1_identity_consents_get: {
     parameters: {
       query: {
+        /** @description An address on channel; address_matches says whether it is the subject's */
+        address?: string | null;
+        /** @description With address: ask whether the address is the subject's own contact */
+        channel?: ("whatsapp" | "email") | null;
         subject: string;
       };
       header?: {

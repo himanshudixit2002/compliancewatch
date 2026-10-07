@@ -625,7 +625,7 @@ export type components = {
       source: components["schemas"]["ConsentSource"];
       /**
        * Subject
-       * @description The identity consent subject (the user id) whose consent covers a web opt-in (opted_in with source web_onboarding or web_settings). A user's token names it; otherwise a web opt-in needs it. Ignored for anything else
+       * @description The identity consent subject (the user id) whose consent covers a web opt-in (opted_in with source web_onboarding or web_settings), as the web app's server names its signed-in user; a web opt-in needs it. Ignored for anything else
        */
       subject?: string | null;
     };

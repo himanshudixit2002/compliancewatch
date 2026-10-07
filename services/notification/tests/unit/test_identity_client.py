@@ -7,6 +7,7 @@ from typing import Any
 import httpx2
 import pytest
 
+from domain_kernel.channels import Channel
 from domain_kernel.ids import TenantId
 from notification.domain.errors import DependencyUnavailableError
 from notification.infrastructure.identity_client import HttpConsentReader
@@ -14,6 +15,7 @@ from py_common.auth import BearerAuth, ServiceTokenUnavailableError
 
 TENANT = TenantId.new()
 SUBJECT = "4f6c0f9e-2b7a-4d4e-8b1d-0c9a5e3f2a10"
+ADDRESS = "+919876543210"
 
 
 def state(purpose: str, granted: bool) -> dict[str, Any]:
@@ -46,15 +48,40 @@ def test_reads_the_state_of_the_purpose_for_the_tenant_and_subject() -> None:
         return httpx2.Response(200, json=SUMMARY)
 
     consents = reader(handler)
-    assert consents.granted(TENANT, SUBJECT, "whatsapp_reminders") is True
-    assert consents.granted(TENANT, SUBJECT, "email_reminders") is False, "withdrawn"
-    assert consents.granted(TENANT, SUBJECT, "analytics") is False, "never recorded"
+    assert (
+        consents.check(
+            TENANT, SUBJECT, "whatsapp_reminders", channel=Channel.WHATSAPP, address=ADDRESS
+        ).granted
+        is True
+    )
+    assert (
+        consents.check(
+            TENANT, SUBJECT, "email_reminders", channel=Channel.WHATSAPP, address=ADDRESS
+        ).granted
+        is False
+    ), "withdrawn"
+    assert (
+        consents.check(
+            TENANT, SUBJECT, "analytics", channel=Channel.WHATSAPP, address=ADDRESS
+        ).granted
+        is False
+    ), "never recorded"
     request = seen[0]
     assert request.url.path == "/v1/identity/consents"
     assert request.url.params["subject"] == SUBJECT
+    assert (request.url.params["channel"], request.url.params["address"]) == ("whatsapp", ADDRESS)
     assert request.headers["x-tenant-id"] == str(TENANT)
     assert "authorization" not in request.headers
     consents.close()
+
+
+@pytest.mark.parametrize("matches", [True, False, None])
+def test_reads_whether_the_address_is_the_subject_s(matches: bool | None) -> None:
+    body = {**SUMMARY, "address_matches": matches}
+    answer = reader(lambda _: httpx2.Response(200, json=body)).check(
+        TENANT, SUBJECT, "whatsapp_reminders", channel=Channel.WHATSAPP, address=ADDRESS
+    )
+    assert (answer.granted, answer.address_is_theirs) == (True, matches)
 
 
 class StaticTokens:
@@ -81,13 +108,17 @@ def test_carries_the_service_token_and_an_unavailable_one_is_unavailable() -> No
         seen.append(request)
         return httpx2.Response(200, json=SUMMARY)
 
-    assert reader(handler, auth=BearerAuth(StaticTokens())).granted(
-        TENANT, SUBJECT, "whatsapp_reminders"
+    assert (
+        reader(handler, auth=BearerAuth(StaticTokens()))
+        .check(TENANT, SUBJECT, "whatsapp_reminders", channel=Channel.WHATSAPP, address=ADDRESS)
+        .granted
     )
     assert seen[0].headers["authorization"] == "Bearer service-token"
     failing = reader(handler, auth=BearerAuth(StaticTokens(fail=True)))
     with pytest.raises(DependencyUnavailableError, match="no service token"):
-        failing.granted(TENANT, SUBJECT, "whatsapp_reminders")
+        failing.check(
+            TENANT, SUBJECT, "whatsapp_reminders", channel=Channel.WHATSAPP, address=ADDRESS
+        )
 
 
 @pytest.mark.parametrize(
@@ -103,11 +134,14 @@ def test_carries_the_service_token_and_an_unavailable_one_is_unavailable() -> No
             200, json={"states": [{"purpose": "whatsapp_reminders", "granted": "yes"}]}
         ),
         httpx2.Response(200, json=[]),
+        httpx2.Response(200, json={**SUMMARY, "address_matches": "yes"}),
     ],
 )
 def test_an_answer_it_cannot_use_is_unavailable(response: httpx2.Response) -> None:
     with pytest.raises(DependencyUnavailableError):
-        reader(lambda _: response).granted(TENANT, SUBJECT, "whatsapp_reminders")
+        reader(lambda _: response).check(
+            TENANT, SUBJECT, "whatsapp_reminders", channel=Channel.WHATSAPP, address=ADDRESS
+        )
 
 
 def test_an_unreachable_identity_is_unavailable() -> None:
@@ -115,4 +149,6 @@ def test_an_unreachable_identity_is_unavailable() -> None:
         raise httpx2.ConnectError("refused", request=request)
 
     with pytest.raises(DependencyUnavailableError, match="unreachable"):
-        reader(handler).granted(TENANT, SUBJECT, "whatsapp_reminders")
+        reader(handler).check(
+            TENANT, SUBJECT, "whatsapp_reminders", channel=Channel.WHATSAPP, address=ADDRESS
+        )
