@@ -87,14 +87,21 @@ null. The downgrade drops the table and keeps the schema.
 Migration 0006 adds the read scopes: `event_platform_read` admits the rows of no tenant while the
 transaction's `app.audit_scope` is `regulatory`, and `event_export_read` every row while it is
 `export`, both FOR SELECT only. Identity sets the scope after its own role checks and names it in
-the query too, and among the service roles only `cw_identity` may read the table.
+the query too. Among the per-service roles only `cw_identity` may read the table; the MVP's one
+image runs every service as `cw_app`, which holds SELECT on `audit` too, so there the scopes hold
+by code convention (only identity's code sets them), as defence in depth rather than a role
+boundary (docs/runbooks/audit-export.md). Migration 0007 adds the index on
+(subject_type, subject_id, occurred_at) for one subject's history.
 `GET /v1/identity/audit` reads it for people (filters `subject_type`, `subject_id`, `action`,
 `from`, `to`; `limit` and `cursor`): owners, CA admins and compliance leads see their tenant's
-entries, and analysts, reviewers and admins the platform's and the internal tenant's. A tenant
+entries, and analysts, reviewers and admins of the internal tenant (the route checks the kind as
+well as the role) the platform's and the internal tenant's. A tenant
 role never sees another tenant's rows or the platform's, and in header mode an anonymous caller
 sees only the tenant its header names. `identity-admin audit-export --from --to --out DIR` writes
 a range as NDJSON with `manifest.json` (SHA-256, count, range, generated_at), reading under the
-export scope; uploading it to the object-locked bucket is a manual step
+export scope, into a missing or empty directory; the files keep `.partial` names until its
+`audit.exported` row commits, and `--to` defaults to midnight UTC two days ago so late rows are
+in. Uploading it to the object-locked bucket is a manual step
 ([docs/runbooks/audit-export.md](../../docs/runbooks/audit-export.md), which also lists every
 service's audited actions). Rows are kept seven years and never changed.
 

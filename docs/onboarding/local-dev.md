@@ -218,7 +218,8 @@ Each service connects to Postgres as its own role, `cw_<schema>`: `cw_identity`,
   (the outbox, the consumer inbox, the idempotency keys and the routing directories included),
   now and as later migrations add tables, but never writes its `alembic_version`;
 - may add rows to `audit.event` and do nothing else there; only `cw_identity` also reads them, for
-  the audit trail route;
+  the audit trail route (`cw_app`, the one role of `make product`, reads them too, so there the
+  audit read scopes are a code convention);
 - has nothing in another service's schema, since the services call each other over HTTP.
 
 `make run`, `make worker`, `make relay`, `make seed` and `make web-stack STORE=postgres` connect

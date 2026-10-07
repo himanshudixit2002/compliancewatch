@@ -14,9 +14,10 @@ through the tracking routes writes its own ``obligation.status.*`` entry and pas
 ``audited=False``, so one action is one entry.
 
 Volume: ``obligation.created`` grows with fan-out, one row per obligation materialised (one per
-business, rule and period); a reschedule writes one row per open obligation it moves. Both are
-bounded by the obligation rows themselves, which is fine for the MVP; a later change could write
-one entry per batch instead.
+business, rule and period); a reschedule writes one row per open obligation it moves, and a rule's
+withdrawal or supersession, or a profile change, writes one ``obligation.closed`` per open
+obligation it closes. All three are bounded by the obligation rows themselves, which is fine for
+the MVP; a later change could write one entry per batch instead.
 """
 
 from datetime import datetime

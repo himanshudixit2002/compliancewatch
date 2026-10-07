@@ -466,7 +466,9 @@ what the table refuses.
 
 Each service's database role (`infra/dev/postgres/roles.sql`, `cw_<schema>`) may only insert
 into the table, and only `cw_identity` may also read it; the writer needs nothing more, since it
-inserts without `RETURNING`.
+inserts without `RETURNING`. The MVP image's one role, `cw_app`, holds SELECT on `audit` as well,
+so under it the read scopes are a code convention rather than a role boundary
+([docs/runbooks/audit-export.md](../../docs/runbooks/audit-export.md)).
 
 Identity reads the log (`GET /v1/identity/audit`, `identity-admin audit-export`; the identity
 README and [docs/runbooks/audit-export.md](../../docs/runbooks/audit-export.md) describe both).
