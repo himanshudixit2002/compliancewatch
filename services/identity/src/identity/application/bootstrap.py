@@ -7,10 +7,15 @@
   tenant, where the regulatory team works, with its first admin, whose account it creates at the
   identity provider. There is one internal tenant; a second run is refused. The admin enrols a
   second factor at the provider before signing in, since admins sign in with one.
+- Creating and revoking a client writes ``service_client.created`` and ``service_client.revoked``,
+  and the bootstrap ``tenant.created``, each an audit entry by ``system:identity-admin`` in the
+  unit of work of the change; a client's entry has no tenant and names its scopes, never its
+  secret.
 - ``EnsureDevServiceClients`` makes the development service clients exist with the shared dev
   secret: one client per caller in the committed ``identity_dev_clients.toml`` (or
   ``CW_IDENTITY_DEV_CLIENTS``). The composition root runs it only when ``CW_ENV`` is local or test
   and ``CW_IDENTITY_DEV_CLIENT_SECRET`` is set; the settings refuse that secret anywhere else.
+  It writes no audit entry: it runs on every start of a local or test process.
 """
 
 from collections.abc import Callable, Mapping
@@ -20,7 +25,8 @@ from datetime import datetime
 from domain_kernel.access import Scope
 from domain_kernel.events import utc_now
 from domain_kernel.ids import TenantId
-from identity.application.tenancy import first_user_events
+from identity.application.audit import CLI_ACTOR, audit_entry
+from identity.application.tenancy import first_user_events, tenant_created_entry
 from identity.domain.errors import (
     ProviderUnavailableError,
     ServiceClientExistsError,
@@ -46,6 +52,17 @@ class CreateServiceClient:
             if uow.service_clients.get(client_id) is not None:
                 raise ServiceClientExistsError(client_id)
             uow.service_clients.add(client)
+            uow.audit.write(
+                audit_entry(
+                    "service_client.created",
+                    tenant_id=None,
+                    subject_type="service_client",
+                    subject_id=client.client_id,
+                    at=client.created_at,
+                    after={"scopes": sorted(scope.value for scope in client.scopes)},
+                    actor=CLI_ACTOR,
+                )
+            )
         return client, secret
 
 
@@ -63,8 +80,20 @@ class RevokeServiceClient:
             if client is None:
                 raise ServiceClientNotFoundError(client_id)
             revoked = client.revoked(self._clock())
-            if revoked is not client:
+            if revoked is not client and revoked.revoked_at is not None:
                 uow.service_clients.save(revoked)
+                uow.audit.write(
+                    audit_entry(
+                        "service_client.revoked",
+                        tenant_id=None,
+                        subject_type="service_client",
+                        subject_id=client.client_id,
+                        at=revoked.revoked_at,
+                        before={"revoked_at": None},
+                        after={"revoked_at": revoked.revoked_at.isoformat()},
+                        actor=CLI_ACTOR,
+                    )
+                )
         return revoked
 
 
@@ -142,6 +171,7 @@ class BootstrapInternalTenant:
                 uow.subjects.add(SubjectEntry.of(admin))
                 for event in first_user_events(tenant, admin, changed_by=None):
                     uow.events.publish(event)
+                uow.audit.write(tenant_created_entry(tenant, admin, actor=CLI_ACTOR))
         except Exception:
             with suppress(ProviderUnavailableError):
                 self._provider.delete(subject)

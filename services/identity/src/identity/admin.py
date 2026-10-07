@@ -7,6 +7,7 @@
     identity-admin service-client revoke --id pipeline
     identity-admin service-client list
     identity-admin bootstrap-internal --name "Regulatory team" --email admin@example.org
+    identity-admin audit-export --from 2026-09-01 --to 2026-10-01 --out var/audit-export/2026-09
 
 ``signing-key new`` prints a key set with one new ES256 key, the JSON ``CW_IDENTITY_SIGNING_KEYS``
 takes; it touches no store. To rotate, put the new record second in the environment's key set,
@@ -23,18 +24,30 @@ admin, whose account it creates at the identity provider (``CW_AUTH_PROVIDER``).
 internal tenant; a second run is refused. The admin enrols a second factor at the provider before
 signing in, and then invites the analysts and reviewers.
 
-The service-client and bootstrap commands use the database at ``CW_DATABASE_URL``, whose
-search_path must name the identity schema, as ``make migrate`` sets it.
+``audit-export`` writes every audit entry from ``--from`` (inclusive) to ``--to`` (exclusive),
+oldest first, to ``audit-events.ndjson`` in ``--out`` (made when missing; a directory holding an
+export already is refused), and ``manifest.json`` beside it: the file's SHA-256, the count, the
+range and when it was generated. A date without a time is midnight UTC. It reads under the export
+scope (``app.audit_scope = 'export'``), so it sees every tenant's rows and the platform's, and it
+records itself as an ``audit.exported`` entry. Uploading the two files to the object-locked
+bucket is a manual step (docs/runbooks/audit-export.md).
+
+Every command but ``signing-key`` uses the database at ``CW_DATABASE_URL``, whose search_path
+must name the identity schema, as ``make migrate`` sets it, and the service-client, bootstrap and
+export commands write their audit entries as ``system:identity-admin``.
 """
 
 import argparse
 import json
 import sys
 from collections.abc import Sequence
+from datetime import UTC, date, datetime
+from pathlib import Path
 from typing import TextIO
 
 from domain_kernel.access import Scope
 from domain_kernel.errors import DomainError
+from identity.application.audit import ExportAuditTrail
 from identity.application.bootstrap import (
     BootstrapInternalTenant,
     CreateServiceClient,
@@ -42,10 +55,12 @@ from identity.application.bootstrap import (
     RevokeServiceClient,
 )
 from identity.composition import identity_provider
+from identity.domain.audit import AuditReader
 from identity.domain.provider import IdentityProvider
 from identity.domain.repository import UnitOfWorkFactory
 from identity.domain.service_clients import ServiceClient
 from identity.domain.tenancy import Contact
+from identity.infrastructure.audit_reader import PostgresAuditReader
 from identity.infrastructure.repository import PostgresUnitOfWorkFactory
 from identity.settings import IdentitySettings
 from py_common.auth import KeySet, generate_signing_key
@@ -86,7 +101,30 @@ def parser() -> argparse.ArgumentParser:
     contact = bootstrap.add_mutually_exclusive_group(required=True)
     contact.add_argument("--email", help="the admin's email address")
     contact.add_argument("--phone", help="the admin's phone number, E.164")
+
+    export = commands.add_parser(
+        "audit-export", help="write the audit entries of a range as NDJSON with a manifest"
+    )
+    export.add_argument(
+        "--from", required=True, dest="since", type=instant, help="inclusive: 2026-09-01"
+    )
+    export.add_argument(
+        "--to", required=True, dest="until", type=instant, help="exclusive: 2026-10-01"
+    )
+    export.add_argument("--out", required=True, type=Path, help="the directory to write")
     return root
+
+
+def instant(text: str) -> datetime:
+    """An ISO date (midnight UTC) or an ISO instant; one without a zone is UTC."""
+    try:
+        if len(text) == len("2026-09-01"):
+            day = date.fromisoformat(text)
+            return datetime(day.year, day.month, day.day, tzinfo=UTC)
+        parsed = datetime.fromisoformat(text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"not an ISO date or instant: {text!r}") from exc
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
 
 
 def main(
@@ -94,15 +132,18 @@ def main(
     *,
     unit_of_work: UnitOfWorkFactory | None = None,
     provider: IdentityProvider | None = None,
+    reader: AuditReader | None = None,
     out: TextIO | None = None,
 ) -> int:
-    """Run one command. ``unit_of_work`` and ``provider`` replace the ones the settings name
-    (tests)."""
+    """Run one command. ``unit_of_work``, ``provider`` and ``reader`` replace the ones the
+    settings name (tests)."""
     args = parser().parse_args(argv)
     stream = out or sys.stdout
     try:
         if args.command == "signing-key":
             return _new_signing_key(args.kid, stream)
+        if args.command == "audit-export":
+            return _audit_export(args, unit_of_work, reader, stream)
         if unit_of_work is None or provider is None:
             settings = IdentitySettings(service_name=PROG)
             store = unit_of_work or PostgresUnitOfWorkFactory.from_url(settings.database_url)
@@ -134,6 +175,26 @@ def _bootstrap(
     out.write(json.dumps(described, indent=2) + "\n")
     sys.stderr.write(
         f"{PROG}: the admin enrols a second factor at the identity provider, then signs in\n"
+    )
+    return 0
+
+
+def _audit_export(
+    args: argparse.Namespace,
+    unit_of_work: UnitOfWorkFactory | None,
+    reader: AuditReader | None,
+    out: TextIO,
+) -> int:
+    if unit_of_work is None or reader is None:
+        postgres = PostgresUnitOfWorkFactory.from_url(
+            IdentitySettings(service_name=PROG).database_url
+        )
+        unit_of_work, reader = postgres, PostgresAuditReader(postgres.engine)
+    manifest = ExportAuditTrail(reader, unit_of_work).run(args.since, args.until, args.out)
+    out.write(json.dumps(manifest.document(), indent=2, sort_keys=True) + "\n")
+    sys.stderr.write(
+        f"{PROG}: upload {args.out / manifest.file} and its manifest.json to the object-locked "
+        "bucket (docs/runbooks/audit-export.md)\n"
     )
     return 0
 

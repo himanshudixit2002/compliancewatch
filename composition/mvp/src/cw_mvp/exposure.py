@@ -66,6 +66,10 @@ EXPOSURE: Final[Mapping[str, Mapping[str, Exposure]]] = {
         "POST /v1/identity/users/{user_id}/disable": PUBLIC,
         # Whether a user belongs to a tenant, for a service acting for it (tenant:act).
         "GET /v1/identity/users/{user_id}/membership": INTERNAL,
+        # The audit trail: a tenant's owners read their tenant's rows; the regulatory team the
+        # platform's. The route refuses staff, services, and a request without a token outside
+        # header mode, and never shows the platform's rows to an anonymous caller.
+        "GET /v1/identity/audit": PUBLIC,
     },
     "profile": {
         "GET /v1/profile/ping": PUBLIC,

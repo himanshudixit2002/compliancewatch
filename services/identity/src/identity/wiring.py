@@ -3,6 +3,7 @@
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
+from identity.application.audit import ReadAuditTrail
 from identity.application.billing import BillingLedger, ReceiveBillingWebhook, StartSubscription
 from identity.application.channel_consents import ChannelConsentStatus, RecordChannelConsent
 from identity.application.consents import ConsentStatus, RecordConsent
@@ -50,3 +51,4 @@ class Wiring:
     invite_user: InviteUser
     change_roles: ChangeRoles
     disable_user: DisableUser
+    read_audit_trail: ReadAuditTrail

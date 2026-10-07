@@ -71,6 +71,9 @@ def engine(database_url: str, alembic_config: Config) -> Iterator[Engine]:
 
 @pytest.fixture(scope="module")
 def app_engine(database_url: str, engine: Engine) -> Iterator[Engine]:
+    # Again after the migrations: identity's 0005 makes the audit schema, which the role must
+    # be able to write to (USAGE and INSERT), as make migrate's db-roles step grants.
+    apply_roles(database_url)
     engine = create_engine(as_role(database_url, SCHEMA))
     yield engine
     engine.dispose()

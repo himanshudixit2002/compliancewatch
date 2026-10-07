@@ -15,6 +15,7 @@ from identity.infrastructure.billing.razorpay import (
     customer_body,
     subscription_body,
 )
+from identity.infrastructure.memory import MemoryStore
 
 TENANT = TenantId.new()
 NOW = datetime(2026, 9, 28, 10, 0, tzinfo=UTC)
@@ -39,7 +40,8 @@ def test_plans_are_placeholders_with_zero_prices() -> None:
 def test_start_subscription_reuses_the_customer_and_webhooks_move_the_status() -> None:
     provider = MemoryBillingProvider(clock=lambda: NOW)
     ledger = BillingLedger()
-    start = StartSubscription(provider, ledger, clock=lambda: NOW)
+    store = MemoryStore()
+    start = StartSubscription(provider, ledger, store, clock=lambda: NOW)
     first = start.run(TENANT, "owner_monthly", email="a@b.c", name="Acme")
     second = start.run(TENANT, "ca_seat_monthly", email="a@b.c", name="Acme")
     assert len(provider.customers) == 1
@@ -47,7 +49,7 @@ def test_start_subscription_reuses_the_customer_and_webhooks_move_the_status() -
     assert {first.provider_subscription_id, second.provider_subscription_id} == set(
         ledger.subscriptions
     )
-    receive = ReceiveBillingWebhook(provider, ledger)
+    receive = ReceiveBillingWebhook(provider, ledger, store, clock=lambda: NOW)
     body = webhook("subscription.activated", first.provider_subscription_id)
     event = receive.run(body, provider.sign(body))
     assert event.status is SubscriptionStatus.ACTIVE
@@ -58,6 +60,23 @@ def test_start_subscription_reuses_the_customer_and_webhooks_move_the_status() -
     with pytest.raises(InvalidWebhookSignatureError):
         receive.run(body, "bad")
     assert len(ledger.events) == 2
+    repeated = receive.run(body, provider.sign(body))
+    assert repeated.status is SubscriptionStatus.ACTIVE
+
+    started = [entry for entry in store.audit if entry.action == "subscription.started"]
+    assert [(entry.tenant_id, entry.subject_id) for entry in started] == [
+        (TENANT, first.provider_subscription_id),
+        (TENANT, second.provider_subscription_id),
+    ]
+    assert started[0].after == {"plan_key": "owner_monthly", "status": "created"}
+    [changed] = [entry for entry in store.audit if entry.action == "subscription.status_changed"]
+    assert changed.tenant_id == TENANT
+    assert changed.subject_id == first.provider_subscription_id
+    assert (changed.actor.label, changed.reason) == (
+        "system:billing-webhook",
+        "subscription.activated",
+    )
+    assert (changed.before, changed.after) == ({"status": "created"}, {"status": "active"})
 
 
 def test_parse_event_tolerates_missing_fields() -> None:

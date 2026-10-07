@@ -27,6 +27,7 @@ Design reference: Project Foundation guide, sections 7, 14 and 16.
 | `GET /v1/identity/consents?subject=` | Current state per purpose and the full history for a subject (a user id or an E.164 number) |
 | `POST /v1/identity/channel-consents` | Record a keyword opt-in or opt-out for a number (service token); 201, or 200 with the stored record when the message was recorded already |
 | `GET /v1/identity/channel-consents/{channel}/{subject}` | A number's current state per purpose on a channel, with its history (service token) |
+| `GET /v1/identity/audit` | The audit trail, newest first, a keyset page of at most 200: a tenant's entries for its owners, CA admins and compliance leads; the platform's (and the internal tenant's) for analysts, reviewers and admins; 403 for any other role or a service, 422 for a bad cursor or range |
 | `GET /v1/identity/billing/plans` | The plans (placeholders with zero prices until pricing is decided) |
 | `POST /v1/identity/billing/subscriptions` | Start a subscription with the provider; 503 while `CW_BILLING_PROVIDER=none` |
 | `POST /v1/identity/billing/webhook` | Provider webhook; the body is verified against the webhook secret (`X-Razorpay-Signature`) before it is read |
@@ -79,10 +80,31 @@ The audit log's table is identity's too: migration 0005 creates `audit.event` in
 every service writes an audited action to, in the transaction of the action, through
 `py_common.audit` (the py-common README describes the writer). Row-level security is forced: a
 session reads and writes the rows of its tenant and may add rows of no tenant, for platform-wide
-actions, which nothing reads yet. A trigger refuses UPDATE and DELETE, a tenant's erasure
-included, and `infra/scripts/migration_lint.toml` exempts the table because its tenant_id may be
-null. The downgrade drops the table and keeps the schema. Identity writes no entry of its own
-yet, and the read route `GET /v1/identity/audit` is not built yet.
+actions, which only the regulatory scope reads (below). A trigger refuses UPDATE and DELETE, a
+tenant's erasure included, and `infra/scripts/migration_lint.toml` exempts the table because its tenant_id may be
+null. The downgrade drops the table and keeps the schema.
+
+Migration 0006 adds the read scopes: `event_platform_read` admits the rows of no tenant while the
+transaction's `app.audit_scope` is `regulatory`, and `event_export_read` every row while it is
+`export`, both FOR SELECT only. Identity sets the scope after its own role checks and names it in
+the query too, and among the service roles only `cw_identity` may read the table.
+`GET /v1/identity/audit` reads it for people (filters `subject_type`, `subject_id`, `action`,
+`from`, `to`; `limit` and `cursor`): owners, CA admins and compliance leads see their tenant's
+entries, and analysts, reviewers and admins the platform's and the internal tenant's. A tenant
+role never sees another tenant's rows or the platform's, and in header mode an anonymous caller
+sees only the tenant its header names. `identity-admin audit-export --from --to --out DIR` writes
+a range as NDJSON with `manifest.json` (SHA-256, count, range, generated_at), reading under the
+export scope; uploading it to the object-locked bucket is a manual step
+([docs/runbooks/audit-export.md](../../docs/runbooks/audit-export.md), which also lists every
+service's audited actions). Rows are kept seven years and never changed.
+
+Identity writes its own entries in the transaction of each change: `tenant.created` (sign-up, and
+`bootstrap-internal`), `user.invited`, `user.roles_changed` and `user.disabled` (roles and status,
+never a contact detail), `consent.recorded`, `subscription.started` and
+`subscription.status_changed` (by `system:billing-webhook`), and from `identity-admin`
+`service_client.created`, `service_client.revoked` and `audit.exported` (by
+`system:identity-admin`). Channel consents and the dev service clients made at start are not
+audited.
 
 Roles depend on the tenant's kind: a business has owners, staff and compliance leads; a CA firm has
 CA admins, CA staff and compliance leads; the internal tenant has analysts, reviewers and admins.
@@ -106,6 +128,7 @@ identity-admin service-client create --id pipeline --scope rulebook:write --scop
 identity-admin service-client revoke --id pipeline
 identity-admin service-client list
 identity-admin bootstrap-internal --name "Regulatory team" --email admin@example.org
+identity-admin audit-export --from 2026-09-01 --to 2026-10-01 --out var/audit-export/2026-09
 ```
 
 In local and test runs, with `CW_IDENTITY_DEV_CLIENT_SECRET` set, the service creates the clients

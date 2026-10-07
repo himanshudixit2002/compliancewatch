@@ -52,6 +52,28 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  "/v1/identity/audit": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * The audit trail: who did what to which record, newest first
+     * @description Owners, CA admins and compliance leads read their tenant's entries; analysts, reviewers
+     *     and admins the platform's and their own tenant's. 403 for any other role or a service, 422
+     *     for a cursor this route did not issue or a range whose from is not before its to.
+     */
+    get: operations["read_audit_trail_v1_identity_audit_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/identity/billing/plans": {
     parameters: {
       query?: never;
@@ -340,6 +362,90 @@ export type paths = {
 export type webhooks = Record<string, never>;
 export type components = {
   schemas: {
+    /** AuditActorOut */
+    AuditActorOut: {
+      /**
+       * Id
+       * @description A user id, a service client id, or the service that acted
+       */
+      id: string;
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: "user" | "service" | "system";
+      /**
+       * Label
+       * @description A user's roles, service:<client> or system:<service>; never a name
+       */
+      label: string;
+    };
+    /**
+     * AuditEntryOut
+     * @description One audited action, as ``audit.event`` keeps it: personal identifiers in the reason and
+     *     in before and after are masked ([PAN], [GSTIN], [PHONE], [EMAIL], [AADHAAR]).
+     */
+    AuditEntryOut: {
+      /**
+       * Action
+       * @description <subject_type>.<verb>, such as user.roles_changed
+       */
+      action: string;
+      actor: components["schemas"]["AuditActorOut"];
+      /**
+       * After
+       * @description What the action changed, as it is now
+       */
+      after: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Before
+       * @description What the action changed, as it was
+       */
+      before: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Correlation Id
+       * @description The request or event behind the action
+       */
+      correlation_id: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Occurred At
+       * Format: date-time
+       */
+      occurred_at: string;
+      /**
+       * Reason
+       * @description Why, as the person said; empty when none was asked
+       */
+      reason: string;
+      subject: components["schemas"]["AuditSubjectOut"];
+      /**
+       * Tenant Id
+       * @description The tenant whose data it touched; null: platform
+       */
+      tenant_id: string | null;
+    };
+    /** AuditSubjectOut */
+    AuditSubjectOut: {
+      /**
+       * Id
+       * @description Its id
+       */
+      id: string;
+      /**
+       * Type
+       * @description What was acted on, a snake_case noun: user, rule_version
+       */
+      type: string;
+    };
     /** ChannelConsentIn */
     ChannelConsentIn: {
       channel: components["schemas"]["ConsentChannel"];
@@ -651,6 +757,16 @@ export type components = {
        * Format: uuid
        */
       user_id: string;
+    };
+    /** Page[AuditEntryOut] */
+    Page_AuditEntryOut_: {
+      /** Items */
+      items: components["schemas"]["AuditEntryOut"][];
+      /**
+       * Next Cursor
+       * @description Send as cursor to read the next page; null on the last page
+       */
+      next_cursor: string | null;
     };
     /** PlanOut */
     PlanOut: {
@@ -1033,6 +1149,71 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["JwksOut"];
+        };
+      };
+    };
+  };
+  read_audit_trail_v1_identity_audit_get: {
+    parameters: {
+      query?: {
+        /** @description Such as user.disabled */
+        action?: string | null;
+        /** @description The next_cursor of the previous page; absent for the first page */
+        cursor?: string | null;
+        /** @description Entries at or after this instant (with a zone) */
+        from?: string | null;
+        /** @description Items per page, 1 to 200 */
+        limit?: number;
+        /** @description Its id */
+        subject_id?: string | null;
+        /** @description user, rule_version */
+        subject_type?: string | null;
+        /** @description Entries before this instant (with a zone) */
+        to?: string | null;
+      };
+      header?: {
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
+        "x-tenant-id"?: string | null;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Page_AuditEntryOut_"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
         };
       };
     };

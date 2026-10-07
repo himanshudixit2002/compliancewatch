@@ -1,6 +1,6 @@
-"""Migration 0005 on Postgres: ``audit.event`` on top of identity's chain, the schema it creates
-when missing, the catalog lint's view of the table, a write through a plain role, and the
-downgrade. Needs Docker.
+"""Migrations 0005 and 0006 on Postgres: ``audit.event`` on top of identity's chain, the schema
+0005 creates when missing, the read scopes of 0006, the catalog lint's view of the table, a
+write and the audit trail's reads through a plain role, and the downgrades. Needs Docker.
 
 The role owns nothing and is not a superuser, and is granted what ``make product-role`` grants
 ``cw_app`` (infra/dev/postgres/50-app-role.sql). The policies, the trigger and the writer in the
@@ -9,6 +9,7 @@ transaction of an action are tested in packages/py-common/tests/integration/test
 
 import importlib
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,8 @@ from testcontainers.community.postgres import PostgresContainer
 
 from domain_kernel.audit import AuditActor
 from domain_kernel.ids import TenantId
+from identity.domain.audit import AuditKey, AuditQuery, AuditScope
+from identity.infrastructure.audit_reader import PostgresAuditReader
 from py_common.audit.schema import AUDIT_SCHEMA, AUDIT_TABLE, audit_event, metadata
 from py_common.audit.testing import audit_entry, read_audit_entries
 from py_common.audit.writer import PostgresAuditSink
@@ -101,7 +104,7 @@ def test_the_migration_creates_the_schema_and_the_table(engine: Engine) -> None:
         version: str = connection.execute(
             text(f"SELECT version_num FROM {SCHEMA}.alembic_version")
         ).scalar_one()
-    assert version == "0005"
+    assert version == "0006"
 
 
 def test_the_table_and_py_common_agree(engine: Engine) -> None:
@@ -138,7 +141,9 @@ def test_the_catalog_lint_accepts_the_table(engine: Engine) -> None:
     )
     exemption = config.exemption_for(table.qualified)
     assert exemption is not None
-    assert (exemption.kind, "event_platform_insert" in exemption.reason) == ("exempt", True)
+    assert exemption.kind == "exempt"
+    for policy in ("event_platform_insert", "event_platform_read", "event_export_read"):
+        assert policy in exemption.reason, policy
     problems = lint.catalog_problems(catalog, config)
     assert [p for p in problems if p.startswith(f"{AUDIT_SCHEMA}.")] == []
 
@@ -158,9 +163,49 @@ def test_a_plain_role_writes_an_entry_of_its_tenant(app_engine: Engine) -> None:
         assert read_audit_entries(connection) == [], "no tenant setting reads nothing"
 
 
-def test_downgrade_drops_the_table_and_keeps_the_schema(
+def test_the_trail_reads_each_scope_through_the_plain_role(app_engine: Engine) -> None:
+    tenant, other = TenantId.new(), TenantId.new()
+    at = datetime(2000, 1, 3, 9, 0, tzinfo=UTC)
+    mine = [
+        audit_entry(tenant_id=tenant, occurred_at=at + timedelta(minutes=index))
+        for index in range(3)
+    ]
+    theirs = audit_entry(tenant_id=other, occurred_at=at)
+    platform = audit_entry(tenant_id=None, occurred_at=at + timedelta(minutes=10))
+    for owner, entries in ((tenant, [*mine, platform]), (other, [theirs])):
+        with app_engine.begin() as connection:
+            connection.execute(
+                text("SELECT set_config('app.tenant_id', :tenant, true)"), {"tenant": str(owner)}
+            )
+            for entry in entries:
+                PostgresAuditSink(connection).write(entry)
+    reader = PostgresAuditReader(app_engine)
+
+    first = reader.page(AuditScope.TENANT, tenant, AuditQuery(limit=2))
+    assert first == [mine[2], mine[1], mine[0]], "limit + 1, newest first"
+    rest = reader.page(AuditScope.TENANT, tenant, AuditQuery(limit=2, after=AuditKey.of(mine[1])))
+    assert rest == [mine[0]]
+    regulatory = reader.page(AuditScope.REGULATORY, tenant, AuditQuery(limit=10))
+    assert set(regulatory) == {*mine, platform}
+    assert reader.page(AuditScope.REGULATORY, None, AuditQuery(limit=10)) == [platform]
+    assert reader.page(AuditScope.TENANT, other, AuditQuery(limit=10)) == [theirs]
+    exported = list(reader.export(at, at + timedelta(hours=1)))
+    assert exported == sorted(
+        [*mine, theirs, platform], key=lambda e: (e.occurred_at, str(e.entry_id))
+    )
+
+
+def test_downgrade_drops_the_read_scopes_then_the_table_and_keeps_the_schema(
     alembic_config: Config, engine: Engine
 ) -> None:
+    command.downgrade(alembic_config, "0005")
+    with engine.connect() as connection:
+        policies = set(
+            connection.execute(
+                text("SELECT policyname FROM pg_policies WHERE schemaname = 'audit'")
+            ).scalars()
+        )
+    assert policies == {"event_tenant_isolation", "event_platform_insert"}
     command.downgrade(alembic_config, "0004")
     assert audit_tables(engine) == []
     with engine.connect() as connection:

@@ -1,6 +1,6 @@
 """The Postgres units of work: one transaction with the tenant setting for row-level security
-(or none, for the subject index), with the outbox writer as the event sink, and one without a
-tenant for channel consents.
+(or none, for the subject index), with the outbox writer as the event sink and
+``py_common.audit``'s writer as the audit sink, and one without a tenant for channel consents.
 
 Tenant, user and consent reads also name the unit of work's tenant in the query. Row-level
 security applies only to a role that does not bypass it, and the dev stack connects as the
@@ -48,6 +48,7 @@ from identity.infrastructure.models import (
     UserRow,
     UserSubjectRow,
 )
+from py_common.audit.writer import PostgresAuditSink
 from py_common.outbox import OutboxWriter
 
 
@@ -241,6 +242,7 @@ class SqlAlchemyUnitOfWork:
         self.subjects = SqlAlchemySubjectIndex(session)
         self.service_clients = SqlAlchemyServiceClientRepository(session)
         self.events = OutboxSink(connection, writer)
+        self.audit = PostgresAuditSink(connection)
 
 
 class PostgresUnitOfWorkFactory:

@@ -1,4 +1,9 @@
-"""Record a consent or a withdrawal, and answer what a subject has agreed to."""
+"""Record a consent or a withdrawal, and answer what a subject has agreed to.
+
+Recording writes a ``consent.recorded`` audit entry in the same unit of work, by the request's
+caller (``py_common.audit.audit_actor``): the purpose, whether it was granted, the source and the
+notice version. The subject (a user id, or a phone number the log masks) is the entry's subject.
+"""
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -6,6 +11,7 @@ from datetime import datetime
 
 from domain_kernel.events import utc_now
 from domain_kernel.ids import ConsentId, TenantId, UserId
+from identity.application.audit import audit_entry
 from identity.domain.consent import ConsentPurpose, ConsentRecord, ConsentSource, ConsentState
 from identity.domain.errors import NoticeVersionRequiredError
 from identity.domain.repository import UnitOfWorkFactory
@@ -56,6 +62,22 @@ class RecordConsent:
         )
         with self._unit_of_work(tenant_id) as uow:
             uow.consents.add(record)
+            uow.audit.write(
+                audit_entry(
+                    "consent.recorded",
+                    tenant_id=tenant_id,
+                    subject_type="consent",
+                    subject_id=str(record.id),
+                    at=record.recorded_at,
+                    after={
+                        "subject": record.subject,
+                        "purpose": record.purpose.value,
+                        "granted": record.granted,
+                        "source": record.source.value,
+                        "notice_version": record.notice_version,
+                    },
+                )
+            )
         return record
 
 

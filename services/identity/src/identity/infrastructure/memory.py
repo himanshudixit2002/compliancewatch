@@ -1,20 +1,25 @@
 """In-memory stores: tests, demos and the app before Postgres.
 
-``MemoryStore`` holds consents, tenants, users, the subject index, service clients and the
-published events. A unit of work keeps what it did only when it ends without an error, as a
-Postgres transaction would, and it mirrors row-level security: it sees the rows of its own tenant,
-none when it has no tenant, and refuses to write another tenant's rows. A unit works on a copy of
-the store, so units run one at a time (a store-level lock held from open to commit or rollback):
-two overlapping requests, of one tenant or of two, cannot both start from the same copy and lose
-each other's writes. ``MemoryChannelStore`` does the same for channel consents.
+``MemoryStore`` holds consents, tenants, users, the subject index, service clients, the
+published events and the audit log (``audit``, masked as ``audit.event`` keeps it). A unit of
+work keeps what it did only when it ends without an error, as a Postgres transaction would, and
+it mirrors row-level security: it sees the rows of its own tenant, none when it has no tenant,
+and refuses to write another tenant's rows (an audit entry of no tenant is allowed). A unit
+works on a copy of the store, so units run one at a time (a store-level lock held from open to
+commit or rollback): two overlapping requests, of one tenant or of two, cannot both start from
+the same copy and lose each other's writes. ``MemoryChannelStore`` does the same for channel
+consents.
 """
 
 import threading
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager
+from datetime import datetime
 
+from domain_kernel.audit import AuditEntry
 from domain_kernel.events import DomainEvent
 from domain_kernel.ids import TenantId, UserId
+from identity.domain.audit import AuditQuery, AuditScope, newest_first_key, readable
 from identity.domain.channel_consent import (
     ChannelConsentRecord,
     ChannelUnitOfWork,
@@ -25,6 +30,7 @@ from identity.domain.errors import InternalTenantExistsError, SubjectRegisteredE
 from identity.domain.repository import UnitOfWork
 from identity.domain.service_clients import ServiceClient
 from identity.domain.tenancy import SubjectEntry, Tenant, TenantKind, User
+from py_common.audit import MemoryAuditSink
 
 
 class RowSecurityViolationError(RuntimeError):
@@ -155,6 +161,7 @@ class MemoryUnitOfWork:
         self.subjects = MemorySubjectIndex(self._subjects)
         self.service_clients = MemoryServiceClientRepository(self._clients)
         self.events = MemorySink()
+        self.audit = MemoryAuditSink(store.audit, tenant_id=tenant_id)
 
     def commit(self, store: "MemoryStore") -> None:
         store.records[:] = self._records
@@ -167,6 +174,7 @@ class MemoryUnitOfWork:
         store.service_clients.clear()
         store.service_clients.update(self._clients)
         store.events.extend(self.events.pending)
+        self.audit.commit()
 
 
 class MemoryStore:
@@ -177,6 +185,7 @@ class MemoryStore:
         self.subjects: dict[tuple[str, str], SubjectEntry] = {}
         self.service_clients: dict[str, ServiceClient] = {}
         self.events: list[DomainEvent] = []
+        self.audit: list[AuditEntry] = []
         self._lock = threading.Lock()
 
     def __call__(self, tenant_id: TenantId | None) -> AbstractContextManager[UnitOfWork]:
@@ -246,3 +255,26 @@ class MemoryChannelStore:
             pending = list(self.records)
             yield MemoryChannelUnitOfWork(pending)
             self.records[:] = pending
+
+
+class MemoryAuditReader:
+    """``AuditReader`` over a ``MemoryStore``'s audit log, with the scopes the Postgres policies
+    hold (``identity.domain.audit.readable``)."""
+
+    def __init__(self, store: MemoryStore) -> None:
+        self._store = store
+
+    def page(
+        self, scope: AuditScope, tenant_id: TenantId | None, query: AuditQuery
+    ) -> list[AuditEntry]:
+        found = [
+            entry
+            for entry in list(self._store.audit)
+            if readable(scope, tenant_id, entry) and query.matches(entry)
+        ]
+        found.sort(key=newest_first_key, reverse=True)
+        return found[: query.limit + 1]
+
+    def export(self, since: datetime, until: datetime) -> Iterator[AuditEntry]:
+        found = [entry for entry in list(self._store.audit) if since <= entry.occurred_at < until]
+        yield from sorted(found, key=newest_first_key)
