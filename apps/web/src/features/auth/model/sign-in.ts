@@ -127,10 +127,11 @@ export function parseFakeSignInForm(formData: FormData): ParsedSignInForm {
 }
 
 /**
- * The plain reason the sign-in page shows for a refusal trying again cannot fix, by the
- * problem type identity answers the session exchange with (the slug after the type's prefix).
- * The real sign-in's proxy maps the refusal with it; a tenant whose deletion is under way
- * (identity-tenant-deleting, 403) signs nobody in.
+ * The plain reason for a refusal trying again cannot fix, by the problem type identity answers
+ * the session exchange with (the slug after the type's prefix): a tenant whose deletion is
+ * under way (identity-tenant-deleting, 403) signs nobody in. Nothing calls it yet: the web has
+ * no session exchange proxy, and the real sign-in maps its refusals with it when that lands
+ * (W3). Until then the key is ready and no page shows it.
  */
 const REFUSAL_KEYS: Readonly<Record<string, MessageKey>> = {
   "identity-tenant-deleting": "signIn.refusal.tenantDeleting",

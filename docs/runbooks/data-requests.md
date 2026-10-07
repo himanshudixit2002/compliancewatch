@@ -45,78 +45,117 @@ false zero.
 ## Deletion: the erasure cascade
 
 A deletion request, in one transaction at identity: the request (`received`, due in 30 days),
-the tenant turned `deletion_requested`, `tenant.deletion.requested` in identity's outbox and a
-`data_request.created` audit row. From then on nobody signs in to the tenant (the session
-exchange answers 403 `identity-tenant-deleting`, and the web's sign-in page shows the plain
-reason `signIn.refusal.tenantDeleting`), its tokens open no identity route but the reads of its
-data requests and its audit trail, and it can ask for nothing more. The internal tenant is never
-erased (422 `identity-tenant-not-erasable`).
+the tenant turned `deletion_requested`, `tenant.deletion.requested` in identity's outbox (its
+event id kept on the request: the event every service checks) and a `data_request.created` audit
+row. From then on nobody signs in to the tenant (the session exchange answers 403
+`identity-tenant-deleting`), its tokens open no identity route but the reads of its data requests
+and its audit trail, and it can ask for nothing more. The web has the plain reason ready as the
+message key `signIn.refusal.tenantDeleting`, but nothing shows it yet: the web has no session
+exchange proxy, and the key is wired when that lands (W3). Only identity's routes refuse the
+tenant at once: the other services take a token issued before the request until it expires (ten
+minutes by default), and answer 410 `tenant-erased` once each has erased the tenant. The internal
+tenant is never erased (422 `identity-tenant-not-erasable`).
 
 Six consumers answer the event, each in its group `<service>.erasure` in the worker
 (`cw-mvp worker`, or `make worker SERVICE=<service>`), each in one transaction with its
-`processed_event` row, with `app.tenant_id` and `app.erasure` set (`py_common.erasure`):
+`processed_event` row, with `app.tenant_id` and `app.erasure` set (`py_common.erasure`). Each
+first checks the event, with no transaction open: identity against its own records, every other
+service with `GET /v1/identity/erasures/{tenant_id}` (internal, scope `erasure:verify`, 5 s). It
+erases only when the tenant asked for its deletion (or identity erased it already), is not the
+internal tenant, and the event is the one identity last sent for the tenant's open deletion
+request. Any other event erases nothing, not even at the identity provider: the consumer writes a
+`tenant.erasure_refused` audit row with the reason and dead-letters the event at once. Identity
+unreachable is retried, then dead-lettered; nothing is erased.
 
 | Service | Erases | Keeps |
 | --- | --- | --- |
-| identity | the users' accounts at the identity provider (first, with no transaction open; an account already gone counts), `app_user`, `user_subject`, `idempotency_key`; pseudonymises `consent_record` (subject `erased:` + 16 hex of sha256(tenant\|subject), evidence emptied, `recorded_by` nulled) and the billing customer's email and name; empties the tenant's name and marks it `erased` | the pseudonymised consents and billing customer, the subscriptions, starts and masked webhooks (tax records), the data request, the tenant marker |
+| identity | the users' accounts at the identity provider (first, with no transaction open; an account already gone counts), `app_user` (every session with it), `user_subject`, `idempotency_key`; pseudonymises `consent_record` (subject `erased:` + 32 hex of HMAC-SHA256 keyed with `CW_IDENTITY_ERASURE_PEPPER` over tenant\|subject, evidence emptied, `recorded_by` nulled) and the billing customer's email (the same pseudonym) and name (emptied); empties the checkout links of the subscriptions and starts; empties the tenant's name and marks it `erased` | the pseudonymised consents and billing customer, the subscriptions, starts and masked webhooks (tax records), the data request, the erased tenant |
 | profile | `profile_version`, `profile_attribute`, `review_task`, `profile_node`, `idempotency_key` | nothing of the tenant |
 | obligation | `obligation_change`, `obligation_comment` (append-only, under `app.erasure`), `obligation_reminder`, `obligation`, `obligation_decision`, its `obligation_tenant` row, `idempotency_key` | `rule_version_ref` (rule-level cache) |
-| notification | `work_index` and `notification` (receipts with them), `recipient_address`, `recipient_business`, `recipient`, its `address_directory` rows, `idempotency_key`; `channel_preference` of an address no other tenant holds | a preference another tenant's address still holds, its `set_for_tenant_id` nulled; `suppression` |
+| notification | `work_index` and `notification` (receipts with them), `recipient_address`, `recipient_business`, `recipient`, its `address_directory` rows, `idempotency_key`; the opt-in `channel_preference` of an address no other tenant holds | opt-outs (the record that the person asked to stop, which must outlive the account), an opt-in another tenant still holds (in its directory, or set by its user), each with this tenant's `set_for_tenant_id` nulled; `suppression` |
 | applicability-engine | `review_item`, `applicability_decision` (append-only, under `app.erasure`), its `business_directory` rows, `idempotency_key` | `fanout_run`, `fanout_hold` (rule-level) |
 | rulebook | nothing: it holds regulatory data of no tenant | the documents, rules, candidates and their review |
 
 Every service also prunes the tenant's published or dead `outbox_event` rows (pending ones go out
-with the relay) and writes a `tenant.erased` audit row and `tenant.data.erased` with the row
-counts per table and the tables it kept, each with the reason. Identity's group
-`identity.erasure-records` records each answer on the request: the first turns it
-`in_progress`, and it completes, with `data_request.completed`, once every service of
-`CW_IDENTITY_ERASURE_SERVICES` (by default identity, profile, obligation, notification,
-applicability-engine, rulebook) has answered; `GET /v1/identity/data-requests/{id}` names those
-still pending. The audit log is never erased: its rows are masked and kept seven years. The
-llm-gateway's cost ledger keeps the tenant id only (13 months) and has no handler; qa holds no
-tenant data.
+with the relay; nothing prunes the outbox on its own, see `docs/runbooks/outbox-relay.md`), writes
+its erased marker (`erased_tenant`: the tenant, when, the event's id), a `tenant.erased` audit row
+and `tenant.data.erased` with the row counts per table and the tables it kept, each with the
+reason. From its marker on, the service's routes answer the tenant 410 `tenant-erased`, whoever
+asks, and its consumers mark the tenant's events processed (outcome `erased_tenant`) and write
+nothing: a consumer that checked the marker before the erasure started holds the erasure's lock
+until it commits, so what it wrote goes with the erasure.
+
+Identity's group `identity.erasure-records` records each answer to the event it sent last (an
+answer to another event changes nothing): the first turns the request `in_progress`. Once every
+service of `CW_IDENTITY_ERASURE_SERVICES` (by default identity, profile, obligation, notification,
+applicability-engine, rulebook) has answered, identity writes the second pass, the same request
+as a new event, to its outbox, held back `CW_IDENTITY_ERASURE_SECOND_PASS_SECONDS` (900: longer
+than an access token lives), with a `data_request.second_pass_scheduled` audit row; the relay
+sends it then. Every service checks and answers it like the first, and the request completes,
+with `data_request.completed`, once they all have: a write that slipped past the first pass (a
+request on a route that checked the marker just before the erasure, a fan-out batch that read the
+directory before it) goes in the second. `GET /v1/identity/data-requests/{id}` shows the pass
+(`erasure_pass`), when the second goes out (`second_pass_at`) and the services still pending. The
+audit log is never erased: its rows are masked and kept seven years. The llm-gateway's cost ledger
+keeps the tenant id only (13 months) and has no handler; qa holds no tenant data.
 
 ### The flag
 
 `identity.tenant_erasure` (`CW_TENANT_ERASURE_ENABLED`, per tenant with
 `CW_TENANT_ERASURE_TENANTS`; owner identity-partner; off by default) is read by every erasure
-consumer. With it off, the request is still recorded, the tenant still shut and the event still
-emitted, but every consumer only logs `erasure.off` and marks the event processed: nothing is
-erased, the request stays `received`, and 30 days later it is overdue and pages. That is meant: a
-request is never silently done. To answer it once the flag is on for the tenant, send it again:
+consumer, through one switch per worker process. With it off, the request is still recorded, the
+tenant still shut and the event still emitted, but every consumer only logs `erasure.off` and
+marks the event processed: nothing is erased, the request stays `received`, and 30 days later it
+is overdue and pages. That is meant: a request is never silently done. To answer it once the flag
+is on for the tenant, send it again:
 
 ```bash
 CW_DATABASE_URL=... identity-admin erasure resend --tenant <tenant id> --reason "flag turned on"
 ```
 
-`resend` writes a new `tenant.deletion.requested` for the tenant's open deletion request (else
-its newest) and a `data_request.resent` audit row. Every service's erasure is idempotent, so one
-that answered already erases nothing more and answers again; answers to a completed request
-change nothing. The flag stays off everywhere until counsel has reviewed the data map and a
-staging drill has erased a synthetic tenant (`infra/deploy/README.md`); never run an erasure
-against a shared dev database.
+`resend` writes a new `tenant.deletion.requested` for the tenant's open deletion request, makes it
+the event the services check, and writes a `data_request.resent` audit row. Every service's
+erasure is idempotent, so one that answered already erases nothing more and answers again. An
+older event of the request still in flight is refused from then on (dead-lettered, with a
+`tenant.erasure_refused` row): expected, and nothing to do. A completed request is not sent
+again (404 `identity-deletion-request-not-found`): every service would refuse it. The flag stays
+off everywhere until counsel has reviewed the data map, `CW_IDENTITY_ERASURE_PEPPER` is set, the
+consumers' clients hold `erasure:verify`, and a staging drill has erased a synthetic tenant
+(`infra/deploy/README.md`); never run an erasure against a shared dev database.
 
 ### When a deletion is pending
 
 1. `GET /v1/identity/data-requests/{id}` (as the owner while its token lasts, or the directory
-   query of step 1 below) names the services still pending.
+   query of step 1 below) names the services still pending and the pass.
 2. Is the flag on for the tenant? Each consumer logs `erasure.off` with the tenant while it is
    off.
 3. Is the worker consuming? `/loops` on the worker's health port lists
-   `<service>/consumer:<service>.erasure`; is the relay of identity's schema publishing?
+   `<service>/consumer:<service>.erasure`; is the relay of identity's schema publishing? In the
+   second pass, has `second_pass_at` passed? Until then the event waits in identity's outbox.
 4. Did a handler dead-letter? Look at `tenant.deletion.requested.<service>.erasure.dlq` (and
    `tenant.data.erased.identity.erasure-records.dlq`); the consumer logs
-   `consumer.dead_lettered` with the error. Identity's handler raises while the identity
-   provider cannot be reached (`ProviderUnavailableError`) and retries the next delivery. Fix
-   the cause, then `make replay` the message or `identity-admin erasure resend`.
-5. A user whose account lives at another provider than the one configured (the logs count them
-   as `other_provider`) is deleted from the store but not at that provider: delete it there by
-   hand and note it in the ticket.
+   `consumer.dead_lettered` with the error, or `erasure.refused` with the reason and a
+   `tenant.erasure_refused` audit row. A refusal of an event identity did not send, or of an
+   older event after a resend, is right: leave it. A refusal of the current event means the
+   service and identity disagree: compare `GET /v1/identity/erasures/{tenant_id}` with the
+   event. `IdentityUnreachableError` (identity down, or 403 without `erasure:verify`) and
+   `ProviderUnavailableError` (the identity provider) are retried with the next delivery. Fix the
+   cause, then `make replay` the message (it is checked again) or `identity-admin erasure
+   resend`.
+5. A user whose account lives at another provider than the one configured is deleted from the
+   store but not at that provider. Identity's `tenant.erased` audit row lists each one under
+   `other_provider_accounts` (user id, provider and the provider's subject, masked where it reads
+   as a phone number or an email address), and the log line `identity.provider_accounts_deleted`
+   names them too: delete each account there by hand and note it in the ticket.
 6. Outside the databases: remove the tenant's lines from `CW_PROFILE_EVAL_CASES_PATH` where it is
-   set; backups age out with their retention, and a restore must run the erasure again
-   (`resend`) before the tenant's data is served.
-7. An event in flight when a service erased (a late profile.updated, a decision, a reminder) can
-   write a row again; the drill checks for it, and `resend` erases it.
+   set; the Kafka topics and dead-letter topics keep the event (and its free-text reason) for 7
+   and 30 days, and the engine's Temporal histories for the namespace's retention; backups age
+   out with their retention, and a restore must run the erasure again (`resend`, while the
+   request is open) before the tenant's data is served.
+7. After it completes, nothing of the tenant comes back: every service's routes answer 410 and
+   its consumers drop the tenant's events by its marker. If a row of the tenant turns up anyway,
+   it is a bug: the services' integration tests read every table with a tenant column from the
+   catalog and fail on one their eraser neither erases nor retains.
 
 ## When it fires
 
