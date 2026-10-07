@@ -21,14 +21,14 @@ test.describe("not available yet", () => {
     checkA11y,
   }) => {
     await signIn(ANALYST);
-    await page.goto("/admin/review/stats");
-    await expect(page.getByRole("heading", { level: 1, name: "Review stats" })).toBeVisible();
-    await expect(page.getByText("GET /v1/rulebook/review/stats")).toBeVisible();
-    await expect(page.getByText("services track (WP21)")).toBeVisible();
+    await page.goto("/admin/error-reports");
+    await expect(page.getByRole("heading", { level: 1, name: "Error reports" })).toBeVisible();
+    await expect(page.getByText("GET /v1/rulebook/error-reports")).toBeVisible();
+    await expect(page.getByText("services track (WP24)").first()).toBeVisible();
     const crumbs = page.getByRole("navigation", { name: "Breadcrumb" });
-    await expect(crumbs.getByRole("link", { name: "Review queue" })).toHaveAttribute(
+    await expect(crumbs.getByRole("link", { name: "Internal tools" })).toHaveAttribute(
       "href",
-      "/admin/review",
+      "/admin",
     );
     await expect(page.getByRole("link", { name: "Back", exact: true })).toHaveAttribute(
       "href",

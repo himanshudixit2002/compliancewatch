@@ -8,17 +8,17 @@ import { NotAvailablePage } from "./not-available-page";
 
 describe("NotAvailablePage", () => {
   it("shows the awaited routes with their owners, the roles and the guide reference", async () => {
-    const screenEntry = screenById("admin.review.stats");
+    const screenEntry = screenById("admin.error-reports");
     const { container } = render(
       <NotAvailablePage
         view={toNotAvailableView(screenEntry)}
-        crumbs={breadcrumbsFor("admin.review.stats")}
+        crumbs={breadcrumbsFor("admin.error-reports")}
         backHref="/admin"
       />,
     );
-    expect(screen.getByRole("heading", { level: 1, name: "Review stats" })).toBeDefined();
-    expect(screen.getByText("GET /v1/rulebook/review/stats")).toBeDefined();
-    expect(screen.getByText("services track (WP21)")).toBeDefined();
+    expect(screen.getByRole("heading", { level: 1, name: "Error reports" })).toBeDefined();
+    expect(screen.getByText("GET /v1/rulebook/error-reports")).toBeDefined();
+    expect(screen.getAllByText("services track (WP24)").length).toBeGreaterThan(0);
     expect(screen.getByText("Analyst, Reviewer, Admin")).toBeDefined();
     expect(screen.getByRole("link", { name: "Back" }).getAttribute("href")).toBe("/admin");
     const crumbs = screen.getByRole("navigation", { name: "Breadcrumb" });

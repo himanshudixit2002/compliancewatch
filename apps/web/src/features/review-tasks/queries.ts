@@ -1,0 +1,171 @@
+import "server-only";
+
+import type { DocumentDetail } from "@/entities/pipeline/types";
+import type { RulebookDocument } from "@/entities/rulebook/types";
+import type { ReviewTaskDetail, RuleVersion } from "@/entities/rule-version/types";
+import { rulebookWriteAccess, type WriteAccess } from "@/server/api/rulebook-write";
+import type { ClientContext, ClientPrincipal } from "@/server/api/services";
+import { getOntology, readOntology } from "@/server/ontology";
+import { err, ok, type ApiError, type Result } from "@/server/result";
+import { reviewTasksGateway } from "./gateway";
+import { QUEUE_PAGE_SIZE, queueView, type QueueFilter, type QueueView } from "./model/queue";
+import { statsStrip, statsView, type StatsStrip, type StatsView } from "./model/stats";
+import {
+  sourceDocumentIds,
+  workbenchView,
+  type WorkbenchReads,
+  type WorkbenchView,
+} from "./model/workbench";
+import type { ReviewTasksPort } from "./ports";
+import type { AccessView } from "./ui/form-shared";
+
+/**
+ * The review screens' reads. The queue reads one page of tasks and the stats (for the strip and
+ * the regulators the chips offer) side by side, each with its own failure; the stats page reads
+ * the stats; the workbench reads the task, then side by side the ontology, each document it shows
+ * with the pipeline's record of its file, the rule's versions (for the previous one), the write
+ * access, and for a candidate's draft form the document's open relation candidates, the rules and
+ * every rule's versions a relation may point at.
+ */
+export interface QueryDeps {
+  fetchImpl?: ClientContext["fetchImpl"];
+}
+
+function accessView(access: WriteAccess): AccessView {
+  if (access.allowed) return { allowed: true };
+  const detail = access.error.problem?.detail ?? undefined;
+  return {
+    allowed: false,
+    title: access.error.message,
+    ...(detail === undefined || detail === null ? {} : { detail }),
+  };
+}
+
+export interface QueuePage {
+  /** The page of tasks; an error when the queue could not be read. */
+  queue: Result<QueueView>;
+  /** Whether the session may claim and open the seed tasks, and why not. */
+  access: AccessView;
+  /** The strip; an error when the stats could not be read (the queue still shows). */
+  strip: Result<StatsStrip>;
+  /** The regulators the stats count, for the chips; empty when they could not be read. */
+  regulators: string[];
+}
+
+export async function getQueuePage(
+  session: ClientPrincipal,
+  filter: QueueFilter,
+  deps: QueryDeps = {},
+): Promise<QueuePage> {
+  const port = reviewTasksGateway(deps);
+  const [tasks, stats, access] = await Promise.all([
+    port.tasks({
+      status: filter.status === "all" ? null : filter.status,
+      regulator: filter.regulator,
+      kind: filter.kind,
+      cursor: filter.cursor,
+      limit: QUEUE_PAGE_SIZE,
+    }),
+    port.stats(),
+    rulebookWriteAccess({ session, fetchImpl: deps.fetchImpl }),
+  ]);
+  return {
+    queue: tasks.ok
+      ? ok(queueView(filter, tasks.value.tasks, tasks.value.nextCursor, session.userId))
+      : tasks,
+    access: accessView(access),
+    strip: stats.ok ? ok(statsStrip(stats.value)) : stats,
+    regulators: stats.ok ? stats.value.byRegulator.map((row) => row.regulator) : [],
+  };
+}
+
+export async function getStatsPage(deps: QueryDeps = {}): Promise<Result<StatsView>> {
+  const stats = await reviewTasksGateway(deps).stats();
+  return stats.ok ? ok(statsView(stats.value)) : stats;
+}
+
+/** Every rule's versions; a rule gone between the two reads is skipped. */
+async function everyVersion(port: ReviewTasksPort): Promise<Result<RuleVersion[]>> {
+  const rules = await port.rules();
+  if (!rules.ok) return rules;
+  const versions = await Promise.all(rules.value.map((rule) => port.versionsOf(rule.ruleKey)));
+  const all: RuleVersion[] = [];
+  for (const result of versions) {
+    if (result.ok) all.push(...result.value);
+    else if (result.error.kind !== "not_found") return err(result.error);
+  }
+  return ok(all);
+}
+
+async function readEach<T>(
+  ids: readonly string[],
+  read: (id: string) => Promise<Result<T>>,
+): Promise<Map<string, Result<T>>> {
+  const results = await Promise.all(ids.map(read));
+  return new Map(ids.map((id, index) => [id, results[index] as Result<T>]));
+}
+
+/**
+ * The workbench of one task, or null for a task the rulebook does not hold. The draft form's
+ * extra reads (relations, rules, versions) are made only when the form is shown: a candidate task
+ * not drafted yet, claimed by the signed-in analyst.
+ */
+export async function getWorkbench(
+  session: ClientPrincipal,
+  taskId: string,
+  deps: QueryDeps = {},
+): Promise<Result<WorkbenchView | null>> {
+  const port = reviewTasksGateway(deps);
+  const read = await port.task(taskId);
+  if (!read.ok) return read.error.kind === "not_found" ? ok(null) : read;
+  const view = await workbenchFor(session, read.value, port, deps);
+  return ok(view);
+}
+
+export async function workbenchFor(
+  session: ClientPrincipal,
+  detail: ReviewTaskDetail,
+  port: ReviewTasksPort,
+  deps: QueryDeps = {},
+): Promise<WorkbenchView> {
+  const documentIds = sourceDocumentIds(detail);
+  const candidate = detail.candidate;
+  const formShown =
+    candidate !== null &&
+    detail.version === null &&
+    detail.task.status !== "decided" &&
+    detail.task.claimedBy === session.userId;
+  const [ontology, documents, stored, ruleVersions, access, relations, rules] = await Promise.all([
+    deps.fetchImpl === undefined ? getOntology() : readOntology({ fetchImpl: deps.fetchImpl }),
+    readEach<RulebookDocument>(documentIds, (id) => port.document(id)),
+    readEach<DocumentDetail>(documentIds, (id) => port.storedDocument(id)),
+    detail.version === null ? Promise.resolve(null) : port.versionsOf(detail.version.ruleKey),
+    rulebookWriteAccess({ session, fetchImpl: deps.fetchImpl }),
+    formShown ? port.openRelations(candidate.documentId) : Promise.resolve(null),
+    formShown ? port.rules() : Promise.resolve(null),
+  ]);
+  const needsTargets = relations !== null && relations.ok && relations.value.length > 0;
+  const targets = needsTargets ? await everyVersion(port) : null;
+  const reads: WorkbenchReads = {
+    detail,
+    ontology,
+    documents,
+    stored,
+    ruleVersions,
+    relations,
+    targets,
+    ruleKeys: rules !== null && rules.ok ? rules.value.map((rule) => rule.ruleKey).sort() : [],
+    access: accessView(access),
+  };
+  return workbenchView(reads, session);
+}
+
+/** A task read again after a refusal, to say who holds or decided it; null when it is gone. */
+export async function taskNow(
+  taskId: string,
+  deps: QueryDeps = {},
+): Promise<Result<ReviewTaskDetail | null>> {
+  const read = await reviewTasksGateway(deps).task(taskId);
+  if (read.ok) return read;
+  return read.error.kind === "not_found" ? ok(null) : err<ApiError>(read.error);
+}

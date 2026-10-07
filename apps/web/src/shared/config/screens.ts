@@ -135,13 +135,6 @@ const PROBES: readonly RouteRef[] = SERVICES_WITH_SPECS.flatMap((service) => [
   uses(service, "GET", "/health"),
   uses(service, "GET", "/ready"),
 ]);
-const ONTOLOGY = servicesTrack("WP12", "profile", "GET", "/v1/ontology");
-const RAW_DOCUMENT = servicesTrack(
-  "WP18",
-  "pipeline",
-  "GET",
-  "/v1/pipeline/documents/{document_id}/raw",
-);
 /** An admin's upload of a document to a source, and the pipeline's task queue (M2-3). */
 const UPLOAD = uses("pipeline", "POST", "/v1/pipeline/sources/{key}/uploads");
 const TASKS = uses("pipeline", "GET", "/v1/pipeline/tasks");
@@ -196,7 +189,6 @@ const NOTIFICATION = uses(
 );
 const BUDGET_ALARMS = servicesTrack("WP27", "eval", "GET", "/v1/eval/budget-alarms");
 const QA_COVERAGE = servicesTrack("WP28", "eval", "GET", "/v1/eval/qa-coverage");
-const REVIEW_STATS = servicesTrack("WP21", "rulebook", "GET", "/v1/rulebook/review/stats");
 /** The rulebook's review tasks (M2-4, M2-6): the queue, the seed tasks, a task, its claim, the
  * version drafted from a candidate task's candidate, its draft's edit and its decision, and the
  * stats. */
@@ -1479,14 +1471,9 @@ const SCREEN_LIST = [
     roles: REGULATORY,
     tenantKinds: ["internal"],
     uses: [REVIEW_TASKS, REVIEW_CLAIM, REVIEW_SEED, REVIEW_STATS_READ],
-    awaits: [
-      servicesTrack("WP21", "rulebook", "GET", "/v1/rulebook/review/tasks"),
-      servicesTrack("WP21", "rulebook", "POST", "/v1/rulebook/review/tasks/{task_id}/claim"),
-      servicesTrack("WP21", "rulebook", "POST", "/v1/rulebook/review/tasks/seed"),
-      REVIEW_STATS,
-    ],
-    status: "ready",
-    e2e: [],
+    awaits: [],
+    status: "live",
+    e2e: ["admin-review.spec.ts", "a11y.spec.ts"],
     guideRef: "15; F4; ADR-006",
     nav: { group: "review", order: 1 },
     parent: "admin.home",
@@ -1500,26 +1487,21 @@ const SCREEN_LIST = [
     roles: REGULATORY,
     tenantKinds: ["internal"],
     uses: [
-      uses("rulebook", "GET", "/v1/rulebook/documents/{document_id}"),
-      RULE_VERSION,
-      uses("profile", "GET", "/v1/ontology"),
-      STORED_BYTES,
       REVIEW_TASK,
       REVIEW_CLAIM,
       REVIEW_DRAFT,
       REVIEW_EDIT,
       REVIEW_DECIDE,
+      RULEBOOK_DOCUMENT,
+      STORED_DOCUMENT,
+      REVIEW_RELATIONS,
+      uses("rulebook", "GET", "/v1/rulebook/rules"),
+      uses("rulebook", "GET", "/v1/rulebook/rules/{rule_key}/versions"),
+      uses("profile", "GET", "/v1/ontology"),
     ],
-    awaits: [
-      servicesTrack("WP21", "rulebook", "GET", "/v1/rulebook/review/tasks/{task_id}"),
-      servicesTrack("WP21", "rulebook", "POST", "/v1/rulebook/review/tasks/{task_id}/draft"),
-      servicesTrack("WP21", "rulebook", "PATCH", "/v1/rulebook/review/tasks/{task_id}/draft"),
-      servicesTrack("WP21", "rulebook", "POST", "/v1/rulebook/review/tasks/{task_id}/decide"),
-      ONTOLOGY,
-      RAW_DOCUMENT,
-    ],
-    status: "ready",
-    e2e: [],
+    awaits: [],
+    status: "live",
+    e2e: ["admin-review-workbench.spec.ts"],
     guideRef: "15; ADR-006; F4",
     parent: "admin.review",
   },
@@ -1532,9 +1514,9 @@ const SCREEN_LIST = [
     roles: REGULATORY,
     tenantKinds: ["internal"],
     uses: [REVIEW_STATS_READ],
-    awaits: [REVIEW_STATS],
-    status: "ready",
-    e2e: [],
+    awaits: [],
+    status: "live",
+    e2e: ["admin-review-stats.spec.ts", "a11y.spec.ts"],
     guideRef: "15",
     nav: { group: "review", order: 2 },
     parent: "admin.review",

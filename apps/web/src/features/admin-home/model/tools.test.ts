@@ -34,11 +34,14 @@ describe("adminToolGroups", () => {
   });
 
   it("describes a tool with its link, roles, awaited routes and services", () => {
-    const tool = toAdminTool(screenById("admin.review.task"));
+    const tool = toAdminTool(screenById("admin.tenant"));
     expect(tool.href).toBeNull();
-    expect(tool.services).toEqual(["pipeline", "profile", "rulebook"]);
-    expect(tool.waitsFor.some((item) => item.path.includes("/review/tasks/"))).toBe(true);
-    expect(tool.roles).toEqual(["Analyst", "Reviewer", "Admin"]);
+    expect(tool.services).toEqual(["identity"]);
+    expect(tool.waitsFor.some((item) => item.path.includes("/admin/tenants/"))).toBe(true);
+    expect(tool.roles).toEqual(["Admin"]);
+    const workbench = toAdminTool(screenById("admin.review.task"));
+    expect(workbench.services).toEqual(["pipeline", "profile", "rulebook"]);
+    expect(workbench.waitsFor).toEqual([]);
     const sources = toAdminTool(screenById("admin.sources"));
     expect(sources.href).toBe("/admin/sources");
     const hindi = toAdminTool(screenById("system.hindi-ui"));

@@ -1,4 +1,4 @@
-import { ANALYST, IS_CI, expect, seededTenantId, test } from "./fixtures";
+import { ADMIN, ANALYST, IS_CI, expect, seededTenantId, test } from "./fixtures";
 
 test.describe("admin home", () => {
   test.beforeEach(async ({ signIn }) => {
@@ -53,13 +53,15 @@ test.describe("admin home", () => {
     await checkA11y();
   });
 
-  test("the sidebar says which tools are not built yet", async ({ page }) => {
+  test("the sidebar says which tools are not built yet", async ({ page, signIn }) => {
+    // An admin's sidebar: every tool an analyst may open that is not built yet has no link there.
+    await signIn(ADMIN);
     await page.goto("/admin");
     const sidebar = page.locator("aside");
     const sources = sidebar.getByRole("link", { name: "Sources", exact: true });
     await expect(sources).toHaveAccessibleDescription("");
-    const stats = sidebar.getByRole("link", { name: "Review stats", exact: true });
-    await expect(stats).toHaveAccessibleDescription("Not built");
+    const team = sidebar.getByRole("link", { name: "Internal users", exact: true });
+    await expect(team).toHaveAccessibleDescription("Not built");
     const audit = sidebar.getByRole("link", { name: "Audit trail", exact: true });
     await expect(audit).toHaveAccessibleDescription("Waiting");
     await expect(sources).toHaveText("Sources");
