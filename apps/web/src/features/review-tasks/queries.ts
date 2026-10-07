@@ -137,6 +137,13 @@ export async function relationReads(
   return { relations, targets };
 }
 
+export interface OfferedRelations {
+  /** What the form offers for each candidate. */
+  choices: RelationChoice[];
+  /** The candidates themselves, for the words a refusal names one by. */
+  candidates: RelationCandidate[];
+}
+
 /**
  * The relation candidates a claimed candidate task's draft may take on, read again when the draft
  * is sent, to check the form against (D-061); none for a task without a candidate.
@@ -144,16 +151,19 @@ export async function relationReads(
 export async function relationsOffered(
   taskId: string,
   deps: QueryDeps = {},
-): Promise<Result<RelationChoice[]>> {
+): Promise<Result<OfferedRelations>> {
   const port = reviewTasksGateway(deps);
   const task = await port.task(taskId);
   if (!task.ok) return task;
   const candidate = task.value.candidate;
-  if (candidate === null) return ok([]);
+  if (candidate === null) return ok({ choices: [], candidates: [] });
   const reads = await relationReads(port, candidate.documentId);
   if (!reads.relations.ok) return reads.relations;
   if (reads.targets !== null && !reads.targets.ok) return reads.targets;
-  return ok(relationChoices(reads.relations.value, reads.targets?.value ?? []));
+  return ok({
+    choices: relationChoices(reads.relations.value, reads.targets?.value ?? []),
+    candidates: reads.relations.value,
+  });
 }
 
 async function readEach<T>(

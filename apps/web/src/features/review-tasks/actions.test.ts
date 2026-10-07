@@ -532,6 +532,70 @@ describe("editDraft", () => {
     });
   });
 
+  it("says an edit of a task decided meanwhile is not saved, naming who decided it", async () => {
+    await signedInAs(["analyst"]);
+    const decided = reviewTaskDetailDto({
+      task: reviewTaskDto({
+        status: "decided",
+        decision: "return",
+        decided_by: EXAMPLE_OTHER_ANALYST_ID,
+        decided_at: "2000-05-02T06:00:00Z",
+        note: "Example rework note",
+      }),
+    });
+    vi.stubGlobal(
+      "fetch",
+      fakeFetch([
+        { method: "PATCH", path: `${TASK}/draft`, ...problem("rulebook-review-task-closed", 409) },
+        { method: "POST", path: `${TASK}/claim`, ...problem("rulebook-review-task-closed", 409) },
+        {
+          method: "POST",
+          path: `${CANDIDATE_TASK}/draft`,
+          ...problem("rulebook-review-task-closed", 409),
+        },
+        { method: "GET", path: TASK, body: decided },
+        { method: "GET", path: CANDIDATE_TASK, body: decided },
+      ]).fetchImpl,
+    );
+    const title = `This task was decided already (Returned by ${EXAMPLE_OTHER_ANALYST_ID} on 2 May 2000, 11:30 am IST), so nothing was saved`;
+    expect(await editDraft(EXAMPLE_TASK_ID, IDLE, edit({ summary: "Example." }))).toMatchObject({
+      status: "error",
+      problem: { title, detail: "Note: Example rework note" },
+    });
+    expect(await claimTask(EXAMPLE_TASK_ID)).toMatchObject({ status: "error", problem: { title } });
+    const draft = form({ rule_key: "example_rule", citations_mode: "candidate" });
+    expect(await draftFromCandidate(EXAMPLE_CANDIDATE_TASK_ID, IDLE, draft)).toMatchObject({
+      status: "error",
+      problem: { title },
+    });
+  });
+
+  it("words the rulebook's content refusal and lists each problem", async () => {
+    await signedInAs(["analyst"]);
+    vi.stubGlobal(
+      "fetch",
+      fakeFetch([
+        {
+          method: "PATCH",
+          path: `${TASK}/draft`,
+          ...problem(
+            "invariant-violation",
+            422,
+            "specification: example_kind = nowhere: not an option; effective_to must be after effective_from",
+          ),
+        },
+      ]).fetchImpl,
+    );
+    expect(await editDraft(EXAMPLE_TASK_ID, IDLE, edit({ summary: "Example." }))).toMatchObject({
+      status: "error",
+      problem: { title: "The rulebook refused the draft's content" },
+      formErrors: [
+        "specification: example_kind = nowhere: not an option",
+        "effective_to must be after effective_from",
+      ],
+    });
+  });
+
   it("says plainly that the task is not the analyst's", async () => {
     await signedInAs(["analyst"]);
     vi.stubGlobal(

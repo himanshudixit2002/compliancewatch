@@ -291,11 +291,14 @@ describe("getWorkbench", () => {
       await relationsOffered(EXAMPLE_CANDIDATE_TASK_ID, { fetchImpl: fake.fetchImpl }),
     ).toMatchObject({
       ok: true,
-      value: [{ needsTarget: true, targetOptions: [{ label: "example_rule v1 (Published)" }] }],
+      value: {
+        choices: [{ needsTarget: true, targetOptions: [{ label: "example_rule v1 (Published)" }] }],
+        candidates: [{ targetName: "EXAMPLE-1" }],
+      },
     });
     expect(await relationsOffered(EXAMPLE_TASK_ID, { fetchImpl: fake.fetchImpl })).toEqual({
       ok: true,
-      value: [],
+      value: { choices: [], candidates: [] },
     });
     const failing = fakeFetch([
       {

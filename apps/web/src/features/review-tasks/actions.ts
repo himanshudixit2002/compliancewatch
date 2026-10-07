@@ -26,7 +26,14 @@ import { ruleVersionStatusLabel } from "@/shared/ui/rule-version-status";
 import { candidateStatusLabel } from "./model/candidate";
 import { parseClaim, parseDecision, parseDraft, parseEdit, type Parsed } from "./model/forms";
 import { decisionLabel, taskHref } from "./model/queue";
-import { REVIEW_PROBLEMS, isRefusal, onRelationRows, refusalState } from "./model/refusals";
+import {
+  REVIEW_PROBLEMS,
+  isRefusal,
+  onRelationRows,
+  refusalState,
+  type ReviewStep,
+  type SentRelation,
+} from "./model/refusals";
 import { checkRelations } from "./model/workbench";
 import { relationsOffered, taskNow } from "./queries";
 import type { WriteResult } from "./ui/form-shared";
@@ -77,31 +84,65 @@ function failure<T>(parsed: Extract<Parsed<unknown>, { ok: false }>): ActionStat
     : { status: "error", fieldErrors, formErrors: parsed.formErrors };
 }
 
-/** Who decided a task, read again: "Already decided: Approved by you on 1 Jan 2000, ...". */
-function decidedResult(detail: ReviewTaskDetail, session: SessionClaims): WriteResult {
+/** Who decided a task, read again: "Approved by you on 1 Jan 2000, 10:30 am IST". */
+function decidedWords(
+  detail: ReviewTaskDetail,
+  session: SessionClaims,
+): { decision: string; who: string; when: string } {
   const task = detail.task;
+  return {
+    decision: task.decision === null ? t("common.unknown") : decisionLabel(task.decision),
+    who: who(task.decidedBy, session),
+    when: task.decidedAt === null ? t("common.unknown") : formatDateTime(task.decidedAt),
+  };
+}
+
+/** A decision that found the task decided already: information, with who decided it. */
+function decidedResult(detail: ReviewTaskDetail, session: SessionClaims): WriteResult {
+  const note = detail.task.note;
   return result(
-    t("workbench.alreadyDecided", {
-      decision: task.decision === null ? t("common.unknown") : decisionLabel(task.decision),
-      who: who(task.decidedBy, session),
-      when: task.decidedAt === null ? t("common.unknown") : formatDateTime(task.decidedAt),
-    }),
-    task.note === "" ? [] : [t("workbench.decisionNote", { note: task.note })],
+    t("workbench.alreadyDecided", decidedWords(detail, session)),
+    note === "" ? [] : [t("workbench.decisionNote", { note })],
     [],
     "already",
   );
 }
 
 /**
- * A refusal the rulebook gave because the task moved: decided before the request arrived (shown
- * as information), or claimed by someone else (shown as the refusal, naming who). Anything else,
- * or a read that fails, passes on in plain words.
+ * A claim, a draft or an edit that found the task decided: an error, since what it asked for was
+ * not saved, naming who decided it.
+ */
+function closedState<T>(
+  error: ApiError,
+  detail: ReviewTaskDetail,
+  session: SessionClaims,
+): ActionState<T> {
+  const state = refusalState<T>(error);
+  if (state.status !== "error") return state;
+  const note = detail.task.note;
+  return {
+    ...state,
+    problem: {
+      ...(state.problem ?? { type: "", title: "" }),
+      title: t("workbench.closedNothingSaved", decidedWords(detail, session)),
+      detail: note === "" ? t("workbench.closedDetail") : t("workbench.decisionNote", { note }),
+    },
+  };
+}
+
+/**
+ * A refusal the rulebook gave because the task moved: decided before the request arrived (said as
+ * information for a decision, and as an error that nothing was saved for a claim, a draft or an
+ * edit), or claimed by someone else (shown as the refusal, naming who). Anything else, or a read
+ * that fails, passes on in plain words for the step.
  */
 async function refusal<T>(
   error: ApiError,
   taskId: string,
   session: SessionClaims,
+  step: ReviewStep,
   done: (found: WriteResult) => T,
+  relations: readonly SentRelation[] = [],
 ): Promise<ActionState<T>> {
   const closed = isRefusal(error, REVIEW_PROBLEMS.closed);
   const claimed =
@@ -112,11 +153,12 @@ async function refusal<T>(
     if (now.ok && now.value !== null) {
       const task = now.value.task;
       if (closed && task.status === "decided") {
+        if (step !== "decide") return closedState<T>(error, now.value, session);
         const found = decidedResult(now.value, session);
         return actionSuccess(done(found), found.message);
       }
       if (claimed && task.claimedBy !== null && task.claimedBy !== session.userId) {
-        const state = refusalState<T>(error);
+        const state = refusalState<T>(error, { step });
         if (state.status !== "error") return state;
         return {
           ...state,
@@ -131,7 +173,7 @@ async function refusal<T>(
       }
     }
   }
-  return refusalState<T>(error);
+  return refusalState<T>(error, { step, relations });
 }
 
 function taskIdOk(taskId: string): boolean {
@@ -143,7 +185,7 @@ function taskIdOk(taskId: string): boolean {
 async function claim(taskId: string, session: SessionClaims): Promise<ActionState<WriteResult>> {
   const writes = await rulebookWrites({ session });
   const claimed = await writes.claimTask(taskId);
-  if (!claimed.ok) return refusal(claimed.error, taskId, session, (found) => found);
+  if (!claimed.ok) return refusal(claimed.error, taskId, session, "claim", (found) => found);
   refresh(taskId);
   const done = result(
     t("workbench.claimed"),
@@ -178,7 +220,7 @@ export async function openSeedTasks(): Promise<ActionState<WriteResult>> {
   const session = await requireScreenSession(QUEUE);
   const writes = await rulebookWrites({ session });
   const opened = await writes.openSeedTasks();
-  if (!opened.ok) return refusalState(opened.error);
+  if (!opened.ok) return refusalState(opened.error, { step: "seed" });
   refresh(null);
   const done = result(
     opened.value.opened === 0
@@ -234,16 +276,32 @@ export async function draftFromCandidate(
   if (!parsed.ok) return failure(parsed);
   const id = taskId.toLowerCase();
   const relations = parsed.value.relations;
+  let sent: SentRelation[] = [];
   if (relations.length > 0) {
     const offered = await relationsOffered(id);
-    if (!offered.ok) return refusalState(offered.error);
-    const problems = checkRelations(relations, offered.value);
+    if (!offered.ok) return refusalState(offered.error, { step: "draft" });
+    const problems = checkRelations(relations, offered.value.choices);
     if (Object.keys(problems).length > 0) return { status: "error", fieldErrors: problems };
+    const named = new Map(
+      offered.value.candidates.map((candidate) => [candidate.candidateId, candidate]),
+    );
+    sent = relations.map((relation) => {
+      const candidate = named.get(relation.candidateId);
+      return {
+        ...relation,
+        ...(candidate === undefined
+          ? {}
+          : { relation: candidate.relation, targetName: candidate.targetName }),
+      };
+    });
   }
   const writes = await rulebookWrites({ session });
   const drafted = await writes.draftFromCandidate(id, parsed.value);
   if (!drafted.ok) {
-    return onRelationRows(await refusal(drafted.error, id, session, (found) => found), relations);
+    return onRelationRows(
+      await refusal(drafted.error, id, session, "draft", (found) => found, sent),
+      relations,
+    );
   }
   refresh(id);
   const version = drafted.value.version;
@@ -274,7 +332,7 @@ export async function editDraft(
   const id = taskId.toLowerCase();
   const writes = await rulebookWrites({ session });
   const edited = await writes.editDraft(id, parsed.value);
-  if (!edited.ok) return refusal(edited.error, id, session, (found) => found);
+  if (!edited.ok) return refusal(edited.error, id, session, "edit", (found) => found);
   refresh(id);
   const done = savedResult(parsed.value);
   return actionSuccess(done, done.message);
@@ -355,7 +413,7 @@ export async function decideTask(
   const id = taskId.toLowerCase();
   const writes = await rulebookWrites({ session });
   const decided = await writes.decideTask(id, parsed.value);
-  if (!decided.ok) return refusal(decided.error, id, session, (found) => found);
+  if (!decided.ok) return refusal(decided.error, id, session, "decide", (found) => found);
   refresh(id);
   const done = decisionResult(decided.value, session);
   return actionSuccess(done, done.message);

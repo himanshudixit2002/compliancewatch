@@ -426,7 +426,9 @@ the not-found page.
   how it recurs, the obligation, the condition, the open questions and the instrument), a link to
   the version's page, then the steps the task's state allows (D-061):
   - **Claim**: required before drafting or editing; claiming one's own task again changes nothing,
-    and a task someone else claimed names them (read again after the rulebook's refusal).
+    and a task someone else claimed names them (read again after the rulebook's refusal). A claim,
+    a draft or an edit that finds the task decided meanwhile is an error that names who decided it
+    and says nothing was saved; only a decision that finds it decided is said as information.
   - **Draft from the candidate** (the claimant, before drafting): the rule key (the suggested one,
     another rule's, or a new rule's with its regulator and level), the proposed content with the
     analyst's changes, the citations (the candidate's quotes, or the analyst's own, each a clause of
@@ -435,15 +437,18 @@ the not-found page.
     points at where its kind needs one, from the versions of the rule it names, or of every rule
     when it names none) and why. The action reads the open candidates and their versions again and
     refuses a candidate or a version the form would not offer, on its row, before anything is sent
-    (D-061). Refusals are said plainly: a key no rule has or one a rule has, a candidate drafted
-    already (the page renders its draft), an overlapping version, a relation's refusal, a quote not
-    in its clause, and an incomplete draft with every problem the rulebook listed.
+    (D-061). Refusals are said plainly: a key no rule has or one a rule has, a rule of another
+    regulator, a candidate drafted already (the page renders its draft), an overlapping version, a
+    relation candidate gone or decided meanwhile, a target not aligned, a supersession cycle or a
+    version the rulebook does not hold (each on the relation's row when the rulebook names it), a
+    quote not in its clause, and an incomplete draft with every problem the rulebook listed.
   - **Edit the draft** (the claimant, while the version is a draft and not closed): the title,
     summary, dates, recurrence, obligation, open questions and condition (the predicate editor,
     D-064), only the fields changed sent; citations to add, each a clause of a cited document and
     its words, the row saying beforehand whether the clause holds them word for word; and why, for
-    the audit. A closed draft, a version under review and someone else's claim each say why there
-    is no form.
+    the audit. A content the rulebook refuses (`invariant-violation`) is said as such, each problem
+    it found on a line of its own. A closed draft, a version under review and someone else's claim
+    each say why there is no form.
   - **Decide**: approve (a reviewer's or an admin's; it submits a draft and approves it, after
     tagging it high impact when asked), return or reject with a note, a candidate's rejection with
     its reason, each confirmed in a dialog that says what the rulebook records. The round's
