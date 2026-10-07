@@ -56,7 +56,7 @@ def create_entity(body: EntityIn, tenant: Tenant, wired: Wired) -> NodeOut:
     "/registrations",
     summary="Register a GSTIN; its PAN finds or creates the entity",
     status_code=status.HTTP_201_CREATED,
-    responses=problem_responses(401, 403, 422),
+    responses=problem_responses(401, 402, 403, 422),
 )
 def create_registration(body: RegistrationIn, tenant: Tenant, wired: Wired) -> NodeOut:
     registered = wired.register.registration(

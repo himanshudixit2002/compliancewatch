@@ -27,7 +27,12 @@ from domain_kernel.ids import BusinessId, TenantId, UserId
 from domain_kernel.ontology import AttributeLevel, Ontology
 from profile_service.application.attributes import apply_changes, financial_year_in_india
 from profile_service.application.prefill import PrefillFromGstin, PrefillResult
-from profile_service.application.registration import register_entity, register_registration
+from profile_service.application.registration import (
+    register_entity,
+    register_registration,
+    registration_limit,
+)
+from profile_service.domain.entitlements import EntitlementsReader
 from profile_service.domain.errors import (
     BusinessIdentifierRequiredError,
     InvalidHierarchyError,
@@ -180,11 +185,13 @@ class CreateBusiness:
         prefill: PrefillFromGstin,
         *,
         clock: Callable[[], datetime] = utc_now,
+        entitlements: EntitlementsReader | None = None,
     ) -> None:
         self._unit_of_work = unit_of_work
         self._ontology = ontology
         self._prefill = prefill
         self._clock = clock
+        self._entitlements = entitlements
 
     def run(
         self,
@@ -206,6 +213,7 @@ class CreateBusiness:
         if pan is not None and pan != entity_pan:
             raise InvalidHierarchyError(f"gstin {gstin} carries PAN {entity_pan}, not {pan}")
         looked_up = None if gstin is None else self._prefill.look_up(gstin)
+        limit = None if gstin is None else registration_limit(self._entitlements, tenant_id)
         now = self._clock()
         prefilled: PrefillResult | None = None
         with self._unit_of_work(tenant_id) as uow:
@@ -213,7 +221,13 @@ class CreateBusiness:
                 entity = register_entity(uow, tenant_id, entity_pan, name, now)
             else:
                 entity, registration = register_registration(
-                    uow, tenant_id, gstin, registration_name or name, entity_name=name, now=now
+                    uow,
+                    tenant_id,
+                    gstin,
+                    registration_name or name,
+                    entity_name=name,
+                    now=now,
+                    limit=limit,
                 )
                 prefilled = self._prefill.apply(uow, tenant_id, registration.node, looked_up, by=by)
                 answers = self._to_registration(answers, registration.node.id)
@@ -321,10 +335,12 @@ class AddRegistration:
         prefill: PrefillFromGstin,
         *,
         clock: Callable[[], datetime] = utc_now,
+        entitlements: EntitlementsReader | None = None,
     ) -> None:
         self._unit_of_work = unit_of_work
         self._prefill = prefill
         self._clock = clock
+        self._entitlements = entitlements
 
     def run(
         self,
@@ -340,6 +356,7 @@ class AddRegistration:
         with self._unit_of_work(tenant_id) as uow:
             _require_pan(load_business(uow, business_id), gstin)
         looked_up = self._prefill.look_up(gstin)
+        limit = registration_limit(self._entitlements, tenant_id)
         with self._unit_of_work(tenant_id) as uow:
             business = load_business(uow, business_id)
             _require_pan(business, gstin)
@@ -350,6 +367,7 @@ class AddRegistration:
                 name or business.entity.name,
                 entity_name=business.entity.name,
                 now=self._clock(),
+                limit=limit,
             )
             prefilled = self._prefill.apply(uow, tenant_id, registered.node, looked_up, by=by)
             business = load_business(uow, business_id)

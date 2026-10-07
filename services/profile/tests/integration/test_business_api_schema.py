@@ -18,6 +18,7 @@ import ontology as ontology_package
 from domain_kernel.errors import InvalidAttributeValueError
 from domain_kernel.identifiers import Pan
 from domain_kernel.ids import TenantId
+from domain_kernel.ontology import AttributeLevel
 from profile_service.application.businesses import (
     Answer,
     CreateBusiness,
@@ -25,7 +26,7 @@ from profile_service.application.businesses import (
     UpdateBusiness,
 )
 from profile_service.application.prefill import PrefillFromGstin
-from profile_service.domain.errors import ProfileNodeNotFoundError
+from profile_service.domain.errors import PlanLimitReachedError, ProfileNodeNotFoundError
 from profile_service.domain.model import AttributeChange
 from profile_service.infrastructure.lookup import ManualLookupProvider
 from profile_service.infrastructure.repository import PostgresUnitOfWorkFactory
@@ -257,3 +258,29 @@ def test_a_create_is_replayed_from_postgres(app_url: str) -> None:
         assert theirs.json()["business"]["id"] != first.json()["business"]["id"]
         listed = client.get("/v1/businesses", headers={"x-tenant-id": str(tenant)}).json()
     assert [item["name"] for item in listed["items"]] == ["Acme"]
+
+
+class FixedLimit:
+    def __init__(self, limit: int | None) -> None:
+        self.limit = limit
+
+    def registration_limit(self, tenant_id: TenantId) -> int | None:
+        return self.limit
+
+
+def test_the_plan_limit_counts_the_tenants_registrations_only(
+    factory: PostgresUnitOfWorkFactory,
+) -> None:
+    ontology = ontology_package.load()
+    prefill = PrefillFromGstin(factory, ManualLookupProvider(), ontology, FixedFlags())
+    limited = CreateBusiness(factory, ontology, prefill, entitlements=FixedLimit(1))
+    tenant, other = TenantId.new(), TenantId.new()
+    limited.run(other, name="Example Stores", gstin=GSTIN_KARNATAKA)
+    limited.run(tenant, name="Example Traders", gstin=GSTIN_KARNATAKA)
+    with factory(tenant) as uow:
+        assert uow.profiles.count(AttributeLevel.REGISTRATION) == 1
+        assert uow.profiles.count(AttributeLevel.ENTITY) == 1
+    with pytest.raises(PlanLimitReachedError) as refused:
+        limited.run(tenant, name="Example Traders", gstin=GSTIN_DELHI)
+    assert (refused.value.limit, refused.value.used) == (1, 1)
+    assert limited.run(tenant, name="Example Traders", gstin=GSTIN_KARNATAKA).created is False

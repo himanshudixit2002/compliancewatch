@@ -35,7 +35,8 @@ router = APIRouter(prefix="/v1/businesses", tags=["public", "businesses"])
 
 LIST_SCOPE = "profile.businesses"
 READ_PROBLEMS = problem_responses(401, 403, 404, 422)
-CREATE_PROBLEMS = {**problem_responses(401, 403, 422), **IDEMPOTENCY_RESPONSES}
+CREATE_PROBLEMS = {**problem_responses(401, 402, 403, 422), **IDEMPOTENCY_RESPONSES}
+"""402: a GSTIN registration past the tenant's plan (profile-plan-limit-reached)."""
 
 
 class BusinessCursor(BaseModel):
@@ -165,7 +166,7 @@ def onboarding(business_id: UUID, tenant: Tenant, wired: Wired) -> OnboardingOut
     summary="Add a GSTIN registration to a business and pre-fill it",
     status_code=status.HTTP_201_CREATED,
     response_model=RegistrationCreatedOut,
-    responses={**READ_PROBLEMS, **IDEMPOTENCY_RESPONSES},
+    responses={**READ_PROBLEMS, **problem_responses(402), **IDEMPOTENCY_RESPONSES},
     openapi_extra=PUBLIC_ROUTE,
 )
 def add_registration(

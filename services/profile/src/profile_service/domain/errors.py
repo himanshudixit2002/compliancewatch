@@ -1,5 +1,7 @@
 """Errors of the profile service, with stable problem type slugs."""
 
+from collections.abc import Mapping
+
 from domain_kernel.errors import DomainError
 
 
@@ -77,3 +79,20 @@ class NotABusinessError(DomainError, LookupError):
             f"profile node {node_id} is a registration or location; a business is a legal entity"
         )
         self.node_id = node_id
+
+
+class PlanLimitReachedError(DomainError):
+    """The tenant's plan allows no more GSTIN registrations (402). The body carries the limit
+    and how many the tenant holds (``limit``, ``used``), and never the GSTIN asked for."""
+
+    type_slug = "profile-plan-limit-reached"
+    title = "Plan registration limit reached"
+
+    def __init__(self, *, limit: int, used: int) -> None:
+        self.limit = limit
+        self.used = used
+        self.problem_extensions: Mapping[str, object] = {"limit": limit, "used": used}
+        super().__init__(
+            f"the plan allows {limit} GSTIN registration(s) and the tenant holds {used}; "
+            "upgrade the plan to add another"
+        )

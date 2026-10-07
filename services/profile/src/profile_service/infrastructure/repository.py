@@ -11,7 +11,17 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Self
 
-from sqlalchemy import Connection, Engine, create_engine, exists, or_, select, text, tuple_
+from sqlalchemy import (
+    Connection,
+    Engine,
+    create_engine,
+    exists,
+    func,
+    or_,
+    select,
+    text,
+    tuple_,
+)
 from sqlalchemy.orm import Session, aliased
 from sqlalchemy.pool import NullPool
 
@@ -115,6 +125,16 @@ class SqlAlchemyProfileRepository:
             )
         rows = self._session.scalars(statement.order_by(node.name, node.id).limit(limit)).all()
         return self._to_nodes(rows)
+
+    def count(self, level: AttributeLevel) -> int:
+        counted = self._session.scalar(
+            select(func.count())
+            .select_from(ProfileNodeRow)
+            .where(
+                ProfileNodeRow.tenant_id == self._tenant.value, ProfileNodeRow.level == level.value
+            )
+        )
+        return int(counted or 0)
 
     def registrations_of(
         self, entity_ids: Sequence[BusinessId]
