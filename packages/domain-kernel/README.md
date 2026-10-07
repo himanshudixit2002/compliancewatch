@@ -22,6 +22,7 @@ Design reference: Project Foundation guide, sections 6, 11 and 13.
 | `confidence` | `Confidence` in [0, 1], `REVIEW_THRESHOLD`, `CERTAIN` and `ZERO` |
 | `periods` | `EffectivePeriod`: half-open date range with `contains` and `overlaps` |
 | `identifiers` | `Pan` and `Gstin` (state code, PAN and entity code inside the GSTIN; check character not verified) |
+| `pii` | `mask_pii(text)`: every GSTIN, PAN, Aadhaar number, phone number and email address in free text replaced by `[GSTIN]`, `[PAN]`, `[AADHAAR]`, `[PHONE]` or `[EMAIL]`, with a `MaskResult` that counts each kind (`PII_PATTERNS`, `PII_KINDS`); `mask_pii_in(value, keep=...)`: the same for every text in a JSON-like value, except under a key ending in `_id` or `_ids` (`ID_KEY_SUFFIXES`) or one `keep` names. The llm-gateway masks prompts with it, py-common's logging every log line and the audit writer every row. ASCII-only patterns, so Devanagari is never touched; they err towards masking, so a ten-digit number from 6 to 9 or a twelve-digit one from 2 to 9 is masked whatever it is |
 | `financial_year` | `FinancialYear`: India's April-to-March year (`2025-26`), `for_date`, `parse`, `previous`, `next` |
 | `recurrence` | `Frequency`, `Period`, `Recurrence`: the period a date falls in and the due date of each period for a monthly, quarterly or annual duty |
 | `citations` | `Citation`: clause reference, verbatim quote, verified flag; `quote_match_ratio` / `quote_matches` (folded fuzzy match, threshold 0.85) and `evidence_tokens_missing` (numbers and month names a quote has and its clause lacks) |
