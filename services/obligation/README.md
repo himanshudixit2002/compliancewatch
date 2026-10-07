@@ -258,10 +258,11 @@ The spec is committed at `packages/contracts/openapi/obligation.v1.json`
 (`make openapi SERVICE=obligation`) and pinned by `tests/contract/test_openapi.py`.
 
 Row-level security only binds non-superuser roles: a superuser bypasses every policy whatever
-the table says. The dev stack's `cw` user is the container's superuser, so locally the policy
-is present but not enforced; the integration test creates a plain role and proves the isolation
-through it, and every deployment must give the service a role that is neither a superuser nor
-the table owner. The policy reads `app.tenant_id` through `NULLIF(current_setting(...), '')`
+the table says. `make run`, `make worker` and `make web-stack STORE=postgres` connect as
+`cw_obligation` (`infra/dev/postgres/roles.sql`), which is neither, so locally the policy holds
+as in a deployment; `DB_ROLE=owner` connects as `cw`, the container's superuser, which bypasses
+it. The integration tests prove the isolation through `cw_obligation`, and every deployment must
+give the service a role that is neither a superuser nor the table owner. The policy reads `app.tenant_id` through `NULLIF(current_setting(...), '')`
 because Postgres reports a custom setting as an empty string between transactions once it has
 been used in a session.
 

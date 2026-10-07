@@ -45,8 +45,9 @@ per year and the snapshot picks the year asked for.
   `idempotency_key` (py-common's, with the forced tenant policy and the purge policy) and the
   index `ix_profile_node_tenant_level_name` the business list pages on.
 
-Row-level security binds only non-superuser roles; see the obligation service README for the
-dev-stack caveat. Settings: `CW_PROFILE_STORE` (`postgres` default, `memory`),
+Row-level security binds only non-superuser roles: `make run` and `make web-stack STORE=postgres`
+connect as `cw_profile` (`infra/dev/postgres/roles.sql`), so it holds locally too, unless
+`DB_ROLE=owner`. Settings: `CW_PROFILE_STORE` (`postgres` default, `memory`),
 `CW_PROFILE_EVAL_CASES_PATH` (empty keeps the eval seed in the review task only).
 
 ## Business API

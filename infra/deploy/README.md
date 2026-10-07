@@ -11,7 +11,7 @@ Nothing in this directory has been applied: every account is the maintainer's to
 | Web app (`apps/web`) | Vercel, region `bom1` | `apps/web/vercel.json`; project root `apps/web`, monorepo install from the repo root |
 | Ten Python services | Fly.io, region `bom` (Mumbai), one app each | `infra/deploy/fly/<service>.toml`, image from the service's Dockerfile, `/ready` health check, `alembic upgrade head` as the release command where the service has migrations |
 | WhatsApp bot | Fly.io, `bom` | `infra/deploy/fly/whatsapp-bot.toml`, `apps/whatsapp-bot/Dockerfile` |
-| Postgres | Fly Postgres (or Neon) in Mumbai, one database, one schema per service, PITR on | `CW_DATABASE_URL` secret per service with `?options=-csearch_path%3D<schema>%2Cpublic` |
+| Postgres | Fly Postgres (or Neon) in Mumbai, one database, one schema per service, PITR on | `CW_DATABASE_URL` secret per service with `?options=-csearch_path%3D<schema>%2Cpublic`, connecting as the service's own role `cw_<schema>` (manual step 3) |
 | Kafka | Redpanda Cloud (serverless) or Upstash Kafka, Mumbai | `CW_KAFKA_BOOTSTRAP` plus SASL secrets (relay and consumers only) |
 | Temporal | Temporal Cloud namespace | `CW_TEMPORAL_ADDRESS`, `CW_TEMPORAL_NAMESPACE`, client certificate secrets (pipeline worker) |
 | Redis | Upstash Redis, Mumbai | `CW_REDIS_URL` |
@@ -30,6 +30,15 @@ topics of `composition/mvp/topics.toml` (created when missing, never deleted). R
 refuses. The Fly files below still describe one app per service; package M5-2 replaces them with
 one app of two process groups on this image, with `cw-mvp release` as its release command.
 
+The one image connects with one `CW_DATABASE_URL`: its registry gives each hosted service that
+URL with its own schema first on the search path (`composition/mvp/src/cw_mvp/registry.py`), so
+the app and the worker run as one role with every service schema, as `cw_app` does on the dev
+stack (`infra/dev/postgres/50-app-role.sql`). That role must be neither a superuser nor BYPASSRLS
+nor the schemas' owner, and outside local and test `cw-mvp migrate` refuses to run when
+`CW_MIGRATION_DATABASE_URL` and `CW_DATABASE_URL` connect as the same role. Running each hosted
+service as its own `cw_<schema>` role instead needs a database URL per service in the registry
+(one pool each, the per-service roles of manual step 3): deploy work for package M5-2.
+
 ## Manual steps (in order)
 
 1. Accounts: Fly.io organisation, Vercel team, Postgres provider, Redpanda Cloud or Upstash,
@@ -37,15 +46,33 @@ one app of two process groups on this image, with `cw-mvp release` as its releas
    (data residency assumption of the guide).
 2. `fly apps create` for each app named in the toml files; `fly secrets set` per app from the
    matrix below; `fly deploy --config infra/deploy/fly/<service>.toml .` from the repo root.
-3. Vercel: import the repository, set the project root to `apps/web`, add the public API base URL
+3. Database roles, once per environment and again after each release that adds a schema
+   (`infra/dev/postgres/roles.sql`, plain SQL, safe to repeat):
+   - Run the file as the role that owns the service schemas and runs the migrations, after the
+     first release has created the schemas:
+     `psql "<owner URL>" -v ON_ERROR_STOP=1 -1 -f infra/dev/postgres/roles.sql`. It makes one
+     login role per schema, `cw_<schema>`, that is neither a superuser nor BYPASSRLS, with its
+     own schema, public and INSERT on the audit log (`cw_identity` also reads it), and default
+     privileges for the tables later migrations by that owner create. A schema the release has
+     not made yet is skipped with a notice, so run it again after a release that adds one.
+   - The owner needs CREATEROLE to create the roles; otherwise an administrator creates the ten
+     roles (LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT) and the file then
+     only grants. It sets no password and refuses to leave a role with SUPERUSER or BYPASSRLS.
+   - Set each role's password from the secret store; never run `dev-passwords.sql`, which holds
+     the dev stack's placeholders.
+   - Point each service's `CW_DATABASE_URL` at its own role. The migrations run as the owner:
+     `cw-mvp release` reads the owner's URL from `CW_MIGRATION_DATABASE_URL`, and a service's
+     `alembic upgrade head` release command needs `CW_DATABASE_URL` overridden with the owner's
+     URL (its `CW_DB_SCHEMA` stays), since the service's role cannot change its schema.
+4. Vercel: import the repository, set the project root to `apps/web`, add the public API base URL
    as `NEXT_PUBLIC_API_URL` when the web app starts calling services.
-4. DNS: `app.<domain>` to Vercel, `api.<domain>` to the gateway app (the identity service fronts the
+5. DNS: `app.<domain>` to Vercel, `api.<domain>` to the gateway app (the identity service fronts the
    API until an API gateway exists), `hooks.<domain>` to the bot; point the Meta webhook at
    `https://hooks.<domain>/webhook`.
-5. Wire the flags once the accounts exist: `CW_WHATSAPP_ENABLED`, `WHATSAPP_SEND_ENABLED`,
+6. Wire the flags once the accounts exist: `CW_WHATSAPP_ENABLED`, `WHATSAPP_SEND_ENABLED`,
    `CW_BILLING_PROVIDER=razorpay`, `CW_PROFILE_GSTIN_LOOKUP`, `CW_LLM_PROVIDER=vercel`, and
    `CW_LLM_RESIDENCY` as ADR-020 decides (`global` until the maintainer decides with counsel).
-6. Identity and access tokens, per environment: the Supabase project and its keys, identity's
+7. Identity and access tokens, per environment: the Supabase project and its keys, identity's
    signing key, a service client for each caller and the internal tenant, as listed in
    `services/identity/README.md` ("Supabase: manual steps"). Deploy identity before the services
    that verify its tokens. Run staging with `CW_AUTH_MODE=dual`, then `token`; production refuses

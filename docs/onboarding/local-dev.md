@@ -55,7 +55,7 @@ Every host port is a variable in `.env` (`POSTGRES_PORT`, `REDIS_PORT`, `REDPAND
 
 ## Running one service
 
-`make run SERVICE=<dir> [PORT=<n>]` starts uvicorn with reload on the service's dev port and exports `CW_DATABASE_URL` (with `search_path=<schema>,public`) and `CW_DB_SCHEMA` for it. Settings come from `py_common.settings.Settings`: `CW_*` variables, then `.env`, then defaults. Empty values count as unset. `make run` and `make migrate` source `.env` the same way: a variable already in the environment wins over the file, so `CW_LLM_LEDGER=postgres make run SERVICE=llm-gateway` does what it says.
+`make run SERVICE=<dir> [PORT=<n>]` starts uvicorn with reload on the service's dev port and exports `CW_DATABASE_URL` (with `search_path=<schema>,public`, connecting as the service's own role `cw_<schema>`; see "Database roles and row-level security" below) and `CW_DB_SCHEMA` for it. Settings come from `py_common.settings.Settings`: `CW_*` variables, then `.env`, then defaults. Empty values count as unset. `make run` and `make migrate` source `.env` the same way: a variable already in the environment wins over the file, so `CW_LLM_LEDGER=postgres make run SERVICE=llm-gateway` does what it says.
 
 `make relay SERVICE=<dir>` runs the outbox relay for that service's schema with the same
 environment: it publishes the service's `outbox_event` rows to Redpanda and dead-letters to
@@ -206,15 +206,59 @@ GST obligations from `services/rulebook/seed/gst_calendar.yaml` as draft rule ve
 on rule.id = rule_id` through `make dev-psql`). `ARGS=--check` validates the file without
 writing. Every version stays `needs_review` until an analyst reviews it.
 
-## Row-level security in the dev stack
+## Database roles and row-level security
 
-Tenant tables (the obligation service's first) carry a policy on `tenant_id`, but `make run`,
-`make worker` and `make web-stack` connect as `cw`, the container's superuser, and a superuser
-bypasses every policy. The policy is therefore visible but not enforced there, and the services
-whose queries leave the tenant to the policy (profile, the engine, obligation) read across
-tenants; the integration tests prove the policies through a plain role. `make product` connects
-as `cw_app`, a role that owns nothing and is not a superuser (`make product-role`), so the
-policies apply to the local product. A role per service arrives with the deployment work.
+Each service connects to Postgres as its own role, `cw_<schema>`: `cw_identity`, `cw_profile`,
+`cw_rulebook`, `cw_applicability`, `cw_obligation`, `cw_notification`, `cw_qa`,
+`cw_llm_gateway`, `cw_eval` and `cw_pipeline` (`infra/dev/postgres/roles.sql`). Each role:
+
+- logs in and holds nothing else: it is not a superuser, does not bypass row-level security,
+  creates no database or role and is NOINHERIT;
+- uses its own schema and `public` (pgvector), and reads and writes every table of its schema
+  (the outbox, the consumer inbox, the idempotency keys and the routing directories included),
+  now and as later migrations add tables, but never writes its `alembic_version`;
+- may add rows to `audit.event` and do nothing else there; only `cw_identity` also reads them, for
+  the audit trail route;
+- has nothing in another service's schema, since the services call each other over HTTP.
+
+`make run`, `make worker`, `make relay`, `make seed` and `make web-stack STORE=postgres` connect
+as the service's role, so the tenant policies apply there as they do in a deployment. Each role's
+dev password is its own name (`infra/dev/postgres/dev-passwords.sql`): a placeholder for this
+local database, like `cw`/`cw`, never a secret. `make migrate` connects as `cw`, the schemas'
+owner, and so do the operators' tools that read a schema directly (`make crawl-report`,
+`make extract-backlog`, `make backfill`, `make golden-export`, `make data-quality`,
+`make migrations-catalog`, `make dev-psql`). Most of the services' integration tests connect as
+the same roles: `py_common.db_roles.apply_roles` gives a test container the same two files, and
+`composition/mvp/tests/integration/test_database_roles.py` checks the file on every schema.
+
+`make db-roles` creates the roles, or brings them back to what the file says, on the running
+Postgres; it is safe to repeat. `make dev` runs it once the stack is up and `make migrate` after
+the migrations: a schema's first migration makes its `alembic_version`, which the roles' default
+privileges reach until the file runs again. A fresh volume also gets the roles from the compose
+mounts, after `init.sql`.
+
+`DB_ROLE=owner` connects those five targets as `cw` instead, which bypasses every policy, as they
+did before the roles: `make run SERVICE=profile DB_ROLE=owner`. It is for looking at every
+tenant's rows while debugging, never for testing what a tenant sees.
+
+`make product` keeps one role, `cw_app` (`make product-role`, `infra/dev/postgres/50-app-role.sql`):
+one process hosts every service there, so its role has every service schema. It is not a
+superuser either.
+
+What changes for a stack that is already running: nothing until it restarts, since a process
+keeps the connections it opened. The next `make dev` recreates the Postgres container once (its
+compose definition gained the two files; the data stays in the volume) and creates the roles, and
+the next `make web-stack STORE=postgres` starts every service as its role. From then on a service
+reads only the tenant a request names, as the API allows and as the product already does:
+
+- an admin page that read across tenants only because the superuser bypassed row-level security
+  now shows what the API allows: the decision review queue lists only the tenant the page names
+  (the superuser listed every tenant's items whatever tenant was named), a business's
+  notifications or a profile looked up under a tenant that is not theirs come back empty or not
+  found, and a CA firm's change impact lists only its own clients;
+- a read of a tenant table that names no tenant answers an empty list;
+- the platform data (the rulebook, the pipeline, the eval runs, the LLM spend ledger) and the
+  routing directories read as before.
 
 ## Traces and metrics
 
@@ -245,7 +289,7 @@ Settings, routes, budgets and errors: [services/llm-gateway/README.md](../../ser
 
 ## Migrations
 
-`make migrate` (all services) or `make migrate SERVICE=<dir>`. Each service owns one schema and its own `alembic_version` table inside it (`version_table_schema`), so services never see each other's tables. `pgvector` lives in `public`, which stays on every search path. Schemas are created once per volume by `infra/dev/postgres/init.sql`; clusters create them through migrations and Helm jobs instead.
+`make migrate` (all services) or `make migrate SERVICE=<dir>`, as `cw`, the schemas' owner, then `make db-roles`. Each service owns one schema and its own `alembic_version` table inside it (`version_table_schema`), so services never see each other's tables. Each service's `migrations/env.py` refuses to run without `CW_DB_SCHEMA` and puts that schema first on the URL's search path, so a migration never lands its tables in `public`. `pgvector` lives in `public`, which stays on every search path. Schemas are created once per volume by `infra/dev/postgres/init.sql`; clusters create them through migrations and Helm jobs instead.
 
 ## Reset
 
@@ -260,6 +304,7 @@ Settings, routes, budgets and errors: [services/llm-gateway/README.md](../../ser
 - **Integration tests fail with `error while creating mount source path '.../.colima/default/docker.sock'`.** testcontainers' reaper mounts the Docker socket by its host path, which does not exist inside the Colima VM. `make py-test-integration` sets `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock` for this; export the same variable when calling `uv run pytest -m integration` directly.
 - **`brew install docker` left no `docker` binary.** Homebrew may leave the formula unlinked when a `docker-desktop` cask is also installed: `brew link --overwrite docker`.
 - **`make dev` fails with a health-check timeout.** `make dev-logs SERVICE=<postgres|redpanda|temporal>`.
+- **`password authentication failed for user "cw_<schema>"` or `permission denied for schema`.** The services' roles are missing from the volume or out of date: `make db-roles` (`make dev` and `make migrate` run it). `DB_ROLE=owner` connects as `cw` meanwhile.
 - **`uv sync` says no interpreter for 3.12.** `uv python install 3.12`.
 - **Apple Silicon.** Every pinned image publishes an arm64 manifest; no `platform:` overrides are needed.
 - **`next dev` rewrites `apps/web/AGENTS.md` (and `CLAUDE.md`, which just points at it).** Both are maintained by Next.js and committed on purpose.

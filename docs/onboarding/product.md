@@ -50,15 +50,18 @@ deployable's image instead, as CI does (below).
 | web | `WEB_PORT` (3000) | `next dev` with every `CW_WEB_*_URL` at the internal listener, building into `apps/web/.next/product` |
 
 Before starting them, `make product` runs `make dev` (the compose stack; nothing happens when it
-already runs), `make migrate`, `make product-role` and `make seed SERVICE=rulebook` (the thirteen
-seed rules as drafts). Pids and logs are in `var/product`; `make product-down` stops the
+already runs but `make db-roles`, which refreshes the services' own roles), `make migrate`,
+`make product-role` and `make seed SERVICE=rulebook` (the thirteen seed rules as drafts, written
+as `cw_rulebook`). Pids and logs are in `var/product`; `make product-down` stops the
 processes whose pids it recorded there, with their children, and nothing else.
 
 The services connect to Postgres as `cw_app`, a role that owns nothing and is not a superuser,
 so row-level security keeps the tenants apart as it does in a deployment. `make product-role`
 creates the role on the running stack and grants it the service schemas
-(`infra/dev/postgres/50-app-role.sql`, safe to repeat). `make migrate`, `make run` and
-`make web-stack` still connect as `cw`, the image's superuser, which bypasses every policy.
+(`infra/dev/postgres/50-app-role.sql`, safe to repeat): one process hosts every service, so one
+role has every schema. `make migrate` connects as `cw`, the schemas' owner; `make run` and
+`make web-stack STORE=postgres` connect each service as its own role, `cw_<schema>`
+([local-dev.md](local-dev.md#database-roles-and-row-level-security)).
 
 The settings that make this the product are passed by the make targets, never as a default in a
 settings class or the flag registry: header auth, both listeners on `127.0.0.1`, the worker's
@@ -481,7 +484,8 @@ the worker does a few seconds after the API answers, and a failed step does not 
 
 The fanout, changes and public steps read the business directory, the audit rows (of no tenant,
 and the CA firm's bulk notifications) and the engine's row counts of a tenant, which no route
-serves and no policy lets `cw_app` read across tenants.
+serves. The directory's read policy lets any role read it across tenants, but no policy lets
+`cw_app` read the audit rows of no tenant or another tenant's rows.
 `make product-check` gives them `CW_PRODUCT_RECORDS_URL`, the database owner's URL, and the tool
 opens it read only (`default_transaction_read_only`), so the session can run nothing but
 queries.
@@ -498,7 +502,8 @@ obligations or a message. `make product` is the full product. Both use `make dev
 Kafka and Temporal, so with `make web-stack STORE=postgres` they share the database: the
 product's worker relays and consumes what either writes, and runs the services' periodic jobs
 there (the reminder sweep, the notification retention sweep, the purge of expired idempotency
-keys). The web stack connects as the superuser and so reads across tenants; the product does not.
+keys). Neither reads across tenants: the web stack connects each service as its own role
+(`cw_<schema>`) and the product as `cw_app`, and row-level security applies to both.
 
 ## Troubleshooting
 
