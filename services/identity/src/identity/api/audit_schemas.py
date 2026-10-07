@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, Field
 
 from domain_kernel.audit import AuditEntry, AuditEntryId
 from identity.domain.audit import AuditKey, plain_json
@@ -57,9 +57,10 @@ class AuditEntryOut(BaseModel):
 
 
 class AuditKeyset(BaseModel):
-    """The cursor's keyset: the last entry of a page."""
+    """The cursor's keyset: the last entry of a page. A time with no zone is not one this route
+    issued, so it is refused as a bad cursor."""
 
-    at: datetime
+    at: AwareDatetime
     id: UUID
 
     @classmethod

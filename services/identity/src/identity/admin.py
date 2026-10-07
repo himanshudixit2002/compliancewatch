@@ -25,11 +25,13 @@ internal tenant; a second run is refused. The admin enrols a second factor at th
 signing in, and then invites the analysts and reviewers.
 
 ``audit-export`` writes every audit entry from ``--from`` (inclusive) to ``--to`` (exclusive),
-oldest first, to ``audit-events.ndjson`` in ``--out`` (made when missing; a directory holding an
-export already is refused), and ``manifest.json`` beside it: the file's SHA-256, the count, the
-range and when it was generated. A date without a time is midnight UTC. It reads under the export
-scope (``app.audit_scope = 'export'``), so it sees every tenant's rows and the platform's, and it
-records itself as an ``audit.exported`` entry. Uploading the two files to the object-locked
+oldest first, to ``audit-events.ndjson`` in ``--out`` (made when missing; a directory that holds
+any file is refused), and ``manifest.json`` beside it: the file's SHA-256, the count, the range
+and when it was generated. A date without a time is midnight UTC. ``--to`` defaults to midnight
+UTC two days ago (``settled_until``), so rows that commit late are in; a later ``--to`` is warned
+about. It reads under the export scope (``app.audit_scope = 'export'``), so it sees every tenant's
+rows and the platform's, and it records itself as an ``audit.exported`` entry; the files keep
+``.partial`` names until that entry commits. Uploading the two files to the object-locked
 bucket is a manual step (docs/runbooks/audit-export.md).
 
 Every command but ``signing-key`` uses the database at ``CW_DATABASE_URL``, whose search_path
@@ -47,7 +49,8 @@ from typing import TextIO
 
 from domain_kernel.access import Scope
 from domain_kernel.errors import DomainError
-from identity.application.audit import ExportAuditTrail
+from domain_kernel.events import utc_now
+from identity.application.audit import ExportAuditTrail, settled_until
 from identity.application.bootstrap import (
     BootstrapInternalTenant,
     CreateServiceClient,
@@ -109,7 +112,11 @@ def parser() -> argparse.ArgumentParser:
         "--from", required=True, dest="since", type=instant, help="inclusive: 2026-09-01"
     )
     export.add_argument(
-        "--to", required=True, dest="until", type=instant, help="exclusive: 2026-10-01"
+        "--to",
+        dest="until",
+        type=instant,
+        default=None,
+        help="exclusive: 2026-10-01; by default midnight UTC two days ago, so late rows are in",
     )
     export.add_argument("--out", required=True, type=Path, help="the directory to write")
     return root
@@ -190,7 +197,14 @@ def _audit_export(
             IdentitySettings(service_name=PROG).database_url
         )
         unit_of_work, reader = postgres, PostgresAuditReader(postgres.engine)
-    manifest = ExportAuditTrail(reader, unit_of_work).run(args.since, args.until, args.out)
+    settled = settled_until(utc_now())
+    until: datetime = settled if args.until is None else args.until
+    if until > settled:
+        sys.stderr.write(
+            f"{PROG}: --to {until.isoformat()} is later than {settled.isoformat()}; rows of the "
+            "last two days may still commit and miss this export (docs/runbooks/audit-export.md)\n"
+        )
+    manifest = ExportAuditTrail(reader, unit_of_work).run(args.since, until, args.out)
     out.write(json.dumps(manifest.document(), indent=2, sort_keys=True) + "\n")
     sys.stderr.write(
         f"{PROG}: upload {args.out / manifest.file} and its manifest.json to the object-locked "

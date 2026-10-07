@@ -1,31 +1,39 @@
 """The audit trail: the entries identity writes, the route that reads them in the caller's scope,
 and ``identity-admin audit-export``."""
 
+import base64
 import hashlib
 import io
 import json
 from collections.abc import Iterator
-from datetime import UTC, datetime, timedelta
+from contextlib import AbstractContextManager
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from domain_kernel.access import Principal, Role
 from domain_kernel.audit import AuditActor, AuditEntry
 from domain_kernel.errors import InvariantViolationError
-from domain_kernel.ids import TenantId
+from domain_kernel.ids import TenantId, UserId
 from identity.admin import main as admin_main
-from identity.application.audit import ExportAuditTrail
+from identity.api.audit import CURSOR_SCOPE
+from identity.application.audit import ExportAuditTrail, ReadAuditTrail, settled_until
 from identity.application.bootstrap import BootstrapInternalTenant
 from identity.domain.audit import AuditQuery, AuditScope, readable
-from identity.domain.tenancy import Contact
+from identity.domain.repository import UnitOfWork
+from identity.domain.tenancy import Contact, Tenant, TenantKind, User
 from identity.infrastructure.memory import MemoryAuditReader, MemoryStore
 from identity.main import build_app
 from identity.testing import DEV_CLIENT_SECRET, identity_settings
 from py_common.audit.testing import audit_entry
+from py_common.auth.errors import AuthForbiddenError
 from py_common.auth.testing import bearer
+from py_common.pagination import CURSOR_VERSION
 
 AUDIT = "/v1/identity/audit"
 OWNER_PHONE = "+919876543210"
@@ -455,3 +463,133 @@ def test_service_clients_created_and_revoked_by_the_cli_are_audited() -> None:
         ("service_client.revoked", None, "example", "system:identity-admin"),
     ], "a second revoke changes nothing and writes nothing"
     assert entries[0].after == {"scopes": ("llm:call",)}
+
+
+# ---------------------------------------------------------------- review findings
+
+
+def test_a_cursor_with_a_time_of_no_zone_is_a_bad_cursor(client: TestClient) -> None:
+    created = sign_up(client, OWNER_PHONE, "Example Traders")
+    owner = bearer(created["session"]["access_token"])
+    payload = {
+        "k": {"at": "2000-01-03T09:00:00", "id": str(uuid4())},
+        "s": CURSOR_SCOPE,
+        "v": CURSOR_VERSION,
+    }
+    raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+    cursor = base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+    refused = client.get(AUDIT, params={"cursor": cursor}, headers=owner)
+    assert refused.status_code == 422
+    assert refused.json()["type"].endswith("pagination-cursor-invalid")
+
+
+def test_the_regulatory_scope_needs_the_internal_tenant_as_well_as_the_role() -> None:
+    store = MemoryStore()
+    reading = ReadAuditTrail(MemoryAuditReader(store), store)
+
+    def member(kind: TenantKind, roles: set[Role]) -> tuple[Principal, TenantId]:
+        tenant = Tenant(TenantId.new(), kind, "Example Tenant", AT)
+        user = User(
+            UserId.new(),
+            tenant.id,
+            "example-provider",
+            f"subject-{len(store.users)}",
+            Contact(email=f"person{len(store.users)}@example.com"),
+            frozenset(roles),
+            AT,
+            AT,
+        )
+        store.tenants[tenant.id] = tenant
+        store.users[user.id] = user
+        return Principal.user(user.id, tenant.id, roles), tenant.id
+
+    assert reading.scope_for(*member(TenantKind.INTERNAL, {Role.ADMIN})) is AuditScope.REGULATORY
+    # A customer tenant whose user somehow holds a regulatory role never reads the platform's rows.
+    assert (
+        reading.scope_for(*member(TenantKind.BUSINESS, {Role.ADMIN, Role.OWNER}))
+        is AuditScope.TENANT
+    )
+    with pytest.raises(AuthForbiddenError):
+        reading.scope_for(*member(TenantKind.BUSINESS, {Role.ANALYST}))
+
+
+class FailingReader:
+    """A reader whose export breaks after its first entry, as a dropped connection would."""
+
+    def __init__(self, entry: AuditEntry) -> None:
+        self._entry = entry
+
+    def page(self, scope: AuditScope, tenant_id: TenantId | None, query: AuditQuery) -> list[Any]:
+        return []
+
+    def export(self, since: datetime, until: datetime) -> Iterator[AuditEntry]:
+        yield self._entry
+        raise RuntimeError("the connection dropped")
+
+
+def test_a_failed_read_leaves_no_files_and_no_entry(tmp_path: Path) -> None:
+    store = MemoryStore()
+    out = tmp_path / "export"
+    export = ExportAuditTrail(FailingReader(audit_entry(tenant_id=None, occurred_at=AT)), store)
+    with pytest.raises(RuntimeError, match="dropped"):
+        export.run(AT, AT + timedelta(days=1), out)
+    assert list(out.iterdir()) == []
+    assert store.audit == []
+    retried = ExportAuditTrail(MemoryAuditReader(store), store).run(AT, AT + timedelta(days=1), out)
+    assert retried.count == 0, "the empty directory takes the export again"
+
+
+def test_a_failed_audit_entry_leaves_no_files(tmp_path: Path) -> None:
+    store = MemoryStore()
+    store.audit.append(audit_entry(tenant_id=None, occurred_at=AT))
+
+    def database_down(tenant_id: TenantId | None) -> AbstractContextManager[UnitOfWork]:
+        raise RuntimeError("the database is down")
+
+    out = tmp_path / "export"
+    with pytest.raises(RuntimeError, match="database is down"):
+        ExportAuditTrail(MemoryAuditReader(store), database_down).run(
+            AT, AT + timedelta(days=1), out
+        )
+    assert list(out.iterdir()) == [], "no export without its audit.exported entry"
+
+
+def test_the_export_refuses_any_file_and_never_overwrites_a_partial_one(tmp_path: Path) -> None:
+    store = MemoryStore()
+    export = ExportAuditTrail(MemoryAuditReader(store), store)
+    used = tmp_path / "used"
+    used.mkdir()
+    (used / "notes.txt").write_text("an operator's note\n")
+    with pytest.raises(InvariantViolationError, match="not empty"):
+        export.run(AT, AT + timedelta(days=1), used)
+
+    # Another export racing into the same directory holds the partial file already.
+    racing = tmp_path / "racing"
+    racing.mkdir()
+    real_iterdir = Path.iterdir
+
+    def empty_then_taken(path: Path) -> Iterator[Path]:
+        if path == racing:
+            (racing / "audit-events.ndjson.partial").write_bytes(b"theirs\n")
+            return iter(())
+        return real_iterdir(path)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(Path, "iterdir", empty_then_taken)
+        with pytest.raises(FileExistsError):
+            export.run(AT, AT + timedelta(days=1), racing)
+    assert (racing / "audit-events.ndjson.partial").read_bytes() == b"theirs\n"
+    assert sorted(path.name for path in racing.iterdir()) == ["audit-events.ndjson.partial"]
+    assert store.audit == []
+
+
+def test_the_default_cut_waits_two_days_for_late_rows() -> None:
+    assert settled_until(datetime(2000, 2, 3, 0, 30, tzinfo=UTC)) == datetime(
+        2000, 2, 1, tzinfo=UTC
+    ), "on the 3rd the month before is settled"
+    assert settled_until(datetime(2000, 2, 2, 23, 59, tzinfo=UTC)) == datetime(
+        2000, 1, 31, tzinfo=UTC
+    ), "on the 2nd its last day is not"
+    assert settled_until(
+        datetime(2000, 2, 3, 3, 0, tzinfo=timezone(timedelta(hours=5, minutes=30)))
+    ) == datetime(2000, 1, 31, tzinfo=UTC), "the cut is taken in UTC"
