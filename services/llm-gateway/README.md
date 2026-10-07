@@ -374,8 +374,8 @@ src/llm_gateway/
                     # stdlib + domain-kernel only
   application/      # Complete and Embed (the call pipelines), BudgetGuard and error rows
                     # (metering), Usage (budget reports)
-  infrastructure/   # providers/{fake,vercel,residency}, ledger/{memory,sqlalchemy,models}, cache/memory,
-                    # prompts/toml, tracing/{log,langfuse,composite}, events/log
+  infrastructure/   # providers/{fake,vercel,residency}, ledger/{memory,sqlalchemy,models},
+                    # cache/memory, prompts/toml, tracing/{log,langfuse,composite}, events/log
   api/              # schemas, dependencies (tenant header, correlation id), router
 prompts/registry.toml
 migrations/         # alembic; 0001 creates cost_ledger

@@ -16,7 +16,8 @@ src/py_common/
   kafka.py             # KafkaClientConfig: bootstrap servers, SASL/SCRAM and TLS for every Kafka client
   flags.py             # configure_flags, flag_enabled, flag_value: OpenFeature over the flag registry (env or Unleash)
   flags_registry.json  # generated from packages/flags/registry.json by make flags; never edited by hand
-  logging.py           # structlog JSON logging bridging stdlib records; correlation_id/tenant_id/actor contextvars; personal identifiers masked on every line
+  logging.py           # structlog JSON logging bridging stdlib records; correlation_id/tenant_id/actor contextvars
+                       # and personal identifiers masked on every line (redact_pii)
   health.py            # GET /health and GET /ready router with pluggable readiness checks
   request_context.py   # x-request-id middleware; correlation_id_of(request) for handlers and dependencies
   problems.py          # RFC 9457 problem+json handlers, Problem schema, problem_responses() for routers
@@ -263,8 +264,9 @@ otherwise read as Aadhaar or phone numbers in about one random UUID in seventy.
 
 By design, any other ten-digit number that starts with 6 to 9, and any twelve-digit number that
 starts with 2 to 9, is masked as a phone or an Aadhaar number, whatever it is: an amount or a
-reference. Log such an id under a key ending in `_id`, and a number as an int, to keep it whole. The console renderer formats a traceback
-itself, after the chain, so a traceback printed with `CW_LOG_JSON=false` is not masked.
+reference. Log such an id under a key ending in `_id`, and a number as an int, to keep it whole.
+The console renderer formats a traceback itself, after the chain, so a traceback printed with
+`CW_LOG_JSON=false` is not masked.
 
 ## Telemetry
 
@@ -421,10 +423,10 @@ what the table refuses.
   `[GSTIN]`, `[PAN]`, `[AADHAAR]`, `[PHONE]` and `[EMAIL]`. As on a log line, a UUID in its
   canonical form is kept whole wherever it stands (a reviewer's user id under `resolved_by`), and
   the value of a key ending in `_id` or `_ids` is left alone. The action, the subject and its id,
-  the actor and the correlation id are never masked. A use case still keeps personal data out of an entry where it
-  can: masking is pattern matching, and it masks any ten-digit number from 6 to 9 and any
-  twelve-digit one from 2 to 9 outside an id key. The memory twin keeps the entry as the use case
-  built it.
+  the actor and the correlation id are never masked. A use case still keeps personal data out of an
+  entry where it can: masking is pattern matching, and it masks any ten-digit number from 6 to 9 and
+  any twelve-digit one from 2 to 9 outside an id key. The memory twin keeps the entry as the use
+  case built it.
 
 Not built yet: the read route `GET /v1/identity/audit`, the NDJSON export, pseudonymising rows on
 a tenant's erasure, the call sites in every service and database roles that may only insert.
