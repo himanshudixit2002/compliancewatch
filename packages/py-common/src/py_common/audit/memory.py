@@ -4,11 +4,13 @@ A memory unit of work exposes a ``MemoryAuditSink`` as its ``audit``. Entries wa
 ``pending`` until the unit commits them into the store's log, and a unit that fails drops them
 (``rollback``), as a rolled back transaction drops its rows. The sink refuses what the table
 refuses: a second entry with an id already stored, and, as row-level security does, an entry of
-a tenant other than the unit's; a unit of no tenant writes only entries of no tenant.
+a tenant other than the unit's; a unit of no tenant writes only entries of no tenant. It stores
+what the table stores: the entry masked for personal identifiers (``masking.masked_entry``).
 """
 
 from domain_kernel.audit import AuditEntry
 from domain_kernel.ids import TenantId
+from py_common.audit.masking import masked_entry
 
 
 class MemoryAuditSink:
@@ -24,7 +26,7 @@ class MemoryAuditSink:
             raise ValueError(f"audit entry {entry.entry_id} belongs to another tenant")
         if any(stored.entry_id == entry.entry_id for stored in (*self._log, *self.pending)):
             raise ValueError(f"audit entry {entry.entry_id} is stored already")
-        self.pending.append(entry)
+        self.pending.append(masked_entry(entry))
 
     def commit(self) -> None:
         """Add the pending entries to the log, in the order they were written."""

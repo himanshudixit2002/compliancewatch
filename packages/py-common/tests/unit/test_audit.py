@@ -17,13 +17,20 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine, create_engine, select
 
 from domain_kernel.access import ANONYMOUS, Principal, Role, Scope
-from domain_kernel.audit import CORRELATION_ID_PATTERN, AuditActor, AuditActorKind, AuditEntry
+from domain_kernel.audit import (
+    CORRELATION_ID_PATTERN,
+    MAX_REASON_CHARS,
+    AuditActor,
+    AuditActorKind,
+    AuditEntry,
+)
 from domain_kernel.ids import TenantId, UserId
 from py_common.audit import (
     CORRELATION_FIELD,
     MemoryAuditSink,
     audit_actor,
     current_correlation_id,
+    masked_entry,
 )
 from py_common.audit.schema import (
     ACTION_TIME_INDEX,
@@ -46,6 +53,10 @@ from py_common.auth.context import principal_bound
 from py_common.request_context import REQUEST_ID_HEADER, REQUEST_ID_SHAPE, RequestContextMiddleware
 
 SERVICE = "example-service"
+NODE = "5a3c6a0e-0d7b-4f43-9a4e-234567890123"
+"""A made-up UUID whose last group, on its own, would read as an Aadhaar number."""
+DIGEST = "3f0c2a9876543210b7e1d4c5a6f8091e2d3c4b5a69788776655443322110fedc"
+"""A made-up SHA-256 digest with a phone number's ten digits in it."""
 USER = UserId(UUID("0b6f1e0a-3c9d-4f2a-8e57-6d1c2b3a4f50"))
 OTHER_TENANT = TenantId(UUID("9c2e7d41-5a6b-4c3d-8e9f-0a1b2c3d4e5f"))
 
@@ -151,6 +162,35 @@ def test_the_memory_sink_refuses_what_the_table_refuses() -> None:
     assert len(no_tenant.pending) == 1
 
 
+def test_the_memory_sink_stores_what_the_table_would_hold_masked() -> None:
+    """One function masks for both, so a memory store's tests see the row Postgres keeps."""
+    log: list[AuditEntry] = []
+    entry = audit_entry(
+        reason="Example Owner asked on 9876543210 to correct PAN ABCDE1234F",
+        before={"contact": {"email": "owner@example.com"}, "node_id": "234567890123"},
+        after={"sha256": DIGEST, "reference": "234567890123"},
+    )
+    sink = MemoryAuditSink(log, tenant_id=SAMPLE_TENANT)
+    sink.write(entry)
+    sink.commit()
+    [stored] = log
+    assert stored == masked_entry(entry) == entry_from_row(audit_row(entry))
+    assert stored.entry_id == entry.entry_id
+    assert stored.reason == "Example Owner asked on [PHONE] to correct PAN [PAN]"
+    assert stored.before == {"contact": {"email": "[EMAIL]"}, "node_id": "234567890123"}
+    assert stored.after == {"sha256": DIGEST, "reference": "[AADHAAR]"}
+
+
+def test_a_reason_that_masking_lengthens_past_the_limit_is_cut_and_masked() -> None:
+    entry = audit_entry(reason="a@b.co " * 285)
+    assert len(entry.reason) <= MAX_REASON_CHARS
+    masked = masked_entry(entry)
+    assert len(masked.reason) <= MAX_REASON_CHARS
+    assert masked.reason.startswith("[EMAIL] [EMAIL] ")
+    assert "a@b.co" not in masked.reason
+    assert audit_row(entry)["reason"] == masked.reason
+
+
 # ---------------------------------------------------------------------------- the writer, SQLite
 
 
@@ -222,10 +262,6 @@ def test_an_entry_read_from_a_zoneless_time_is_utc() -> None:
     entry = audit_entry()
     row = {**audit_row(entry), "occurred_at": entry.occurred_at.replace(tzinfo=None)}
     assert entry_from_row(row) == entry
-
-
-NODE = "5a3c6a0e-0d7b-4f43-9a4e-234567890123"
-"""A made-up UUID whose last group, on its own, would read as an Aadhaar number."""
 
 
 def test_the_reason_and_the_state_are_masked_but_ids_and_the_actor_are_not() -> None:

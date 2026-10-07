@@ -446,16 +446,20 @@ what the table refuses.
   reads the rows of no tenant yet.
 - `py_common.audit.testing` has `audit_entry(...)`, `install_audit_table(connection)` for a
   service's integration tests and `read_audit_entries(connection)`.
-- `AuditWriter` masks personal identifiers before the row is written, with the patterns the log
-  lines are masked with (`domain_kernel.pii`): GSTINs, PANs, Aadhaar numbers, phone numbers and
-  email addresses in the reason, and in every text of `before` and `after` at any depth, become
-  `[GSTIN]`, `[PAN]`, `[AADHAAR]`, `[PHONE]` and `[EMAIL]`. As on a log line, a UUID in its
-  canonical form is kept whole wherever it stands (a reviewer's user id under `resolved_by`), and
-  the value of a key ending in `_id` or `_ids` is left alone. The action, the subject and its id,
-  the actor and the correlation id are never masked. A use case still keeps personal data out of an
-  entry where it can: masking is pattern matching, and it masks any ten-digit number from 6 to 9 and
-  any twelve-digit one from 2 to 9 outside an id key. The memory twin keeps the entry as the use
-  case built it.
+- The log keeps an entry masked for personal identifiers (`py_common.audit.masked_entry`), with
+  the patterns the log lines are masked with (`domain_kernel.pii.mask_pii_in`): GSTINs, PANs,
+  Aadhaar numbers, phone numbers and email addresses in the reason, and in every text of `before`
+  and `after` at any depth, become `[GSTIN]`, `[PAN]`, `[AADHAAR]`, `[PHONE]` and `[EMAIL]`. As on
+  a log line, a UUID in its canonical form and a lower-case hex id of 16 or more (a SHA-256 digest)
+  are kept whole wherever they stand (a reviewer's user id under `resolved_by`, a transcript's
+  digest), and the value of a key ending in `_id` or `_ids` is left alone. The action, the subject
+  and its id, the actor and the correlation id are never masked. `AuditWriter` and the memory twin
+  both store the masked entry, so a service's tests on its memory store see what the table would
+  hold. A reason that masking makes longer than 2,000 characters is cut. A use case still keeps
+  personal data out of an entry where it can: masking is pattern matching, it misses names and
+  free text, and it masks any ten-digit number from 6 to 9 and any twelve-digit one from 2 to 9
+  outside an id key. A masked row cannot show what a PAN, GSTIN, email or phone number changed
+  from or to.
 
 Not built yet: the read route `GET /v1/identity/audit`, the NDJSON export, pseudonymising rows on
 a tenant's erasure, the call sites in every service and database roles that may only insert.

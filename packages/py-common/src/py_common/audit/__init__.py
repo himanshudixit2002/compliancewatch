@@ -5,6 +5,8 @@ written in the transaction of the action it records, never changed and kept seve
   names (a user with their roles, or a service client), else the system as ``system:<service>``;
   ``current_correlation_id()``, the correlation id ``py_common.request_context`` bound for the
   request.
+- ``masking``: ``masked_entry(entry)``, the entry as the log keeps it, masked for personal
+  identifiers; the writer and the memory twin both store it.
 - ``memory``: ``MemoryAuditSink``, the twin a memory store's unit of work writes entries to.
 - ``schema``: the ``audit.event`` table; ``create_audit_table(op)`` and ``drop_audit_table(op)``
   for identity's migration, which owns it.
@@ -20,6 +22,13 @@ application layer may import it (an import-linter contract keeps it so); import 
 """
 
 from py_common.audit.context import CORRELATION_FIELD, audit_actor, current_correlation_id
+from py_common.audit.masking import masked_entry
 from py_common.audit.memory import MemoryAuditSink
 
-__all__ = ["CORRELATION_FIELD", "MemoryAuditSink", "audit_actor", "current_correlation_id"]
+__all__ = [
+    "CORRELATION_FIELD",
+    "MemoryAuditSink",
+    "audit_actor",
+    "current_correlation_id",
+    "masked_entry",
+]
