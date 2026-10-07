@@ -472,23 +472,51 @@ so under it the read scopes are a code convention rather than a role boundary
 
 Identity reads the log (`GET /v1/identity/audit`, `identity-admin audit-export`; the identity
 README and [docs/runbooks/audit-export.md](../../docs/runbooks/audit-export.md) describe both).
-Not built yet: pseudonymising rows on a tenant's erasure.
+A tenant's erasure leaves its audit rows as they are: they were masked when written and are kept
+seven years, the data map's documented exception (docs/legal/data-map.md).
 
 ## Tenant erasure
 
 `py_common.erasure` is the common part of the erasure consumers (docs/runbooks/data-requests.md):
-`erasure_component(service, eraser_on, enabled=...)` is the consumer of
-`tenant.deletion.requested` in group `<service>.erasure` a service's worker hosts. Its handler
-runs on the consumer's connection (`sync_handler`): while `enabled(tenant)` answers false it only
-logs `erasure.off`; otherwise `eraser_on(connection)` makes the service's `TenantEraser`
-(`domain_kernel.erasure`), which erases and then records `tenant.data.erased` in the service's
-outbox and its `tenant.erased` row in `audit.event`, all committing with the `processed_event`
-row (`erase_and_record`). `ErasureSwitch(settings)` answers `enabled` from the flag
-`identity.tenant_erasure` per tenant, configuring the process's flags on first use. A Postgres
-eraser subclasses `PostgresTenantEraser` (the recording half) and builds on `begin_erasure`
-(`app.tenant_id` and `app.erasure` for the transaction), `delete_rows`, `count_rows` and
-`prune_outbox` (the tenant's published or dead outbox rows; `OUTBOX_RETAINED` names the pending
-ones it keeps).
+
+- `erasure_component(service, eraser_on, enabled=..., verifier=...)` is the consumer of
+  `tenant.deletion.requested` in group `<service>.erasure` a service's worker hosts, in two steps
+  (`read_then_write`, on `read_first_store`). With no transaction open: while `enabled(tenant)`
+  answers false it only logs `erasure.off`; otherwise it asks identity what it holds of the
+  tenant's deletion (`HttpErasureVerifier`, `GET /v1/identity/erasures/{tenant_id}` with the
+  service's token, scope `erasure:verify`, within 5 s; `verifier_from(settings)`). On the
+  consumer's connection: an event identity did not send for the tenant's open deletion request,
+  or one for the internal tenant (`domain_kernel.erasure.erasure_refusal`), writes a
+  `tenant.erasure_refused` audit row and raises `ErasureRefusedError`, which the consumer
+  dead-letters at once (`EventRefusedError`, `Outcome.REFUSED`); otherwise
+  `eraser_on(connection)` makes the service's `TenantEraser`, which erases and then records
+  `tenant.data.erased` in the service's outbox, its `tenant.erased` row in `audit.event` and its
+  erased marker, all committing with the `processed_event` row (`erase_and_record`). Identity
+  unreachable (`IdentityUnreachableError`) is retried, then dead-lettered; nothing is erased.
+- `erasure_switch(settings)` is the process's one `ErasureSwitch`, which answers `enabled` from
+  the flag `identity.tenant_erasure` per tenant. The process's flags are configured once
+  (`configure_flags_once`), however many services a worker hosts.
+- The erased marker: `erased_tenant` (tenant_id, erased_at, deletion_event_id) in each service's
+  schema, made by `create_erased_tenant_table(op)`, with no row-level security since every
+  session must see it (the lint exemption `*.erased_tenant`). `PostgresTenantEraser.record`
+  writes it (`mark_erased`). `PostgresErasedTenants(engine)` is what `create_app(erased_tenants=...)`
+  takes: `tenant_scope` then answers 410 `tenant-erased` for a tenant it holds.
+  `skip_erased(service, handler)` and `skip_erased_write(service, write)` wrap a consumer's
+  handler: an event of an erased tenant is marked processed with the outcome `erased_tenant`,
+  and nothing is written. The check holds a shared advisory lock on the tenant's erasure for the
+  rest of the consumer's transaction, and `begin_erasure` takes it exclusively, so a handler
+  either commits before the erasure starts or sees the marker. `MemoryErasedTenants` is the
+  memory stores' twin.
+- A Postgres eraser subclasses `PostgresTenantEraser` (the recording half) and builds on
+  `begin_erasure` (the erasure lock, then `app.tenant_id` and `app.erasure` for the
+  transaction), `delete_rows`, `count_rows` and `prune_outbox` (the tenant's published or dead
+  outbox rows; `OUTBOX_RETAINED` names the pending ones it keeps: nothing prunes the outbox on its
+  own, see docs/runbooks/outbox-relay.md). `ERASED_RETAINED` names the marker every eraser keeps.
+- `py_common.erasure_testing` has `FakeIdentity`, the check a consumer's verifier answers in a
+  test, and `assert_nothing_left(connection, schema, tenant, answer)`, the catalog's check each
+  service's Postgres erasure test runs: every table of the schema with a column `tenant_id` or
+  `*_tenant_id` is one the eraser erased or retained with a reason, and holds no row of the
+  tenant unless retained.
 
 ## Worker processes
 

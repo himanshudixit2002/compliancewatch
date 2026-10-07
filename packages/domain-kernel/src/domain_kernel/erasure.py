@@ -3,12 +3,18 @@ says so (docs/legal/data-map.md, docs/runbooks/data-requests.md).
 
 Identity records a tenant's deletion request and emits ``tenant.deletion.requested``. Every
 service that holds the tenant's data consumes it in its group ``<service>.erasure`` and, while
-the flag ``identity.tenant_erasure`` (``ERASURE_FLAG``) is on for the tenant, erases it in one
-transaction: it deletes or pseudonymises the tenant's rows (``Erased.tables``), names the tables
-it keeps and why (``Erased.retained``), writes a ``tenant.erased`` audit entry
-(``erasure_audit_entry``) and emits ``TenantDataErased``, all with the consumer's
-``processed_event`` row. Identity's group ``identity.erasure-records`` counts the answers and
-completes the request once every service has erased.
+the flag ``identity.tenant_erasure`` (``ERASURE_FLAG``) is on for the tenant, first checks the
+event against what identity holds (``ErasureCheck``, ``erasure_refusal``): the tenant asked for
+its deletion, is not the internal tenant, and the event is the one identity last sent for its
+open deletion request. A refused event erases nothing: the service writes a
+``tenant.erasure_refused`` audit entry (``refusal_audit_entry``) and dead-letters it. Otherwise
+the service erases the tenant in one transaction: it deletes or pseudonymises the tenant's rows
+(``Erased.tables``), names the tables it keeps and why (``Erased.retained``), writes its erased
+marker, a ``tenant.erased`` audit entry (``erasure_audit_entry``) and emits
+``TenantDataErased``, all with the consumer's ``processed_event`` row. From then on the
+service's routes and consumers refuse the tenant's work (``ErasedTenants``). Identity's group
+``identity.erasure-records`` counts the answers and completes the request once every service has
+answered both passes.
 
 The audit log itself is never erased: its rows are masked when they are written and kept seven
 years, the documented exception (``retain_audit`` is always true).
@@ -38,7 +44,12 @@ ERASURE_PURPOSE: Final = "erasure"
 """The purpose part of every erasure consumer group: ``<service>.erasure``."""
 ERASED_ACTION: Final = "tenant.erased"
 """The audit action each service writes once it has erased a tenant."""
+ERASURE_REFUSED_ACTION: Final = "tenant.erasure_refused"
+"""The audit action a service writes when it refuses a deletion event (``erasure_refusal``)."""
 ERASED_SUBJECT_TYPE: Final = "tenant"
+ERASABLE_STATUSES: Final = frozenset({"deletion_requested", "erased"})
+"""The tenant statuses an erasure runs in: the tenant asked for its deletion, or identity has
+erased it already (another service's erasure, a second pass)."""
 SERVICE_PATTERN: Final = re.compile(r"[a-z][a-z-]*")
 TABLE_NAME: Final = re.compile(r"[a-z_][a-z0-9_.]*")
 MAX_REASON_CHARS: Final = 300
@@ -167,9 +178,12 @@ class TenantDataErased(DomainEvent):
         )
 
 
-def erasure_audit_entry(event: TenantDataErased) -> AuditEntry:
+def erasure_audit_entry(
+    event: TenantDataErased, *, details: Mapping[str, object] | None = None
+) -> AuditEntry:
     """The ``tenant.erased`` entry a service writes with its erasure: by the service itself,
-    with the row counts and the tables it kept (names only; the event carries the reasons)."""
+    with the row counts and the tables it kept (names only; the event carries the reasons), and
+    any ``details`` the service adds (identity names the accounts it could not delete)."""
     if event.tenant_id is None:  # pragma: no cover - the event refuses it
         raise InvariantViolationError("an erasure names its tenant")
     return AuditEntry(
@@ -179,6 +193,7 @@ def erasure_audit_entry(event: TenantDataErased) -> AuditEntry:
         subject_id=str(event.tenant_id),
         actor=AuditActor.system(event.service),
         after={
+            **dict(details or {}),
             "service": event.service,
             "deletion_event_id": str(event.deletion_event_id),
             "tables": dict(event.tables),
@@ -187,6 +202,76 @@ def erasure_audit_entry(event: TenantDataErased) -> AuditEntry:
         occurred_at=event.erased_at,
         correlation_id=str(event.correlation_id),
     )
+
+
+@dataclass(frozen=True, slots=True)
+class ErasureCheck:
+    """What identity holds of a tenant's deletion, which every erasure is checked against before
+    it touches anything (``erasure_refusal``)."""
+
+    tenant_id: TenantId
+    tenant_status: str | None
+    """The tenant's status at identity; None when identity holds no such tenant."""
+    internal: bool = False
+    """Whether it is the regulatory team's internal tenant, which is never erased."""
+    deletion_event_id: EventId | None = None
+    """The ``tenant.deletion.requested`` identity last sent for the tenant's open deletion
+    request; None when the tenant has no open deletion request."""
+
+    def __post_init__(self) -> None:
+        require_instance(self.tenant_id, TenantId, "tenant_id")
+        if self.tenant_status is not None:
+            require_text(self.tenant_status, "tenant_status")
+        require_bool(self.internal, "internal")
+        if self.deletion_event_id is not None:
+            require_instance(self.deletion_event_id, EventId, "deletion_event_id")
+
+
+def erasure_refusal(check: ErasureCheck, request: DeletionRequest) -> str | None:
+    """Why ``request`` must erase nothing, or None when identity sent it: the tenant must be
+    known, not the internal tenant, asked for its deletion (or erased already), and the event
+    must be the one identity last sent for the tenant's open deletion request."""
+    if check.tenant_id != request.tenant_id:
+        return "identity answered for another tenant"
+    if check.tenant_status is None:
+        return "identity holds no such tenant"
+    if check.internal:
+        return "the internal tenant is never erased"
+    if check.tenant_status not in ERASABLE_STATUSES:
+        return f"the tenant is {check.tenant_status}, not being deleted"
+    if check.deletion_event_id is None:
+        return "the tenant has no open deletion request"
+    if check.deletion_event_id != request.event_id:
+        return "the event is not the one identity sent for the tenant's open deletion request"
+    return None
+
+
+def refusal_audit_entry(
+    service: str, request: DeletionRequest, reason: str, at: datetime
+) -> AuditEntry:
+    """The ``tenant.erasure_refused`` entry a service writes when it refuses ``request``."""
+    return AuditEntry(
+        action=ERASURE_REFUSED_ACTION,
+        tenant_id=request.tenant_id,
+        subject_type=ERASED_SUBJECT_TYPE,
+        subject_id=str(request.tenant_id),
+        actor=AuditActor.system(_service(service)),
+        after={
+            "service": service,
+            "deletion_event_id": str(request.event_id),
+            "refused": require_text(reason, "reason"),
+        },
+        occurred_at=require_aware(at, "at"),
+        correlation_id=str(request.correlation_id),
+    )
+
+
+class ErasedTenants(Protocol):
+    """A service's erased markers: the tenants it has erased, whose work it refuses."""
+
+    def is_erased(self, tenant_id: TenantId) -> bool:
+        """Whether the service has erased the tenant."""
+        ...
 
 
 def retained(*items: tuple[str, str]) -> tuple[Retained, ...]:
@@ -210,6 +295,12 @@ class TenantEraser(Protocol):
         ...
 
     def record(self, event: TenantDataErased, entry: AuditEntry) -> None:
-        """Write the event to the service's outbox and the entry to the audit log, in the same
-        transaction as the erasure."""
+        """Write the event to the service's outbox, the entry to the audit log and the erased
+        marker (the tenant, ``erased_at``, ``deletion_event_id``), in the same transaction as
+        the erasure."""
+        ...
+
+    def write_audit(self, entry: AuditEntry) -> None:
+        """Write ``entry`` to the audit log in the transaction, with nothing erased: the
+        record of a refusal."""
         ...

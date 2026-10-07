@@ -37,6 +37,15 @@ holds no tenant data (py_common.outbox).
 """
 
 [[exemptions]]
+table = "*.erased_tenant"
+reason = """
+The tenants a service has erased (tenant id, when, the deletion event's id): the marker its
+routes and consumers check before they do anything for a tenant, so every session, of any tenant
+or none, must see it; row-level security would hide it. It holds ids and times only
+(py_common.erasure; the services' erased_tenant migrations).
+"""
+
+[[exemptions]]
 table = "*.alembic_version"
 reason = "Alembic's version table: one row naming the schema's migration head."
 

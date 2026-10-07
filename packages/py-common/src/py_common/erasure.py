@@ -1,76 +1,144 @@
-"""The erasure consumers' common part: read ``tenant.deletion.requested``, erase, answer with
-``tenant.data.erased`` (``domain_kernel.erasure``; docs/runbooks/data-requests.md).
+"""The erasure consumers' common part: read ``tenant.deletion.requested``, check it with identity,
+erase, answer with ``tenant.data.erased``, and keep the erased tenant out afterwards
+(``domain_kernel.erasure``; docs/runbooks/data-requests.md).
 
-- ``erasure_component(service, eraser_on, enabled=...)``: the consumer a service's worker hosts,
-  group ``<service>.erasure`` on ``tenant.deletion.requested``. Its handler runs on the
-  consumer's connection (``sync_handler``): ``eraser_on(connection)`` makes the service's
-  ``TenantEraser`` there, which erases the tenant and records the event and the audit entry in
-  the transaction that also marks the event processed. While ``enabled(tenant)`` answers false
-  (the flag ``identity.tenant_erasure`` off for the tenant), it only logs ``erasure.off``, and
-  the deletion request stays pending at identity; ``identity-admin erasure resend`` sends the
-  request again once the flag is on.
-- ``ErasureSwitch(settings)``: ``enabled`` from the flag, configuring the process's flags on
-  first use, so a worker that hosts several services needs nothing else.
+- ``erasure_component(service, eraser_on, enabled=..., verifier=...)``: the consumer a service's
+  worker hosts, group ``<service>.erasure`` on ``tenant.deletion.requested``, in two steps
+  (``py_common.outbox.read_then_write``). First, with no transaction open: while ``enabled``
+  answers false for the tenant (the flag ``identity.tenant_erasure`` off) it only logs
+  ``erasure.off``, the deletion request stays pending at identity, and ``identity-admin erasure
+  resend`` sends it again once the flag is on; on, it asks identity what it holds of the tenant's
+  deletion (``ErasureVerifier``: ``GET /v1/identity/erasures/{tenant_id}``, a short timeout).
+  Then, on the consumer's connection: an event identity did not send for the tenant's open
+  deletion request, or one for the internal tenant (``domain_kernel.erasure.erasure_refusal``),
+  erases nothing: the service writes a ``tenant.erasure_refused`` audit entry and the event is
+  dead-lettered at once (``EventRefusedError``). Otherwise ``eraser_on(connection)`` makes the
+  service's ``TenantEraser`` there, which erases the tenant and records the event, the audit
+  entry and the erased marker in the transaction that also marks the event processed. Identity
+  unreachable, or answering anything but its check, raises ``IdentityUnreachableError``: the
+  consumer retries, then dead-letters, and nothing is erased.
+- ``erasure_switch(settings)``: the process's one ``ErasureSwitch``, ``enabled`` from the flag.
+  The process's flags are configured once (``configure_flags_once``), however many services a
+  worker hosts; ``cw-mvp worker`` configures them before it builds any component.
+- The erased marker, ``erased_tenant`` (tenant_id, erased_at, deletion_event_id), one table per
+  service with no row-level security, since every session must see it
+  (``create_erased_tenant_table`` from a migration). The eraser writes it with the erasure.
+  ``PostgresErasedTenants`` reads it for the service's routes (``create_app(erased_tenants=...)``:
+  410 ``tenant-erased``), and ``skip_erased`` / ``skip_erased_write`` wrap a consumer's handler
+  so an event of an erased tenant is marked processed with the outcome ``erased_tenant`` and
+  writes nothing. On Postgres the check holds a shared advisory lock on the tenant's erasure for
+  the rest of the consumer's transaction and ``begin_erasure`` takes it exclusively, so a handler
+  either commits before the erasure starts (and the erasure deletes what it wrote) or sees the
+  marker. ``MemoryErasedTenants`` is the memory stores' twin.
 - The Postgres helpers an eraser builds on: ``begin_erasure`` sets ``app.tenant_id`` and
   ``app.erasure`` for the transaction (row-level security admits the tenant's rows only, and the
   append-only guards let its DELETEs through), ``delete_rows`` deletes a table's rows of the
-  tenant, ``prune_outbox`` the tenant's events the relay has published or given up on, and
-  ``PostgresTenantEraser`` writes the event to the service's outbox and the entry to the audit
-  log on the same connection.
+  tenant, ``prune_outbox`` the tenant's events the relay has published or given up on (nothing
+  prunes the outbox on its own: docs/runbooks/outbox-relay.md), and ``PostgresTenantEraser``
+  writes the event to the service's outbox, the entry to the audit log and the erased marker on
+  the same connection.
 """
 
 import re
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Final
+from typing import Final, Protocol
+from uuid import UUID
 
-from sqlalchemy import Connection, text
+import httpx2
+from alembic.operations import Operations
+from sqlalchemy import (
+    Column,
+    Connection,
+    DateTime,
+    Engine,
+    MetaData,
+    PrimaryKeyConstraint,
+    Table,
+    Uuid,
+    text,
+)
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.sql.schema import SchemaItem
 
 from domain_kernel.audit import AuditEntry
 from domain_kernel.erasure import (
     DELETION_REQUESTED_TOPIC,
     ERASURE_FLAG,
     DeletionRequest,
+    ErasedTenants,
+    ErasureCheck,
     Retained,
     TenantDataErased,
     TenantEraser,
     erasure_audit_entry,
     erasure_group,
+    erasure_refusal,
+    refusal_audit_entry,
 )
 from domain_kernel.events import utc_now
 from domain_kernel.ids import CorrelationId, EventId, TenantId
 from py_common.audit.writer import AuditWriter
+from py_common.auth import ServiceTokenUnavailableError, service_auth_from
 from py_common.events import EventMessage
 from py_common.flags import configure_flags, flag_enabled
 from py_common.logging import get_logger
 from py_common.migrations import ERASURE_SETTING, TENANT_SETTING
-from py_common.outbox.sync import SyncHandler, sync_handler
+from py_common.outbox.consumer import EventRefusedError, Handler
+from py_common.outbox.sync import SyncHandler, read_first_store, read_then_write
 from py_common.outbox.writer import OutboxWriter
 from py_common.runtime import ConsumerComponent
 from py_common.settings import Settings
 
 TOPICS: Final = (DELETION_REQUESTED_TOPIC,)
 OUTBOX_TABLE: Final = "outbox_event"
+ERASED_TABLE: Final = "erased_tenant"
 OUTBOX_RETAINED: Final = Retained(
     OUTBOX_TABLE,
     "the tenant's events the relay has not published yet, this one among them: the relay sends "
-    "them and the outbox prune removes them",
+    "them; nothing prunes the outbox on its own, an operator does (outbox-relay runbook)",
 )
 """What every service with an outbox keeps: ``prune_outbox`` leaves pending rows to the relay."""
+ERASED_RETAINED: Final = Retained(
+    ERASED_TABLE,
+    "the erased marker: the tenant's id, when and by which deletion event; the service's routes "
+    "answer 410 and its consumers drop the tenant's events by it",
+)
+"""What every service keeps of an erased tenant: its marker."""
+VERIFY_PATH: Final = "/v1/identity/erasures/{tenant_id}"
+VERIFY_TIMEOUT_SECONDS: Final = 5.0
+"""How long a consumer waits for identity's check; past it the consumer retries."""
+ERASED_OUTCOME: Final = "erased_tenant"
+"""The outcome a consumer logs for an event of a tenant it has erased: processed, nothing
+written."""
+LOCK_PREFIX: Final = "cw.erasure:"
+DETAIL_CHARS: Final = 300
 _IDENTIFIER: Final = re.compile(r"[a-z_][a-z0-9_]{0,62}")
 
 Enabled = Callable[[TenantId], bool]
 """Whether erasing is on for a tenant."""
 EraserOn = Callable[[Connection], TenantEraser]
 """The service's eraser inside the consumer's transaction on the connection."""
-
+ErasedOn = Callable[[Connection], ErasedTenants]
+"""The service's erased markers read inside the consumer's transaction on the connection."""
 log = get_logger(__name__)
 
 
 class MalformedDeletionRequestError(ValueError):
     """A tenant.deletion.requested message without its tenant or with a payload its contract
     refuses; the consumer retries it and then dead-letters it."""
+
+
+class IdentityUnreachableError(RuntimeError):
+    """Identity could not say what it holds of a tenant's deletion; the consumer retries, then
+    dead-letters, and nothing is erased."""
+
+
+class ErasureRefusedError(EventRefusedError):
+    """A deletion event the service refuses (``erasure_refusal``): dead-lettered at once, with
+    its ``tenant.erasure_refused`` audit entry kept."""
 
 
 def _when(payload: dict[str, object], name: str) -> datetime:
@@ -107,17 +175,137 @@ def deletion_request_from(message: EventMessage) -> DeletionRequest:
     )
 
 
+class ErasureVerifier(Protocol):
+    def check(self, tenant_id: TenantId) -> ErasureCheck:
+        """What identity holds of the tenant's deletion; ``IdentityUnreachableError`` when it
+        cannot say."""
+        ...
+
+
+class HttpErasureVerifier:
+    """``GET {CW_IDENTITY_URL}/v1/identity/erasures/{tenant_id}`` with the service's token
+    (scope ``erasure:verify``), within ``timeout_seconds``. A 404 ``identity-tenant-not-found``
+    is a tenant identity does not hold; any other answer that is not a 200 with the check, a
+    transport error or no service token raises ``IdentityUnreachableError``. Pass ``client`` to
+    talk to an in-process app or a mock transport."""
+
+    def __init__(
+        self,
+        identity_url: str,
+        *,
+        auth: httpx2.Auth | None = None,
+        timeout_seconds: float = VERIFY_TIMEOUT_SECONDS,
+        client: httpx2.Client | None = None,
+    ) -> None:
+        self._client = client or httpx2.Client(
+            base_url=identity_url.rstrip("/"), timeout=timeout_seconds
+        )
+        self._auth = auth
+
+    def check(self, tenant_id: TenantId) -> ErasureCheck:
+        path = VERIFY_PATH.format(tenant_id=tenant_id)
+        try:
+            if self._auth is None:
+                response = self._client.get(path)
+            else:
+                response = self._client.get(path, auth=self._auth)
+        except httpx2.TransportError as exc:
+            raise IdentityUnreachableError(f"identity unreachable: {exc}") from exc
+        except ServiceTokenUnavailableError as exc:
+            raise IdentityUnreachableError(f"no service token for identity: {exc}") from exc
+        if response.status_code == 404 and _problem_type(response).endswith(
+            "identity-tenant-not-found"
+        ):
+            return ErasureCheck(tenant_id, None)
+        if response.status_code != 200:
+            raise IdentityUnreachableError(
+                f"identity answered {response.status_code} for tenant {tenant_id}'s erasure: "
+                f"{response.text[:DETAIL_CHARS]}"
+            )
+        try:
+            return check_from(response.json())
+        except (ValueError, TypeError, KeyError) as exc:
+            raise IdentityUnreachableError(
+                f"identity answered a check the consumer cannot read: {exc}"
+            ) from exc
+
+    def close(self) -> None:
+        self._client.close()
+
+
+def _problem_type(response: httpx2.Response) -> str:
+    try:
+        body = response.json()
+    except ValueError:
+        return ""
+    found = body.get("type") if isinstance(body, dict) else None
+    return found if isinstance(found, str) else ""
+
+
+def check_from(body: object) -> ErasureCheck:
+    """The ``ErasureCheck`` identity's answer carries (``ErasureCheckOut``)."""
+    if not isinstance(body, dict):
+        raise TypeError("identity's check is a JSON object")
+    event_id = body["deletion_event_id"]
+    return ErasureCheck(
+        tenant_id=TenantId(UUID(str(body["tenant_id"]))),
+        tenant_status=str(body["status"]),
+        internal=_bool(body["internal"]),
+        deletion_event_id=None if event_id is None else EventId(UUID(str(event_id))),
+    )
+
+
+def _bool(value: object) -> bool:
+    if not isinstance(value, bool):
+        raise TypeError("identity's check says internal true or false")
+    return value
+
+
+def verifier_from(settings: Settings) -> HttpErasureVerifier:
+    """Identity at ``CW_IDENTITY_URL``, with the service's own token when it has a secret."""
+    return HttpErasureVerifier(settings.identity_url, auth=service_auth_from(settings))
+
+
+@dataclass(frozen=True, slots=True)
+class ErasurePlan:
+    """A deletion request a consumer read, and why it must erase nothing (None: erase)."""
+
+    request: DeletionRequest
+    refusal: str | None = None
+
+
+def plan_erasure(
+    service: str,
+    message: EventMessage,
+    *,
+    enabled: Enabled,
+    verifier: ErasureVerifier,
+) -> ErasurePlan | None:
+    """The first step, with no transaction open: the request, checked with identity while the
+    flag is on for the tenant; None when there is nothing to do."""
+    if message.topic != DELETION_REQUESTED_TOPIC:
+        log.info("erasure.event_ignored", topic=message.topic, event_id=str(message.event_id))
+        return None
+    request = deletion_request_from(message)
+    if not enabled(request.tenant_id):
+        log_erasure_off(service, request)
+        return None
+    return ErasurePlan(request, erasure_refusal(verifier.check(request.tenant_id), request))
+
+
 def erase_and_record(
     service: str,
     eraser: TenantEraser,
     request: DeletionRequest,
     *,
     clock: Callable[[], datetime] = utc_now,
+    details: dict[str, object] | None = None,
 ) -> TenantDataErased:
-    """Erase the tenant with ``eraser``, then record the answer and its audit entry there."""
+    """Erase the tenant with ``eraser``, then record the answer, its audit entry (with
+    ``details``) and the erased marker there."""
     erased = eraser.erase(request.tenant_id)
     event = TenantDataErased.answering(request, service, erased, clock())
-    eraser.record(event, erasure_audit_entry(event))
+    eraser.record(event, erasure_audit_entry(event, details=details))
     log.info(
         "erasure.done",
         service=service,
@@ -128,6 +316,41 @@ def erase_and_record(
         retained=[item.table for item in erased.retained],
     )
     return event
+
+
+def refuse_erasure(
+    service: str,
+    eraser: TenantEraser,
+    request: DeletionRequest,
+    reason: str,
+    *,
+    clock: Callable[[], datetime] = utc_now,
+) -> None:
+    """Write the refusal's audit entry with ``eraser``, then raise ``ErasureRefusedError``: the
+    entry commits, the event goes to the dead letters, and nothing is erased."""
+    eraser.write_audit(refusal_audit_entry(service, request, reason, clock()))
+    log.error(
+        "erasure.refused",
+        service=service,
+        tenant_id=str(request.tenant_id),
+        deletion_event_id=str(request.event_id),
+        reason=reason,
+    )
+    raise ErasureRefusedError(reason)
+
+
+def apply_erasure(
+    service: str,
+    plan: ErasurePlan,
+    eraser: TenantEraser,
+    *,
+    clock: Callable[[], datetime] = utc_now,
+    details: dict[str, object] | None = None,
+) -> TenantDataErased:
+    """The second step, in the consumer's transaction: refuse, or erase and record."""
+    if plan.refusal is not None:
+        refuse_erasure(service, eraser, plan.request, plan.refusal, clock=clock)
+    return erase_and_record(service, eraser, plan.request, clock=clock, details=details)
 
 
 def log_erasure_off(service: str, request: DeletionRequest) -> None:
@@ -147,21 +370,20 @@ def erasure_handler(
     eraser_on: EraserOn,
     *,
     enabled: Enabled,
+    verifier: ErasureVerifier,
     clock: Callable[[], datetime] = utc_now,
-) -> SyncHandler:
-    """The handler of ``tenant.deletion.requested`` on the consumer's connection."""
+) -> Handler:
+    """The handler of ``tenant.deletion.requested``: identity's check with no transaction open,
+    then the erasure (or the refusal) on the consumer's connection."""
 
-    def handle(message: EventMessage, connection: Connection) -> None:
-        if message.topic != DELETION_REQUESTED_TOPIC:
-            log.info("erasure.event_ignored", topic=message.topic, event_id=str(message.event_id))
-            return
-        request = deletion_request_from(message)
-        if not enabled(request.tenant_id):
-            log_erasure_off(service, request)
-            return
-        erase_and_record(service, eraser_on(connection), request, clock=clock)
+    def read(message: EventMessage) -> ErasurePlan | None:
+        return plan_erasure(service, message, enabled=enabled, verifier=verifier)
 
-    return handle
+    def write(message: EventMessage, plan: ErasurePlan | None, connection: Connection) -> None:
+        if plan is not None:
+            apply_erasure(service, plan, eraser_on(connection), clock=clock)
+
+    return read_then_write(read, write)
 
 
 def erasure_component(
@@ -169,33 +391,69 @@ def erasure_component(
     eraser_on: EraserOn,
     *,
     enabled: Enabled,
+    verifier: ErasureVerifier,
     clock: Callable[[], datetime] = utc_now,
 ) -> ConsumerComponent:
     """The consumer of group ``<service>.erasure`` a service's worker hosts."""
     return ConsumerComponent(
         group_id=erasure_group(service),
         topics=TOPICS,
-        handler=sync_handler(erasure_handler(service, eraser_on, enabled=enabled, clock=clock)),
+        handler=erasure_handler(
+            service, eraser_on, enabled=enabled, verifier=verifier, clock=clock
+        ),
+        store_factory=read_first_store,
     )
+
+
+class _FlagsOnce:
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.done = False
+
+
+_flags = _FlagsOnce()
+_switch: list["ErasureSwitch"] = []
+
+
+def configure_flags_once(settings: Settings) -> bool:
+    """Configure the process's flags from ``settings`` unless this process has done it already;
+    whether this call did. A reader waits while another configures them, so no flag is read
+    from a provider being swapped."""
+    with _flags.lock:
+        if _flags.done:
+            return False
+        configure_flags(settings)
+        _flags.done = True
+        return True
+
+
+def reset_flags_once() -> None:
+    """Forget that the flags were configured, and the process's switch (tests)."""
+    with _flags.lock:
+        _flags.done = False
+        _switch.clear()
 
 
 class ErasureSwitch:
     """``enabled`` from the flag ``identity.tenant_erasure`` for each tenant. The first answer
-    configures the process's flags from ``settings`` (``configure_flags``), unless they are
-    configured already: a worker reads no flag otherwise."""
+    configures the process's flags from ``settings`` unless the process has configured them
+    (``configure_flags_once``): a worker reads no flag otherwise."""
 
-    def __init__(self, settings: Settings, *, configure: bool = True) -> None:
+    def __init__(self, settings: Settings) -> None:
         self._settings = settings
-        self._configured = not configure
-        self._lock = threading.Lock()
 
     def __call__(self, tenant_id: TenantId) -> bool:
-        if not self._configured:
-            with self._lock:
-                if not self._configured:
-                    configure_flags(self._settings)
-                    self._configured = True
+        configure_flags_once(self._settings)
         return flag_enabled(ERASURE_FLAG, tenant_id.value)
+
+
+def erasure_switch(settings: Settings) -> ErasureSwitch:
+    """The process's one switch, made from the first ``settings`` given: every erasure consumer
+    a worker hosts reads the flag through it."""
+    with _flags.lock:
+        if not _switch:
+            _switch.append(ErasureSwitch(settings))
+        return _switch[0]
 
 
 def _identifier(name: str) -> str:
@@ -204,8 +462,17 @@ def _identifier(name: str) -> str:
     return name
 
 
+def _lock_key(tenant_id: TenantId) -> str:
+    return f"{LOCK_PREFIX}{tenant_id}"
+
+
 def begin_erasure(connection: Connection, tenant_id: TenantId) -> None:
-    """Set the tenant and the erasure setting for the rest of the transaction."""
+    """Take the tenant's erasure lock (waiting for the consumers whose transactions checked the
+    tenant), then set the tenant and the erasure setting for the rest of the transaction."""
+    connection.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+        {"key": _lock_key(tenant_id)},
+    )
     connection.execute(
         text("SELECT set_config(:tenant_setting, :tenant, true), set_config(:erasure, 'on', true)"),
         {"tenant_setting": TENANT_SETTING, "tenant": str(tenant_id), "erasure": ERASURE_SETTING},
@@ -244,10 +511,203 @@ def prune_outbox(connection: Connection, tenant_id: TenantId) -> int:
     return max(result.rowcount, 0)
 
 
+ERASED_COMMENT: Final = (
+    "The tenants this service has erased: the marker its routes (410) and consumers check, so "
+    "nothing of an erased tenant is written again. No row-level security: every session must "
+    "see it. Ids and times only."
+)
+metadata = MetaData()
+
+
+def _erased_columns() -> list[SchemaItem]:
+    return [
+        Column("tenant_id", Uuid(), nullable=False),
+        Column("erased_at", DateTime(timezone=True), nullable=False),
+        Column("deletion_event_id", Uuid(), nullable=False),
+        PrimaryKeyConstraint("tenant_id", name=f"pk_{ERASED_TABLE}"),
+    ]
+
+
+erased_tenant = Table(ERASED_TABLE, metadata, *_erased_columns(), comment=ERASED_COMMENT)
+
+
+def create_erased_tenant_table(op: Operations) -> None:
+    """Create ``erased_tenant``. Call from a service migration's ``upgrade``; the schema needs
+    the lint exemption ``*.erased_tenant`` (infra/scripts/migration_lint.toml), which it has."""
+    op.create_table(ERASED_TABLE, *_erased_columns(), comment=ERASED_COMMENT)
+
+
+def drop_erased_tenant_table(op: Operations) -> None:
+    op.drop_table(ERASED_TABLE)
+
+
+def mark_erased(connection: Connection, event: TenantDataErased) -> bool:
+    """Write the tenant's erased marker; an erasure run again keeps the first. Whether it was
+    written now."""
+    if event.tenant_id is None:  # pragma: no cover - the event refuses it
+        raise ValueError("an erasure names its tenant")
+    statement = (
+        insert(erased_tenant)
+        .values(
+            tenant_id=event.tenant_id.value,
+            erased_at=event.erased_at,
+            deletion_event_id=event.deletion_event_id.value,
+        )
+        .on_conflict_do_nothing(index_elements=["tenant_id"])
+    )
+    return connection.execute(statement).rowcount > 0
+
+
+class ConnectionErasedTenants:
+    """The erased markers inside a consumer's transaction: ``is_erased`` first takes a shared
+    lock on the tenant's erasure for the rest of the transaction, so an erasure that starts
+    meanwhile waits for it, and one that committed first is seen."""
+
+    def __init__(self, connection: Connection) -> None:
+        self._connection = connection
+
+    def is_erased(self, tenant_id: TenantId) -> bool:
+        self._connection.execute(
+            text("SELECT pg_advisory_xact_lock_shared(hashtextextended(:key, 0))"),
+            {"key": _lock_key(tenant_id)},
+        )
+        found = self._connection.execute(
+            text(f"SELECT 1 FROM {ERASED_TABLE} WHERE tenant_id = :tenant"),
+            {"tenant": tenant_id.value},
+        ).first()
+        return found is not None
+
+
+class _NoMarkers:
+    def is_erased(self, tenant_id: TenantId) -> bool:
+        return False
+
+
+def erased_on_connection(connection: Connection) -> ErasedTenants:
+    """The default ``erased_on`` of a consumer's handler: the erased markers on the consumer's
+    Postgres connection (``ConnectionErasedTenants``). On another database, the SQLite inbox of a
+    test whose units are a memory store's, there is no marker table: none is read, and a test
+    that erases passes the memory store's markers instead."""
+    if connection.dialect.name == "postgresql":
+        return ConnectionErasedTenants(connection)
+    return _NoMarkers()
+
+
+class PostgresErasedTenants:
+    """The erased markers for a service's routes, on its engine. A tenant once seen erased stays
+    so in the process (an erasure is not undone); any other is read again on each request."""
+
+    def __init__(self, engine: Engine) -> None:
+        self._engine = engine
+        self._known: set[TenantId] = set()
+        self._lock = threading.Lock()
+
+    def is_erased(self, tenant_id: TenantId) -> bool:
+        with self._lock:
+            if tenant_id in self._known:
+                return True
+        with self._engine.connect() as connection:
+            found = connection.execute(
+                text(f"SELECT 1 FROM {ERASED_TABLE} WHERE tenant_id = :tenant"),
+                {"tenant": tenant_id.value},
+            ).first()
+        if found is None:
+            return False
+        with self._lock:
+            self._known.add(tenant_id)
+        return True
+
+
+@dataclass(frozen=True, slots=True)
+class ErasedMarker:
+    tenant_id: TenantId
+    erased_at: datetime
+    deletion_event_id: EventId
+
+
+class MemoryErasedTenants:
+    """A memory store's erased markers: its eraser marks, its routes and handlers ask."""
+
+    def __init__(self) -> None:
+        self._markers: dict[TenantId, ErasedMarker] = {}
+        self._lock = threading.Lock()
+
+    def mark(self, event: TenantDataErased) -> bool:
+        if event.tenant_id is None:  # pragma: no cover - the event refuses it
+            raise ValueError("an erasure names its tenant")
+        with self._lock:
+            if event.tenant_id in self._markers:
+                return False
+            self._markers[event.tenant_id] = ErasedMarker(
+                event.tenant_id, event.erased_at, event.deletion_event_id
+            )
+            return True
+
+    def is_erased(self, tenant_id: TenantId) -> bool:
+        with self._lock:
+            return tenant_id in self._markers
+
+    def __iter__(self) -> Iterator[ErasedMarker]:
+        with self._lock:
+            return iter(list(self._markers.values()))
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._markers)
+
+
+def _skipped(
+    service: str, message: EventMessage, erased_on: ErasedOn, connection: Connection
+) -> bool:
+    if message.tenant_id is None:
+        return False
+    tenant_id = TenantId(message.tenant_id)
+    if not erased_on(connection).is_erased(tenant_id):
+        return False
+    log.info(
+        "consumer.erased_tenant",
+        service=service,
+        topic=message.topic,
+        event_id=str(message.event_id),
+        tenant_id=str(tenant_id),
+        outcome=ERASED_OUTCOME,
+    )
+    return True
+
+
+def skip_erased(
+    service: str, handler: SyncHandler, *, erased_on: ErasedOn = erased_on_connection
+) -> SyncHandler:
+    """``handler``, unless the message's tenant is erased here: then the event is only marked
+    processed (outcome ``erased_tenant``) and nothing is written."""
+
+    def handle(message: EventMessage, connection: Connection) -> None:
+        if not _skipped(service, message, erased_on, connection):
+            handler(message, connection)
+
+    return handle
+
+
+def skip_erased_write[P](
+    service: str,
+    write: Callable[[EventMessage, P, Connection], None],
+    *,
+    erased_on: ErasedOn = erased_on_connection,
+) -> Callable[[EventMessage, P, Connection], None]:
+    """The write step of a ``read_then_write`` handler, unless the message's tenant is erased
+    here: then the event is only marked processed (outcome ``erased_tenant``)."""
+
+    def guarded(message: EventMessage, plan: P, connection: Connection) -> None:
+        if not _skipped(service, message, erased_on, connection):
+            write(message, plan, connection)
+
+    return guarded
+
+
 class PostgresTenantEraser:
-    """The recording half of a Postgres eraser: the event into the service's outbox and the
-    entry into ``audit.event``, on the connection whose transaction holds the erasure. A
-    service's eraser subclasses it and adds ``erase``."""
+    """The recording half of a Postgres eraser: the event into the service's outbox, the entry
+    into ``audit.event`` and the erased marker, on the connection whose transaction holds the
+    erasure. A service's eraser subclasses it and adds ``erase``."""
 
     def __init__(
         self,
@@ -262,4 +722,8 @@ class PostgresTenantEraser:
 
     def record(self, event: TenantDataErased, entry: AuditEntry) -> None:
         self._writer.write(self.connection, event)
+        self._audit.write(self.connection, entry)
+        mark_erased(self.connection, event)
+
+    def write_audit(self, entry: AuditEntry) -> None:
         self._audit.write(self.connection, entry)

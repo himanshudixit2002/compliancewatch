@@ -34,6 +34,8 @@ class OutboxWriter:
     The row commits or rolls back with that transaction, which is the whole point of the
     pattern. ``partition_key`` is the Kafka message key and decides ordering: pass the aggregate
     id for regulatory events; tenant events default to the tenant id, others to the event id.
+    ``available_at`` holds the row back from the relay until then (a second pass sent later);
+    by default it is available at once.
     """
 
     def __init__(
@@ -43,7 +45,12 @@ class OutboxWriter:
         self._clock = clock
 
     def write(
-        self, connection: Connection, event: DomainEvent, *, partition_key: str | None = None
+        self,
+        connection: Connection,
+        event: DomainEvent,
+        *,
+        partition_key: str | None = None,
+        available_at: datetime | None = None,
     ) -> OutboxRecord:
         message = to_message(event)
         if self._validator is not None:
@@ -73,7 +80,7 @@ class OutboxWriter:
                 message=message.model_dump(mode="json"),
                 status=STATUS_PENDING,
                 attempts=0,
-                available_at=self._clock(),
+                available_at=available_at or self._clock(),
             )
         )
         return record
