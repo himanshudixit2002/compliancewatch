@@ -308,10 +308,17 @@ describe("UploadPanel", () => {
     await user.click(
       within(screen.getByRole("dialog")).getByRole("button", { name: "Upload the document" }),
     );
-    await waitFor(() => expect(screen.getByText("No answer came back")).toBeDefined());
-    await user.click(screen.getByRole("button", { name: "Try again" }));
-    await waitFor(() =>
-      expect(screen.getByText("Stored, but its ingest did not start")).toBeDefined(),
+    await waitFor(() => expect(screen.getByText("No answer came back")).toBeDefined(), {
+      timeout: 5000,
+    });
+    // Try again stays disabled until the lost request's transition settles; a click before then
+    // does nothing, so wait for it (a slow runner showed the banner well before that).
+    const tryAgain = () => screen.getByRole("button", { name: "Try again" }) as HTMLButtonElement;
+    await waitFor(() => expect(tryAgain().disabled).toBe(false), { timeout: 5000 });
+    await user.click(tryAgain());
+    await waitFor(
+      () => expect(screen.getByText("Stored, but its ingest did not start")).toBeDefined(),
+      { timeout: 5000 },
     );
     expect(screen.getByText("req-example-4")).toBeDefined();
     expect(screen.getByText("Example title message")).toBeDefined();
