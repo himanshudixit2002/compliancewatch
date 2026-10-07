@@ -11,7 +11,9 @@ is created; the second is refused with 402 and the limit and the count, and no G
 answer. They start a subscription (with an Idempotency-Key), the provider's signed webhook
 activates it, and once the profile's minute-long cache of the entitlements has passed, the
 second business is created. The owner's audit trail shows the subscription started and its
-status changed by the billing webhook. Nothing reaches a real billing provider.
+status changed by the billing webhook. A signed webhook that names the tenant for a subscription
+it never started changes nothing, and once the subscription is cancelled a late charge does not
+revive it: the tenant is back on the free allowance. Nothing reaches a real billing provider.
 """
 
 import hashlib
@@ -161,6 +163,7 @@ def test_a_paid_plan_lifts_the_free_registration_limit(
     raw, signature = signed(
         {
             "event": "subscription.activated",
+            "created_at": 946_684_810,
             "payload": {
                 "subscription": {
                     "entity": {
@@ -196,3 +199,47 @@ def test_a_paid_plan_lifts_the_free_registration_limit(
         ("subscription.status_changed", "system"),
     ]
     assert subscription[1][2] == "system:billing-webhook"
+
+    # 5. A webhook for a subscription the tenant never started, with no customer of its own, is
+    # answered and ignored; a cancellation is final even when a late charge follows it.
+    forged, forged_signature = signed(
+        {
+            "event": "subscription.activated",
+            "payload": {
+                "subscription": {
+                    "entity": {
+                        "id": "sub_example_forged",
+                        "customer_id": "cust_example_forged",
+                        "quantity": 1_000_000,
+                        "notes": {"tenant_id": tenant, "plan_key": "ca_seat_monthly"},
+                    }
+                }
+            },
+        }
+    )
+    ignored = identity.post(f"{IDENTITY}/billing/webhook", content=forged, headers=forged_signature)
+    assert (ignored.status_code, ignored.json()["ignored"]) == (200, True)
+    for kind, created_at in (
+        ("subscription.cancelled", 946_684_830),
+        ("subscription.charged", 946_684_820),
+    ):
+        raw, signature = signed(
+            {
+                "event": kind,
+                "created_at": created_at,
+                "payload": {
+                    "subscription": {
+                        "entity": {"id": subscription_id, "notes": {"tenant_id": tenant}}
+                    }
+                },
+            }
+        )
+        assert (
+            identity.post(f"{IDENTITY}/billing/webhook", content=raw, headers=signature).status_code
+            == 200
+        )
+    after = identity.get(f"{IDENTITY}/entitlements", headers=owner).json()
+    assert (after["plan_key"], after["limits"]["registrations"]) == ("free", 1)
+    trail = identity.get(f"{IDENTITY}/audit", params={"limit": 200}, headers=owner).json()
+    actions = {item["action"] for item in trail["items"]}
+    assert {"subscription.unmatched", "subscription.event_ignored"} <= actions
