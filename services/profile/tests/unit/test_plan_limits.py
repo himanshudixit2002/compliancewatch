@@ -16,7 +16,7 @@ from domain_kernel.ontology import AttributeLevel
 from profile_service.application.businesses import AddRegistration, CreateBusiness
 from profile_service.application.prefill import PrefillFromGstin
 from profile_service.application.registration import RegisterNodes
-from profile_service.domain.errors import PlanLimitReachedError
+from profile_service.domain.errors import EntitlementsMisconfiguredError, PlanLimitReachedError
 from profile_service.domain.flags import PLAN_LIMITS
 from profile_service.infrastructure.entitlements import (
     ENTITLEMENTS_PATH,
@@ -139,31 +139,91 @@ def test_the_client_reads_the_limit_and_keeps_it_for_a_minute() -> None:
     assert unlimited.registration_limit(TENANT) is None
 
 
+def test_the_limit_counts_only_when_identity_says_enforced() -> None:
+    """m5: identity is the single source of truth: profile's flag on and enforced false is no
+    limit, cached like any answer."""
+    calls = 0
+
+    def handler(_: httpx2.Request) -> httpx2.Response:
+        nonlocal calls
+        calls += 1
+        return httpx2.Response(200, json={**answer(1), "enforced": False})
+
+    reader = entitlements(handler)
+    assert reader.registration_limit(TENANT) is None
+    assert reader.registration_limit(TENANT) is None
+    assert calls == 1
+
+
 @pytest.mark.parametrize(
     "handler",
     [
         lambda _: httpx2.Response(503, json={"type": "x"}),
-        lambda _: httpx2.Response(200, text="not json"),
-        lambda _: httpx2.Response(200, json={"limits": {}}),
-        lambda _: httpx2.Response(200, json=answer(-1)),
-        lambda _: httpx2.Response(200, json={"limits": {"registrations": True}}),
+        lambda _: httpx2.Response(500),
     ],
-    ids=["503", "not-json", "no-limit-key", "negative", "bool"],
+    ids=["503", "500"],
 )
-def test_an_answer_the_client_cannot_use_fails_open_and_is_asked_again(
+def test_a_5xx_fails_open_and_is_asked_again_after_ten_seconds(
     handler: Callable[[httpx2.Request], httpx2.Response],
 ) -> None:
+    """m4: a failure is kept for 10 s, so an outage costs one call per tenant every 10 s."""
     calls = 0
+    now = [0.0]
 
     def counted(request: httpx2.Request) -> httpx2.Response:
         nonlocal calls
         calls += 1
         return handler(request)
 
-    reader = entitlements(counted)
+    reader = entitlements(counted, now=now)
     assert reader.registration_limit(TENANT) is None
+    now[0] = 9.0
     assert reader.registration_limit(TENANT) is None
-    assert calls == 2, "a failure is not cached"
+    assert calls == 1, "the failure is kept for 10 s"
+    now[0] = 10.0
+    assert reader.registration_limit(TENANT) is None
+    assert calls == 2
+
+
+@pytest.mark.parametrize(
+    "handler",
+    [
+        lambda _: httpx2.Response(401, json={"type": "auth-token-required"}),
+        lambda _: httpx2.Response(403, json={"type": "auth-forbidden"}),
+        lambda _: httpx2.Response(404),
+        lambda _: httpx2.Response(200, text="not json"),
+        lambda _: httpx2.Response(200, json={"limits": {}}),
+        lambda _: httpx2.Response(200, json=answer(-1)),
+        lambda _: httpx2.Response(200, json={**answer(1), "limits": {"registrations": True}}),
+        lambda _: httpx2.Response(200, json={"limits": {"registrations": 1}}),
+    ],
+    ids=["401", "403", "404", "not-json", "no-limit-key", "negative", "bool", "no-enforced"],
+)
+def test_a_misconfiguration_refuses_with_503_and_never_fails_open(
+    handler: Callable[[httpx2.Request], httpx2.Response],
+) -> None:
+    """m3: a missing client or scope (401, 403) or an answer profile cannot read is not an
+    outage: the registration is refused, with the misconfiguration named and no tenant data."""
+    calls = 0
+    now = [0.0]
+
+    def counted(request: httpx2.Request) -> httpx2.Response:
+        nonlocal calls
+        calls += 1
+        return handler(request)
+
+    reader = entitlements(counted, now=now)
+    with pytest.raises(EntitlementsMisconfiguredError) as refused:
+        reader.registration_limit(TENANT)
+    assert "CW_SERVICE_CLIENT_ID" in str(refused.value)
+    assert str(TENANT) not in str(refused.value)
+    with pytest.raises(EntitlementsMisconfiguredError):
+        reader.registration_limit(TENANT)
+    assert calls == 1
+    now[0] = 10.0
+    with pytest.raises(EntitlementsMisconfiguredError):
+        reader.registration_limit(TENANT)
+    assert calls == 2
 
 
 def test_an_unreachable_identity_or_a_missing_token_fails_open() -> None:
@@ -171,6 +231,11 @@ def test_an_unreachable_identity_or_a_missing_token_fails_open() -> None:
         raise httpx2.ConnectError("refused", request=request)
 
     assert entitlements(down).registration_limit(TENANT) is None
+
+    def slow(request: httpx2.Request) -> httpx2.Response:
+        raise httpx2.ReadTimeout("slow", request=request)
+
+    assert entitlements(slow).registration_limit(TENANT) is None
 
     class NoToken(httpx2.Auth):
         def auth_flow(
@@ -226,3 +291,22 @@ def test_the_route_answers_402_with_the_limit_and_the_count() -> None:
             headers=headers,
         )
         assert plain.status_code == 402, plain.text
+
+
+def test_the_route_answers_503_when_identity_refuses_profile() -> None:
+    settings = ProfileSettings(
+        _env_file=None,
+        service_name="profile",
+        profile_store="memory",
+        profile_gstin_lookup="static",
+    )
+    refusing = entitlements(lambda _: httpx2.Response(401, json={"type": "auth-token-required"}))
+    with TestClient(build_app(settings, flags=FixedFlags(), entitlements=refusing)) as client:
+        refused = client.post(
+            "/v1/businesses",
+            json={"name": "Example Traders", "gstin": str(GSTIN_KARNATAKA)},
+            headers={"x-tenant-id": str(TENANT), "Idempotency-Key": str(uuid4())},
+        )
+    assert refused.status_code == 503, refused.text
+    assert refused.json()["type"].endswith("profile-entitlements-misconfigured")
+    assert str(GSTIN_KARNATAKA) not in refused.text

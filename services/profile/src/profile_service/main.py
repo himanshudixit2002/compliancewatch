@@ -39,6 +39,7 @@ from profile_service.domain.entitlements import EntitlementsReader
 from profile_service.domain.errors import (
     AttributeLevelMismatchError,
     BusinessIdentifierRequiredError,
+    EntitlementsMisconfiguredError,
     FinancialYearRequiredError,
     InvalidHierarchyError,
     NotABusinessError,
@@ -86,6 +87,7 @@ PROBLEM_STATUS: dict[type[DomainError], int] = {
     InvalidAttributeValueError: 422,
     UnknownAttributeError: 422,
     PlanLimitReachedError: 402,
+    EntitlementsMisconfiguredError: 503,
 }
 
 

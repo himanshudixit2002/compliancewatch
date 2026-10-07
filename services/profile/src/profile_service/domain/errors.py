@@ -96,3 +96,21 @@ class PlanLimitReachedError(DomainError):
             f"the plan allows {limit} GSTIN registration(s) and the tenant holds {used}; "
             "upgrade the plan to add another"
         )
+
+
+class EntitlementsMisconfiguredError(DomainError):
+    """Identity refused profile's request for the tenant's plan limits (401 or 403), or answered
+    something profile cannot read: profile's service client is missing, lacks the
+    entitlements:read scope, or points at the wrong place. A new registration is refused with
+    503 until an operator fixes it, rather than let through unchecked. The detail names the
+    misconfiguration and nothing about the tenant or the GSTIN."""
+
+    type_slug = "profile-entitlements-misconfigured"
+    title = "Plan limits cannot be read"
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(
+            f"profile cannot read the plan limits from identity ({reason}); check profile's "
+            "service client (CW_SERVICE_CLIENT_ID and CW_SERVICE_CLIENT_SECRET) and its "
+            "entitlements:read scope"
+        )
