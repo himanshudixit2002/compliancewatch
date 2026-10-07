@@ -459,8 +459,10 @@ function NodeFields({ node, path, context }: { node: NodeDraft; path: string; co
  * the ontology, whose comparison is one the ontology allows on the attribute's type and whose
  * values are the ontology's options where it has them; or free text a person has to judge. The
  * words below it say the condition as the version page will. Experts may edit the JSON instead,
- * which is read back and checked for shape only: the rulebook checks it against the ontology when
- * the draft is saved. The form posts the condition's JSON in a hidden field.
+ * which is read back and checked for shape only, within the bounds of D-064 (32 levels, 500
+ * parts): the rulebook checks it against the ontology when the draft is saved. The form posts the
+ * condition's JSON in a hidden field. Its flagged parts hold the form back only once the condition
+ * changed from the one it was rendered with, since an untouched one is never sent.
  */
 export function PredicateEditor({
   idPrefix,
@@ -485,7 +487,10 @@ export function PredicateEditor({
   const errors = useMemo(() => validateTree(root, ontology), [root, ontology]);
   const mapping = useMemo(() => toMapping(root, ontology), [root, ontology]);
   const pendingJson = mode === "json" && jsonText.trim() !== toJson(root, ontology).trim();
-  const problems = Object.keys(errors).length + (pendingJson ? 1 : 0);
+  // A condition left as it was rendered is not sent (the form posts it beside its base), so its
+  // flagged parts hold nothing back; only a changed one counts them, and an unapplied JSON text.
+  const changed = JSON.stringify(mapping) !== start.json;
+  const problems = (changed ? Object.keys(errors).length : 0) + (pendingJson ? 1 : 0);
 
   useEffect(() => {
     onProblems(problems);

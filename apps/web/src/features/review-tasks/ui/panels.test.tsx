@@ -146,6 +146,34 @@ describe("EditPanel", () => {
     expect(screen.getByText("Changed: Title.")).toBeDefined();
   });
 
+  it("sends an edit beside an untouched condition with flagged parts, which it leaves alone", async () => {
+    const sent: Record<string, string>[] = [];
+    const action = vi.fn<WriteAction<WriteResult>>(async (_state, formData) => {
+      sent.push(sentOf(formData));
+      return done("Example saved.");
+    });
+    // A stored value the ontology does not offer: the editor flags it, but nobody touched it.
+    const flagged = {
+      ...FORM,
+      initial: {
+        ...VALUES,
+        specification: {
+          all_of: [{ attribute: "example_kind", operator: "eq", value: "nowhere" }],
+        },
+      },
+    };
+    const user = userEvent.setup();
+    render(<EditPanel action={action} form={flagged} blocked={null} ontology={ONTOLOGY} />);
+    await user.type(screen.getByLabelText(/^Summary/), " Example more.");
+    await user.click(screen.getByRole("button", { name: "Save the draft" }));
+    await waitFor(() => expect(action).toHaveBeenCalledTimes(1));
+    expect(sent[0]?.specification).toBe(sent[0]?.["base:specification"]);
+    // Once the condition changes, its flagged parts hold the form back.
+    await user.click(screen.getByRole("button", { name: "Add a condition to Group 1" }));
+    await user.click(screen.getByRole("button", { name: "Save the draft" }));
+    expect(action).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps a condition with shape problems from being sent and moves focus to the first", async () => {
     const action = vi.fn<WriteAction<WriteResult>>();
     const user = userEvent.setup();

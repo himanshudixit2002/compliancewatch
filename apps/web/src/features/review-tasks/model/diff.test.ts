@@ -8,6 +8,15 @@ import { compare, proposalContent, versionContent } from "./diff";
 const WORDS = { title: "Example comparison", beforeLabel: "Before", afterLabel: "After" };
 
 describe("compare", () => {
+  it("reads a long field that is the same on both sides as the same, past the table limit", () => {
+    // 501 sentences a side: more cells than the diff aligns, yet nothing changed.
+    const summary = Array.from({ length: 501 }, (_, n) => `Example sentence ${n}.`).join(" ");
+    const version = ruleVersionFromDto(ruleVersionDto({ summary }));
+    const comparison = compare(versionContent(version), versionContent(version), null, WORDS);
+    expect(comparison.changed).toEqual([]);
+    expect(comparison.same).toContain("Summary");
+  });
+
   it("lists each changed field as lines, and the fields that read the same", () => {
     const before = versionContent(ruleVersionFromDto(ruleVersionDto()));
     const after = versionContent(

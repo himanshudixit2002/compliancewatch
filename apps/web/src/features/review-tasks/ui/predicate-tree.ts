@@ -80,6 +80,16 @@ export const KERNEL_OPERATORS: readonly string[] = [
 /** domain_kernel.ontology.ATTRIBUTE_KEY_PATTERN. */
 export const ATTRIBUTE_KEY = /^[a-z][a-z0-9_]*$/;
 
+/**
+ * How deep a condition may nest (its groups and negations, the outermost part at depth 1) and how
+ * many parts it may hold in all, D-064. Every read of a condition here walks it recursively, as
+ * the kernel's does: 20,000 nested negations overflow the server's stack, and 5,000 reach the
+ * rulebook's recursion limit, so a condition past either bound is refused on its field before
+ * anything walks it. The seed calendar's conditions nest three deep and hold a handful of parts.
+ */
+export const MAX_DEPTH = 32;
+export const MAX_PARTS = 500;
+
 const PREDICATE_KEYS = new Set(["attribute", "operator", "value", "free_text"]);
 
 export type IdSource = () => string;
@@ -336,10 +346,51 @@ export function validateTree(
 }
 
 /**
+ * Whether a parsed condition fits the bounds (`MAX_DEPTH`, `MAX_PARTS`), walked with a list of
+ * its own rather than recursion, so no condition overflows the stack here. Null when it fits;
+ * otherwise the bound it passes, worded.
+ */
+export function sizeProblem(raw: unknown): string | null {
+  const pending: { node: unknown; depth: number }[] = [{ node: raw, depth: 1 }];
+  let parts = 0;
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    parts += 1;
+    if (parts > MAX_PARTS) return t("predicateEditor.json.tooLarge", { max: MAX_PARTS });
+    if (next.depth > MAX_DEPTH) return t("predicateEditor.json.tooDeep", { max: MAX_DEPTH });
+    const node = next.node;
+    if (!isRecord(node)) continue;
+    const children = Array.isArray(node.all_of)
+      ? node.all_of
+      : Array.isArray(node.any_of)
+        ? node.any_of
+        : "not" in node
+          ? [node.not]
+          : [];
+    for (const child of children as unknown[]) pending.push({ node: child, depth: next.depth + 1 });
+  }
+  return null;
+}
+
+/**
+ * Whether a parsed condition can be read and sent: within the bounds first, then of the kernel's
+ * shape. A walk that fails anyway (a stack the bounds did not foresee) is said as too deep rather
+ * than thrown. Null when it can.
+ */
+export function conditionProblem(raw: unknown): string | null {
+  const size = sizeProblem(raw);
+  if (size !== null) return size;
+  try {
+    return shapeProblem(raw);
+  } catch {
+    return t("predicateEditor.json.tooDeep", { max: MAX_DEPTH });
+  }
+}
+
+/**
  * Whether a parsed JSON value has the kernel's shape: the groups take lists, a negation one part,
  * a predicate the four keys at most with an attribute, an operator only with a value, and every
  * value a string, a number or a boolean (or a list of them). Null when it does; otherwise the
- * first problem, worded.
+ * first problem, worded. It walks the value recursively: `conditionProblem` bounds it first.
  */
 export function shapeProblem(raw: unknown, where = "specification"): string | null {
   if (!isRecord(raw)) return t("predicateEditor.json.notObject", { where });
@@ -380,7 +431,7 @@ function listProblem(items: unknown, where: string): string | null {
   return null;
 }
 
-/** The JSON view's text read back: the tree, or the first shape problem worded. */
+/** The JSON view's text read back: the tree, or the first problem worded (never a throw). */
 export function parseJson(
   text: string,
   newId: IdSource,
@@ -391,9 +442,13 @@ export function parseJson(
   } catch {
     return { ok: false, problem: t("predicateEditor.json.syntax") };
   }
-  const problem = shapeProblem(raw);
+  const problem = conditionProblem(raw);
   if (problem !== null) return { ok: false, problem };
-  return { ok: true, node: fromMapping(raw, newId) };
+  try {
+    return { ok: true, node: fromMapping(raw, newId) };
+  } catch {
+    return { ok: false, problem: t("predicateEditor.json.tooDeep", { max: MAX_DEPTH }) };
+  }
 }
 
 /** The JSON view's text: the mapping, two spaces deep. */

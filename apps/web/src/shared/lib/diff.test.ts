@@ -33,12 +33,45 @@ describe("diffLines", () => {
     expect(lines).toContainEqual({ kind: "added", text: "a" });
   });
 
-  it("stops aligning past the table limit and lists both sides whole", () => {
-    const side = Array.from({ length: Math.ceil(Math.sqrt(MAX_CELLS)) + 1 }, (_, n) => `${n}`);
-    const lines = diffLines(side, side);
-    expect(lines).toHaveLength(side.length * 2);
-    expect(lines[0]).toEqual({ kind: "removed", text: "0" });
-    expect(lines.at(-1)).toEqual({ kind: "added", text: side.at(-1) });
+  it("reads two equal lists past the table limit as unchanged", () => {
+    const side = Array.from({ length: 501 }, (_, n) => `Example line ${n}`);
+    expect(side.length * side.length).toBeGreaterThan(MAX_CELLS);
+    const lines = diffLines(side, [...side]);
+    expect(lines).toHaveLength(501);
+    expect(hasChanges(lines)).toBe(false);
+  });
+
+  it("keeps a long shared start and end, and marks only the line between that changed", () => {
+    const side = Array.from({ length: 600 }, (_, n) => `Example line ${n}`);
+    const changed = side.map((line, n) => (n === 300 ? "Example changed line" : line));
+    const lines = diffLines(side, changed);
+    expect(lines.filter((line) => line.kind !== "same")).toEqual([
+      { kind: "removed", text: "Example line 300" },
+      { kind: "added", text: "Example changed line" },
+    ]);
+    expect(lines).toHaveLength(601);
+    expect(lines[0]).toEqual({ kind: "same", text: "Example line 0" });
+    expect(lines.at(-1)).toEqual({ kind: "same", text: "Example line 599" });
+  });
+
+  it("lists the lines between whole past the table limit, keeping the shared start and end", () => {
+    const middle = Math.ceil(Math.sqrt(MAX_CELLS)) + 1;
+    const left = [
+      "Example start",
+      ...Array.from({ length: middle }, (_, n) => `a${n}`),
+      "Example end",
+    ];
+    const right = [
+      "Example start",
+      ...Array.from({ length: middle }, (_, n) => `b${n}`),
+      "Example end",
+    ];
+    const lines = diffLines(left, right);
+    expect(lines).toHaveLength(middle * 2 + 2);
+    expect(lines[0]).toEqual({ kind: "same", text: "Example start" });
+    expect(lines[1]).toEqual({ kind: "removed", text: "a0" });
+    expect(lines[middle + 1]).toEqual({ kind: "added", text: "b0" });
+    expect(lines.at(-1)).toEqual({ kind: "same", text: "Example end" });
   });
 });
 

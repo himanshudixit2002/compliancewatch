@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { ontologyFixture } from "@/test/ontology-fixture";
 import {
+  MAX_DEPTH,
+  MAX_PARTS,
   addTo,
   combineRoot,
+  conditionProblem,
   emptyGroup,
   emptyPredicate,
   errorKey,
@@ -14,6 +17,7 @@ import {
   parseJson,
   removeNode,
   shapeProblem,
+  sizeProblem,
   toJson,
   toMapping,
   toggleNot,
@@ -237,6 +241,53 @@ describe("the JSON view", () => {
     expect(shapeProblem({ attribute: "example_kind", extra: 1 })).toBe(
       "specification must be all_of, any_of, not, or a predicate with attribute, operator, value and free_text.",
     );
+  });
+});
+
+describe("the condition's bounds", () => {
+  /** A predicate inside `levels` nested negations: the predicate sits at depth levels + 1. */
+  function negated(levels: number): unknown {
+    let node: unknown = { attribute: "example_kind", operator: "eq", value: "first" };
+    for (let level = 0; level < levels; level += 1) node = { not: node };
+    return node;
+  }
+
+  /** The same as JSON text, built without JSON.stringify (which would overflow first). */
+  function negatedText(levels: number): string {
+    return `${'{"not":'.repeat(levels)}{"attribute":"example_kind","free_text":"x"}${"}".repeat(levels)}`;
+  }
+
+  it("takes a condition up to the depth and the parts it allows", () => {
+    expect(sizeProblem(negated(MAX_DEPTH - 1))).toBeNull();
+    expect(conditionProblem(negated(MAX_DEPTH - 1))).toBeNull();
+    const parts = {
+      all_of: Array.from({ length: MAX_PARTS - 1 }, () => ({
+        attribute: "example_kind",
+        free_text: "Example",
+      })),
+    };
+    expect(sizeProblem(parts)).toBeNull();
+  });
+
+  it("refuses a condition nested too deep or with too many parts, in words", () => {
+    expect(sizeProblem(negated(MAX_DEPTH))).toBe(
+      "The condition nests deeper than 32 levels of groups and negations: make it flatter.",
+    );
+    expect(
+      sizeProblem({
+        any_of: Array.from({ length: MAX_PARTS }, () => ({ attribute: "a", free_text: "x" })),
+      }),
+    ).toBe("The condition holds more than 500 parts: split the rule or simplify the condition.");
+  });
+
+  it("refuses 20,000 nested negations without overflowing, in the form and the JSON view", () => {
+    const deep = JSON.parse(negatedText(20_000)) as unknown;
+    expect(conditionProblem(deep)).toMatch(/deeper than 32 levels/);
+    expect(parseJson(negatedText(20_000), idSource())).toEqual({
+      ok: false,
+      problem:
+        "The condition nests deeper than 32 levels of groups and negations: make it flatter.",
+    });
   });
 });
 

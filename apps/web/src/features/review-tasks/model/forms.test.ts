@@ -90,6 +90,31 @@ describe("parseContentChanges", () => {
     expect(canonical({ b: 1, a: [{ d: 1, c: 2 }] })).toBe('{"a":[{"c":2,"d":1}],"b":1}');
   });
 
+  it("refuses a condition past its bounds on its field, never throwing", () => {
+    const deep = `${'{"not":'.repeat(20_000)}{"attribute":"example_kind","free_text":"x"}${"}".repeat(20_000)}`;
+    expect(parseContentChanges(form({ specification: deep }))).toEqual({
+      fields: {},
+      changed: 1,
+      errors: {
+        specification: [
+          "The condition nests deeper than 32 levels of groups and negations: make it flatter.",
+        ],
+      },
+    });
+    const wide = JSON.stringify({
+      all_of: Array.from({ length: 600 }, () => ({ attribute: "example_kind", free_text: "x" })),
+    });
+    expect(parseContentChanges(form({ specification: wide })).errors).toEqual({
+      specification: [
+        "The condition holds more than 500 parts: split the rule or simplify the condition.",
+      ],
+    });
+    // A base past the bounds (a crafted request) is never walked either.
+    const data = form();
+    data.set("base:specification", deep);
+    expect(parseContentChanges(data).errors).toEqual({});
+  });
+
   it("checks the shape of a changed field only, under its own name", () => {
     const parsed = parseContentChanges(
       form({

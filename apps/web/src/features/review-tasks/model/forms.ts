@@ -27,7 +27,7 @@ import {
   citationField,
   relationField,
 } from "../ui/form-shared";
-import { shapeProblem } from "../ui/predicate-tree";
+import { conditionProblem, sizeProblem } from "../ui/predicate-tree";
 
 /**
  * The workbench forms' shapes, checked before the rulebook is asked. A content field is sent
@@ -104,27 +104,35 @@ function templateOf(read: Read): Record<string, unknown> {
   };
 }
 
-/** A specification field whose text is not JSON, kept as its text so a change still shows. */
-class NotJson {
+/**
+ * A specification field that cannot be read (not JSON, or past the condition's bounds, D-064),
+ * kept as its text so a change still shows and compared as that text, never walked.
+ */
+class Unreadable {
   readonly text: string;
+  readonly problem: string;
 
-  constructor(text: string) {
+  constructor(text: string, problem: string) {
     this.text = text;
+    this.problem = problem;
   }
 
   toJSON(): string {
-    return `not json: ${this.text}`;
+    return `unreadable: ${this.text}`;
   }
 }
 
 function specificationOf(read: Read): unknown {
   const raw = read(CONTENT_FIELDS.specification).trim();
   if (raw === "") return {};
+  let parsed: unknown;
   try {
-    return JSON.parse(raw) as unknown;
+    parsed = JSON.parse(raw) as unknown;
   } catch {
-    return new NotJson(raw);
+    return new Unreadable(raw, t("predicateEditor.json.syntax"));
   }
+  const size = sizeProblem(parsed);
+  return size === null ? parsed : new Unreadable(raw, size);
 }
 
 const RULES: readonly FieldRule<unknown>[] = [
@@ -248,10 +256,8 @@ const RULES: readonly FieldRule<unknown>[] = [
     names: [CONTENT_FIELDS.specification],
     read: specificationOf,
     check: (value) => {
-      if (value instanceof NotJson) {
-        return [[CONTENT_FIELDS.specification, t("predicateEditor.json.syntax")]];
-      }
-      const problem = shapeProblem(value);
+      if (value instanceof Unreadable) return [[CONTENT_FIELDS.specification, value.problem]];
+      const problem = conditionProblem(value);
       return problem === null ? [] : [[CONTENT_FIELDS.specification, problem]];
     },
     set: (fields, value) => {
@@ -274,12 +280,18 @@ export function parseContentChanges(
   const errors: FormErrors = {};
   let changed = 0;
   for (const rule of RULES) {
-    const value = rule.read(current);
-    if (canonical(value) === canonical(rule.read(base))) continue;
-    changed += 1;
-    const problems = rule.check(value, current);
-    for (const [field, message] of problems) add(errors, `${prefix}${field}`, message);
-    if (problems.length === 0) rule.set(fields, value);
+    try {
+      const value = rule.read(current);
+      if (canonical(value) === canonical(rule.read(base))) continue;
+      changed += 1;
+      const problems = rule.check(value, current);
+      for (const [field, message] of problems) add(errors, `${prefix}${field}`, message);
+      if (problems.length === 0) rule.set(fields, value);
+    } catch {
+      // A value no check foresaw that still fails to read is the field's error, never a 500.
+      changed += 1;
+      add(errors, `${prefix}${rule.names[0] ?? ""}`, t("workbench.error.unreadable"));
+    }
   }
   return { fields, changed, errors };
 }

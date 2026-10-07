@@ -1184,8 +1184,18 @@ as stored. The JSON view round-trips and is checked for shape only; the rulebook
 condition against the ontology when the draft is saved. The form posts the mapping in a hidden
 field beside the mapping it was rendered with, and the action sends a content field only when it
 changed from that base (as the source settings form does, D-058), so an edit names what it
-changes and the audit says so. Consequences: the shape rules live twice (the editor's and the
-kernel's), the kernel's winning; a field nobody touched is never overwritten.
+changes and the audit says so; the editor's flagged parts therefore hold the form back only once
+the condition changed from its base, since an untouched one is not sent. Every read of a
+condition walks it recursively, here as in the kernel: 20,000 nested negations overflowed the
+server's stack (a 500, and a form that said no answer arrived) and 5,000 reach the rulebook's
+recursion limit. So a condition nests at most 32 deep (its groups and negations) and holds at
+most 500 parts: both are checked without recursion right after the JSON is parsed, before any
+other walk, in the action and in the JSON view, and a condition past either bound, or one whose
+walk fails anyway, is an error on its field, never a thrown error. Consequences: the shape rules
+live twice (the editor's and the kernel's), the kernel's winning; a field nobody touched is never
+overwritten; for the M3 review, the kernel (`specification_from_mapping`) should cap the depth and
+the size too, since another client can send the rulebook a condition deep enough to reach its
+recursion limit.
 
 ## D-065: The queue pages by the rulebook's cursor, marks "mine", and has keys that keep out of the way
 
@@ -1216,5 +1226,9 @@ subsequence over lines and no library. The previous version is the latest earlie
 that is not a closed draft, read from `GET /v1/rulebook/rules/{rule_key}/versions`: the as-of
 list (`GET /v1/rulebook/rule-versions`) holds only published and superseded versions on a date.
 A removed line is marked "-" and an added one "+", with the change said in words for a screen
-reader. Consequences: one rulebook read per drafted task; a long field diffs coarsely past the
-diff's table limit rather than slowly.
+reader. The lines both sides share at their start and at their end are kept as they are before
+any table is built, so two equal fields are never marked changed, however long; only the lines
+between are aligned, by a table of at most 250,000 cells (500 lines a side). Past that the lines
+between are listed as removed, then added: still correct, only coarser, and the shared start and
+end stay shared. Consequences: one rulebook read per drafted task; a long field whose changes are
+spread out diffs coarsely between its first and last change rather than slowly.
