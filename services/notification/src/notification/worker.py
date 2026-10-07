@@ -10,8 +10,19 @@ process that hosts several services adds to its own:
   in the consumer's own transaction (``SqlAlchemyUnitOfWork.on_connection``), so they and the
   ``processed_event`` row commit together and a redelivered event queues nothing twice. An
   event that sends nothing (a manual reschedule, the user's own completion) is only marked
-  processed. A message the handler cannot read goes to ``<topic>.notification.obligations.dlq``
-  after the consumer's retries.
+  processed. An event of a tenant the service has erased queues nothing and is only marked
+  processed (``py_common.erasure.skip_erased``, outcome ``erased_tenant``). A message the
+  handler cannot read goes to ``<topic>.notification.obligations.dlq`` after the consumer's
+  retries.
+- a consumer in group ``notification.erasure`` of ``tenant.deletion.requested``
+  (``py_common.erasure``): while the flag ``identity.tenant_erasure`` is off for the tenant it
+  only logs ``erasure.off``; on, it checks the event with identity (one identity did not send is
+  refused, audited and dead-lettered), then deletes the tenant's notifications with their
+  receipts and work, its recipients and their addresses and businesses, its directory rows, the
+  opt-ins of addresses no other tenant holds, its idempotency keys and published events
+  (``infrastructure.erasure.PostgresNotificationEraser``, which states the rule), keeps the
+  opt-outs and the suppressions, and writes ``tenant.data.erased`` (service notification), its
+  ``tenant.erased`` audit entry and the erased marker with the ``processed_event`` row.
 - the dispatcher, ``DispatchDue.run``, every ``CW_NOTIFICATION_DISPATCH_INTERVAL_SECONDS``
   (5 seconds): it sends what is due, several workers side by side included. The daily digests
   are due at ``CW_NOTIFICATION_DIGEST_AT`` (09:00 IST) and go out through it too.
@@ -42,9 +53,20 @@ from notification.domain.ports import RuleVersionReader
 from notification.domain.preferences import IST
 from notification.domain.repository import UnitOfWork
 from notification.domain.routing import TOPICS
+from notification.infrastructure.erasure import PostgresNotificationEraser
 from notification.infrastructure.events_in import notice_from
 from notification.infrastructure.repository import SqlAlchemyUnitOfWork
 from notification.settings import NotificationSettings
+from py_common.erasure import (
+    Enabled,
+    ErasedOn,
+    ErasureVerifier,
+    erased_on_connection,
+    erasure_component,
+    erasure_switch,
+    skip_erased,
+    verifier_from,
+)
 from py_common.events import EventMessage
 from py_common.logging import get_logger
 from py_common.outbox import sync_handler
@@ -63,6 +85,7 @@ RETENTION_JOB = "notification-retention"
 RETENTION_AT = time(3, 0, tzinfo=IST)
 """03:00 IST, when little else runs."""
 SERVICE_NAME = "notification-worker"
+ERASURE_SERVICE = "notification"
 
 log = get_logger(__name__)
 
@@ -71,11 +94,14 @@ UnitOnConnection = Callable[[Connection, TenantId], AbstractContextManager[UnitO
 
 
 def obligation_handler(
-    enqueue: EnqueueNotifications, *, unit_on: UnitOnConnection = SqlAlchemyUnitOfWork.on_connection
+    enqueue: EnqueueNotifications,
+    *,
+    unit_on: UnitOnConnection = SqlAlchemyUnitOfWork.on_connection,
+    erased_on: ErasedOn = erased_on_connection,
 ) -> SyncHandler:
     """The handler of the obligation events: queue each event's notifications on the
-    consumer's connection. ``unit_on`` opens the unit there; tests pass one of the memory
-    store."""
+    consumer's connection, unless the event's tenant is erased here. ``unit_on`` opens the unit
+    there and ``erased_on`` reads the erased markers; tests pass the memory store's."""
 
     def handle(message: EventMessage, connection: Connection) -> None:
         notice = notice_from(message)
@@ -95,7 +121,7 @@ def obligation_handler(
             unreachable=queued.unreachable,
         )
 
-    return handle
+    return skip_erased(ERASURE_SERVICE, handle, erased_on=erased_on)
 
 
 def dispatch_job(dispatch: DispatchDue) -> Callable[[], None]:
@@ -130,9 +156,12 @@ def components(
     *,
     channels: Mapping[Channel, ChannelAdapter] | None = None,
     rules: RuleVersionReader | None = None,
+    erasure: Enabled | None = None,
+    verifier: ErasureVerifier | None = None,
 ) -> WorkerComponents:
-    """The consumer, the dispatcher loop and the retention sweep; ``channels`` and ``rules``
-    replace the configured channels and rulebook reader."""
+    """The two consumers, the dispatcher loop and the retention sweep; ``channels`` and
+    ``rules`` replace the configured channels and rulebook reader, ``erasure`` the flag of the
+    erasure consumer and ``verifier`` identity's check."""
     if settings.notification_store != "postgres":
         raise ValueError("the notification worker needs CW_NOTIFICATION_STORE=postgres")
     wiring = wire(settings, channels=channels, rules=rules)
@@ -142,6 +171,12 @@ def components(
                 group_id=GROUP_ID,
                 topics=TOPICS,
                 handler=sync_handler(obligation_handler(wiring.enqueue)),
+            ),
+            erasure_component(
+                ERASURE_SERVICE,
+                PostgresNotificationEraser,
+                enabled=erasure or erasure_switch(settings),
+                verifier=verifier or verifier_from(settings),
             ),
         ),
         periodic=(

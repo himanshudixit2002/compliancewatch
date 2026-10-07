@@ -49,6 +49,7 @@ TABLES = {
     "review_item",
     "fanout_run",
     "fanout_hold",
+    "erased_tenant",
 }
 REGULAR = {"attribute": "registration_type", "operator": "eq", "value": "regular"}
 FREE_TEXT = {"attribute": "business_category", "free_text": "Runs a restaurant in a hotel"}

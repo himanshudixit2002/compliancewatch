@@ -31,6 +31,7 @@ from pathlib import Path
 from starlette.concurrency import run_in_threadpool
 
 from domain_kernel.channels import Channel
+from domain_kernel.erasure import ErasedTenants
 from notification.application.bulk import BulkNotify
 from notification.application.dispatch import DispatchDue
 from notification.application.email_feedback import ReceiveEmailFeedback
@@ -71,6 +72,7 @@ from notification.infrastructure.whatsapp import DisabledChannel, WhatsAppCloudC
 from notification.settings import NotificationSettings
 from notification.wiring import Wiring
 from py_common.auth import TokenSource, service_auth_from
+from py_common.erasure import PostgresErasedTenants
 from py_common.idempotency import IdempotencyStore, MemoryIdempotencyStore
 from py_common.idempotency.sqlalchemy import SqlAlchemyIdempotencyStore
 
@@ -127,14 +129,17 @@ def wire(
     work_index: WorkIndex
     ping: Callable[[], bool]
     idempotency: IdempotencyStore
+    erased: ErasedTenants
     if settings.notification_store == "memory":
         memory = MemoryStore()
         unit_of_work, work_index, ping = memory, memory.work_index, memory.ping
         idempotency = MemoryIdempotencyStore()
+        erased = memory.erased
     else:
         postgres = PostgresUnitOfWorkFactory.from_url(settings.database_url)
         unit_of_work, work_index, ping = postgres, postgres.work_index, postgres.ping
         idempotency = SqlAlchemyIdempotencyStore(postgres.engine)
+        erased = PostgresErasedTenants.pooled(settings.database_url)
     auth = service_auth_from(settings, token_source=token_source)
     wired_channels = dict(default_channels(settings) if channels is None else channels)
     quiet_hours = QuietHours.parse(settings.quiet_hours_start, settings.quiet_hours_end)
@@ -200,4 +205,5 @@ def wire(
             reconcile,
         ),
         store_ready=store_ready,
+        erased_tenants=erased,
     )

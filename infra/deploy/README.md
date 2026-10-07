@@ -101,6 +101,42 @@ service as its own `cw_<schema>` role instead needs a database URL per service i
    `manifest.json` under `audit/<YYYY-MM>/`, never a `*.partial` file, as
    [docs/runbooks/audit-export.md](../../docs/runbooks/audit-export.md) describes. Nothing in
    this repository creates the bucket or uploads to it.
+9. Tenant erasure (flag `identity.tenant_erasure`, `CW_TENANT_ERASURE_ENABLED`, owner
+   identity-partner, default off): leave it off in every environment until counsel has reviewed
+   [docs/legal/data-map.md](../../docs/legal/data-map.md) and its exceptions. Before it turns on
+   in production, run a drill in staging: turn it on there for one synthetic tenant only
+   (`CW_TENANT_ERASURE_ENABLED=true`, `CW_TENANT_ERASURE_TENANTS=<its id>`, on the worker's
+   services), give it data in every service, ask for its deletion, check that the request
+   completes after its second pass and that a count per service finds no row of it but the
+   retained tables the runbook lists, check that a forged event for another synthetic tenant is
+   refused everywhere, then turn it off again. Production then turns it on for the listed tenants
+   first, as the requests come. While it is off, deletion requests are still recorded and turn
+   overdue after 30 days, which pages ([docs/runbooks/data-requests.md](../../docs/runbooks/data-requests.md));
+   `identity-admin erasure resend` sends them again once it is on. Never run an erasure against
+   a shared development database. Before the flag turns on anywhere:
+   - set `CW_IDENTITY_ERASURE_PEPPER` on identity's worker (secret, 32 bytes or more, from a
+     password manager, never in the repo): the pseudonyms an erasure leaves are keyed with it,
+     and reversing one needs it. `cw-mvp check-config` refuses it missing outside local and
+     test, and the identity worker refuses to start without it while the flag can be on. Keep
+     it as long as the pseudonymised records (a new pepper leaves the old pseudonyms as they
+     are);
+   - give every erasure consumer's service client the scope `erasure:verify`
+     (`identity-admin service-client create --id <client> --scope ... --scope erasure:verify`,
+     or the worker's client): each consumer checks every `tenant.deletion.requested` with identity
+     (`GET /v1/identity/erasures/{tenant_id}`, internal) and refuses one identity did not send;
+     without the scope identity answers 403 and the erasures are retried, then dead-lettered,
+     never run;
+   - restrict who may produce `tenant.deletion.requested` with Kafka ACLs: only identity's
+     principal (its relay, or the worker's) may write to the topic, and only the erasure
+     consumers' principals may read it. In the combined image every relay runs in the worker
+     under one principal, so there the ACL narrows the topic to the worker and the consumers'
+     check with identity is what stops another producer's bug; a stray or forged event erases
+     nothing either way, and the ACL keeps one off the topic in the first place. The dev cluster
+     has no ACLs; the provider's console or CLI sets them per environment, and nothing in this
+     repository does;
+   - `CW_IDENTITY_ERASURE_SECOND_PASS_SECONDS` (900 by default) must stay longer than
+     `CW_ACCESS_TOKEN_TTL_SECONDS`: the second pass runs once no token issued before the
+     erasure is alive.
 
 ## Environment matrix
 
@@ -110,7 +146,7 @@ Values: `secret` (set with `fly secrets set`, never in the toml), `env` (in the 
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `CW_DATABASE_URL` | secret | secret | secret | secret | secret (API, worker and relay) | secret (`CW_LLM_LEDGER=postgres`) | secret | secret | - |
 | `CW_DB_SCHEMA` | env | env | env | env | env | env | env | env | - |
-| `CW_KAFKA_BOOTSTRAP` + SASL | - | secret (relay) | secret (relay) | secret (relay) | secret (worker, `python -m notification.worker`, and relay) | - | secret | secret | - |
+| `CW_KAFKA_BOOTSTRAP` + SASL | secret (worker, `python -m identity.worker`: the erasure consumers; and relay) | secret (worker, the erasure consumer, and relay) | secret (worker and relay) | secret (worker and relay) | secret (worker, `python -m notification.worker`, and relay) | - | secret | secret | - |
 | `CW_TEMPORAL_*` | - | - | - | - | - | - | secret | - | - |
 | `CW_REDIS_URL` | - | - | - | - | - (digests are held in Postgres) | secret (cache, later) | - | - | - |
 | `CW_OTEL_ENDPOINT` (+ header) | secret | secret | secret | secret | secret | secret | secret | secret | - |
@@ -136,6 +172,10 @@ Values: `secret` (set with `fly secrets set`, never in the toml), `env` (in the 
 | `CW_NOTIFICATION_EMAIL_FEEDBACK_TOKEN`, `CW_NOTIFICATION_SES_TOPIC_ARN` | - | - | - | - | secret / env (the password of the SNS subscription's basic credentials, and the SES feedback topic it must come from; unset token, the email receipt route answers 503) | - | - | - | - |
 | `CW_BILLING_PROVIDER`, `CW_RAZORPAY_*` | env / secret | - | - | - | - | - | - | - | - |
 | `CW_IDENTITY_EXPORT_SOURCES`, `CW_IDENTITY_EXPORT_TIMEOUT_SECONDS`, `CW_IDENTITY_EXPORT_CONCURRENCY`, `CW_IDENTITY_EXPORT_DEADLINE_SECONDS` | env (the services a tenant's export reads, `service=url` pairs: `profile=...,applicability-engine=...,obligation=...,notification=...` at each app's private address, each name the service's own, since identity's export token is addressed to it; required outside local and test, where `check-config` refuses the dev ports' default, and every URL https or a loopback address; the combined image points them at its internal listener by itself; 20 seconds per service, four at a time, 45 seconds for all) | - | - | - | - | - | - | - | - |
+| `CW_TENANT_ERASURE_ENABLED`, `CW_TENANT_ERASURE_TENANTS` | env on the worker (flag `identity.tenant_erasure`, default `false` in every environment; owner identity-partner; on only for the staging drill's tenant until counsel has reviewed the data map, then per tenant in production; removed once erasure has been on for every tenant) | env on the worker | env on the worker | env on the worker | env on the worker | - | - | env on the worker (applicability-engine) | - |
+| `CW_IDENTITY_ERASURE_SERVICES` | env (default `identity,profile,obligation,notification,applicability-engine,rulebook`: the services a deletion request waits for; always identity) | - | - | - | - | - | - | - | - |
+| `CW_IDENTITY_ERASURE_PEPPER` | secret on the worker (keys the erasure's pseudonyms; required wherever the flag can be on, refused missing by `check-config` outside local and test, where a documented placeholder stands in) | - | - | - | - | - | - | - | - |
+| `CW_IDENTITY_ERASURE_SECOND_PASS_SECONDS` | env on the worker (default 900: how long after every service answered a deletion request identity sends it again; longer than `CW_ACCESS_TOKEN_TTL_SECONDS`) | - | - | - | - | - | - | - | - |
 | `CW_PLAN_LIMITS_ENFORCED`, `CW_PLAN_LIMITS_TENANTS` | env (flag `identity.plan_limits`, default `false`, every tenant when the list is empty; owner identity-partner; on only once the maintainer has decided the plan limits and pricing, a few tenants first; refuses invitations past the plan's seats with 402; removed once enforced for every tenant for 30 days) | env (the same values: refuses a new GSTIN registration past the plan with 402, reading identity's entitlements with the `profile` service client, scope `entitlements:read`) | - | - | - | - | - | - | - |
 | `CW_PLAN_FREE_REGISTRATIONS`, `CW_PLAN_FREE_SEATS` | env (default 1 each: what a tenant without a paid subscription is entitled to; placeholders the maintainer decides) | - | - | - | - | - | - | - | - |
 | `CW_PLAN_PAST_DUE_GRACE_DAYS` | env (default 14: how long a past-due or halted subscription keeps its plan before the free allowance applies; a placeholder the maintainer decides) | - | - | - | - | - | - | - | - |

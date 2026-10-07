@@ -9,6 +9,10 @@ active admin, so someone can always manage its users.
 Changing a user's roles and disabling a user each bump the user's session version. The identity
 service refuses access tokens that carry an older version, so the change takes effect there at
 once and in the other services when the token expires.
+
+A tenant that asks for its data to be deleted turns ``deletion_requested``: nobody signs in to it
+any more. Once identity has erased it, it is ``erased``: the row keeps its id and kind for the
+audit log and the billing records, and nothing else (no name, no users).
 """
 
 import re
@@ -111,17 +115,38 @@ class Tenant:
     def __post_init__(self) -> None:
         require_instance(self.id, TenantId, "id")
         require_instance(self.kind, TenantKind, "kind")
-        _require_name(self.name, "name")
+        require_instance(self.status, TenantStatus, "status")
+        if self.status is TenantStatus.ERASED:
+            if self.name != "":
+                raise InvariantViolationError("an erased tenant keeps no name")
+        else:
+            _require_name(self.name, "name")
         require_aware(self.created_at, "created_at")
         if self.region not in REGIONS:
             raise InvariantViolationError(
                 f"region must be one of {', '.join(REGIONS)}, got {self.region!r}"
             )
-        require_instance(self.status, TenantStatus, "status")
 
     @property
     def is_active(self) -> bool:
         return self.status is TenantStatus.ACTIVE
+
+    @property
+    def is_deleting(self) -> bool:
+        """It asked for its deletion, which is not done yet: nobody signs in to it."""
+        return self.status is TenantStatus.DELETION_REQUESTED
+
+    def deletion_requested(self) -> "Tenant":
+        """The tenant once it asked for its data to be deleted."""
+        if not self.is_active:
+            raise InvariantViolationError(f"a {self.status.value} tenant cannot ask again")
+        if self.kind is TenantKind.INTERNAL:
+            raise InvariantViolationError("the internal tenant is not erased")
+        return replace(self, status=TenantStatus.DELETION_REQUESTED)
+
+    def erased(self) -> "Tenant":
+        """The tenant once its data was erased: its id and kind stay, its name goes."""
+        return replace(self, status=TenantStatus.ERASED, name="")
 
     @property
     def admin_roles(self) -> frozenset[Role]:

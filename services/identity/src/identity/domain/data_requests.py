@@ -4,9 +4,10 @@ A request is made by the tenant's owner or CA admin (``self_service``) or by the
 admin for the tenant (``support``), and must be answered within ``DEADLINE``, 30 days after it was
 made (docs/legal/data-map.md and the guide's section 16, until counsel confirms them).
 
-- ``received``: recorded and not answered at all. A deletion request starts here (until M3-6
-  answers it); past its deadline it is overdue (``is_overdue``), which the DataRequestOverdue
-  alert pages on, since only the operator can answer it.
+- ``received``: recorded and not answered at all. A deletion request starts here, and stays
+  here while the flag ``identity.tenant_erasure`` is off; past its deadline it is overdue
+  (``is_overdue``), which the DataRequestOverdue alert pages on, since only the operator can
+  answer it.
 - ``in_progress``: answered, and waiting on the tenant. An export is answered as soon as it is
   made: identity assembles the bundle whenever it is downloaded, so it is offered at once. It
   stays in progress until a download has had every service's part (``services_done`` names those
@@ -19,12 +20,22 @@ overdue: the operator has answered it and only the tenant can complete it. Once 
 passed it expires quietly (``is_expired``): it no longer counts as open, nothing pages, and the
 tenant may still download it or make a new request.
 
+A deletion request is answered by the services that erase the tenant
+(``CW_IDENTITY_ERASURE_SERVICES``), in two passes. ``deletion_event_id`` is the
+``tenant.deletion.requested`` identity last sent for it, which every service checks before it
+erases (``domain_kernel.erasure.erasure_refusal``) and every answer names: an answer to another
+event changes nothing. In the first pass each service's ``tenant.data.erased`` joins
+``services_done`` (``record_erasure``), the first turning the request ``in_progress``. Once they
+all have, identity sends the request again, ``second_pass_at`` (``schedule_second_pass``); each
+answer then joins ``second_pass_done``, and the request completes once that covers them all:
+what a write in flight during the first pass left behind goes in the second. Only the operator
+can make the services answer, so a deletion request that is not completed by its deadline is
+overdue whatever its status, and never expires.
+
 An export is assembled when it is downloaded and never stored: identity's own data and each
 ``ExportSource``'s, one section per service. A source that fails leaves the request in progress
 with that service pending, and the bundle says so.
 
-Deletion requests have their kind already; the routes refuse them until the erasure cascade
-exists.
 """
 
 from collections.abc import Iterable, Mapping
@@ -35,7 +46,7 @@ from typing import Final, Protocol
 
 from domain_kernel._validation import require_aware, require_instance
 from domain_kernel.errors import InvariantViolationError
-from domain_kernel.ids import EntityId, TenantId
+from domain_kernel.ids import EntityId, EventId, TenantId
 from identity.domain.pages import ExportAfter
 
 DEADLINE: Final = timedelta(days=30)
@@ -84,6 +95,13 @@ class DataRequest:
     status: DataRequestStatus = DataRequestStatus.RECEIVED
     services_done: tuple[str, ...] = ()
     completed_at: datetime | None = None
+    deletion_event_id: EventId | None = None
+    """A deletion's: the ``tenant.deletion.requested`` identity last sent for it."""
+    second_pass_at: datetime | None = None
+    """A deletion's: when its second pass goes out, set once every service has answered the
+    first."""
+    second_pass_done: tuple[str, ...] = ()
+    """A deletion's: the services that have answered its second pass."""
 
     def __post_init__(self) -> None:
         require_instance(self.id, DataRequestId, "id")
@@ -103,12 +121,18 @@ class DataRequest:
         if self.deadline_at <= self.requested_at:
             raise InvariantViolationError("a request's deadline comes after it was made")
         require_instance(self.status, DataRequestStatus, "status")
-        require_instance(self.services_done, tuple, "services_done")
-        for service in self.services_done:
-            if not isinstance(service, str) or not 0 < len(service) <= MAX_SERVICE_CHARS:
-                raise InvariantViolationError("services_done holds service names")
-        if list(self.services_done) != sorted(set(self.services_done)):
-            raise InvariantViolationError("services_done is sorted, each service once")
+        _services(self.services_done, "services_done")
+        _services(self.second_pass_done, "second_pass_done")
+        if self.deletion_event_id is not None:
+            require_instance(self.deletion_event_id, EventId, "deletion_event_id")
+        if self.second_pass_at is not None:
+            require_aware(self.second_pass_at, "second_pass_at")
+        if not self.is_deletion and (
+            self.deletion_event_id is not None or self.second_pass_at is not None
+        ):
+            raise InvariantViolationError("only a deletion request is sent to the services")
+        if self.second_pass_done and self.second_pass_at is None:
+            raise InvariantViolationError("a second pass is answered once it is scheduled")
         completed = self.status is DataRequestStatus.COMPLETED
         if completed != (self.completed_at is not None):
             raise InvariantViolationError("a request has completed_at exactly when completed")
@@ -145,27 +169,46 @@ class DataRequest:
     def is_completed(self) -> bool:
         return self.status is DataRequestStatus.COMPLETED
 
+    @property
+    def is_deletion(self) -> bool:
+        return self.kind is DataRequestKind.DELETION
+
     def is_overdue(self, now: datetime) -> bool:
-        """Past its deadline and never answered (still ``received``): what pages."""
-        return self.status is DataRequestStatus.RECEIVED and (
-            require_aware(now, "now") > self.deadline_at
-        )
+        """Past its deadline and still owed by the operator: an export never answered (still
+        ``received``), or a deletion not completed. What pages."""
+        if require_aware(now, "now") <= self.deadline_at:
+            return False
+        if self.is_deletion:
+            return not self.is_completed
+        return self.status is DataRequestStatus.RECEIVED
 
     def is_expired(self, now: datetime) -> bool:
-        """Offered, never completed by the tenant, and past its deadline: it expires quietly."""
-        return self.status is DataRequestStatus.IN_PROGRESS and (
-            require_aware(now, "now") > self.deadline_at
+        """An export offered, never completed by the tenant, and past its deadline: it expires
+        quietly. A deletion never expires."""
+        return (
+            not self.is_deletion
+            and self.status is DataRequestStatus.IN_PROGRESS
+            and require_aware(now, "now") > self.deadline_at
         )
 
     def is_open(self, now: datetime) -> bool:
         """Neither completed nor expired: what the open gauge counts."""
         return not self.is_completed and not self.is_expired(now)
 
+    @property
+    def erasure_pass(self) -> int | None:
+        """A deletion's pass its services answer: 1, then 2 once the second is scheduled; None
+        for an export."""
+        if not self.is_deletion:
+            return None
+        return 1 if self.second_pass_at is None else 2
+
     def pending(self, expected: Iterable[str]) -> tuple[str, ...]:
-        """The services of ``expected`` that have not answered yet; none once completed."""
+        """The services of ``expected`` that have not answered yet (a deletion's current pass);
+        none once completed."""
         if self.is_completed:
             return ()
-        done = set(self.services_done)
+        done = set(self.second_pass_done if self.second_pass_at is not None else self.services_done)
         return tuple(sorted(service for service in set(expected) if service not in done))
 
     def record_answers(
@@ -185,6 +228,81 @@ class DataRequest:
                 completed_at=require_aware(at, "at"),
             )
         return replace(self, services_done=done, status=DataRequestStatus.IN_PROGRESS)
+
+    def sent(self, event_id: EventId) -> "DataRequest":
+        """The deletion request once identity has sent ``tenant.deletion.requested`` (the
+        first time, again, or its second pass) as ``event_id``: the event the services check."""
+        if not self.is_deletion:
+            raise InvariantViolationError("only a deletion request is sent to the services")
+        return replace(self, deletion_event_id=require_instance(event_id, EventId, "event_id"))
+
+    def record_erasure(
+        self, service: str, expected: Iterable[str], at: datetime, *, event_id: EventId
+    ) -> "DataRequest":
+        """The deletion request once ``service`` has erased the tenant for ``event_id``: in the
+        first pass it joins ``services_done`` and the request is in progress; in the second it
+        joins ``second_pass_done``, and the request completes once that covers ``expected``. A
+        service that answered the pass already, an answer to another event than the one sent
+        last, and an answer to a completed request change nothing."""
+        if not self.is_deletion:
+            raise InvariantViolationError("only a deletion request records erasures")
+        if not isinstance(service, str) or not 0 < len(service) <= MAX_SERVICE_CHARS:
+            raise InvariantViolationError("an erasure names its service")
+        if self.is_completed or event_id != self.deletion_event_id:
+            return self
+        if self.second_pass_at is None:
+            done = tuple(sorted({*self.services_done, service}))
+            return replace(self, services_done=done, status=DataRequestStatus.IN_PROGRESS)
+        second = tuple(sorted({*self.second_pass_done, service}))
+        if set(expected) <= set(second):
+            return replace(
+                self,
+                second_pass_done=second,
+                status=DataRequestStatus.COMPLETED,
+                completed_at=require_aware(at, "at"),
+            )
+        return replace(self, second_pass_done=second, status=DataRequestStatus.IN_PROGRESS)
+
+    def first_pass_complete(self, expected: Iterable[str]) -> bool:
+        """Every service of ``expected`` has answered the first pass, and the second is not
+        scheduled yet."""
+        return (
+            self.is_deletion
+            and self.second_pass_at is None
+            and set(expected) <= set(self.services_done)
+        )
+
+    def schedule_second_pass(
+        self, event_id: EventId, at: datetime, expected: Iterable[str]
+    ) -> "DataRequest":
+        """The deletion request once its second pass is sent as ``event_id``, going out ``at``."""
+        if not self.first_pass_complete(expected):
+            raise InvariantViolationError("the second pass follows a complete first pass")
+        return replace(
+            self.sent(event_id), second_pass_at=require_aware(at, "at"), second_pass_done=()
+        )
+
+
+def _services(value: tuple[str, ...], name: str) -> None:
+    require_instance(value, tuple, name)
+    for service in value:
+        if not isinstance(service, str) or not 0 < len(service) <= MAX_SERVICE_CHARS:
+            raise InvariantViolationError(f"{name} holds service names")
+    if list(value) != sorted(set(value)):
+        raise InvariantViolationError(f"{name} is sorted, each service once")
+
+
+def parse_services(text: str, name: str) -> tuple[str, ...]:
+    """``a,b,c`` as service names, sorted, each once; blank is none."""
+    found: set[str] = set()
+    for item in text.split(","):
+        service = item.strip()
+        if not service:
+            continue
+        if not service.replace("-", "").isalpha() or not service.islower():
+            raise ValueError(f"{name}: {service!r} is not a service name")
+        found.add(service)
+    return tuple(sorted(found))
 
 
 class DataRequestRepository(Protocol):
@@ -210,6 +328,13 @@ class DataRequestRepository(Protocol):
 
     def list(self) -> list[DataRequest]:
         """The tenant's requests, newest first."""
+        ...
+
+    def open_deletion(self) -> DataRequest | None:
+        """The tenant's deletion request that is not completed, held until the unit of work
+        ends (``SELECT ... FOR UPDATE``) so two services' answers record one after the other;
+        None when it has none. A tenant has one at most: it asks for nothing once it asked to
+        be deleted."""
         ...
 
 

@@ -84,6 +84,19 @@ class MemoryIdempotencyStore:
                 del self._entries[name]
         return len(expired)
 
+    def forget(self, tenant: TenantId) -> int:
+        """Drop every key of ``tenant`` (its erasure); how many went."""
+        with self._lock:
+            mine = [name for name in self._entries if name[0] == tenant]
+            for name in mine:
+                del self._entries[name]
+        return len(mine)
+
+    def held_by(self, tenant: TenantId) -> int:
+        """How many keys ``tenant`` holds."""
+        with self._lock:
+            return sum(name[0] == tenant for name in self._entries)
+
     def __len__(self) -> int:
         return len(self._entries)
 

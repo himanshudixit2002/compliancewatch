@@ -78,12 +78,14 @@ from applicability_engine.infrastructure.rulebook_client import HttpRulebook
 from applicability_engine.infrastructure.temporal import NoFanOutWorkflows, TemporalFanOuts
 from applicability_engine.settings import ApplicabilityEngineSettings
 from applicability_engine.wiring import Readers, Wiring
+from domain_kernel.erasure import ErasedTenants
 from domain_kernel.errors import DomainError
 from domain_kernel.ontology import Ontology
 from ontology import load as load_ontology
 from py_common.app import create_app, module_app
 from py_common.auth import TokenSource, service_auth_from
 from py_common.auth.fastapi import Authenticator
+from py_common.erasure import PostgresErasedTenants
 from py_common.idempotency import IdempotencyStore, MemoryIdempotencyStore
 from py_common.idempotency.sqlalchemy import SqlAlchemyIdempotencyStore
 
@@ -136,9 +138,11 @@ def wire(
     directory: BusinessDirectoryReader
     ping: Callable[[], bool]
     idempotency: IdempotencyStore
+    erased: ErasedTenants
     if settings.applicability_engine_store == "memory":
         memory = MemoryStore()
         unit_of_work, ping, idempotency = memory, memory.ping, MemoryIdempotencyStore()
+        erased = memory.erased
         fanouts = memory.fanouts
         directory = MemoryBusinessDirectory(memory)
         workflows = workflows or NoFanOutWorkflows()
@@ -146,6 +150,7 @@ def wire(
         postgres = PostgresUnitOfWorkFactory.from_url(settings.database_url)
         unit_of_work, ping = postgres, postgres.ping
         idempotency = SqlAlchemyIdempotencyStore(postgres.engine)
+        erased = PostgresErasedTenants.pooled(settings.database_url)
         fanouts = PostgresFanOutUnitOfWorkFactory(postgres.engine)
         directory = PostgresBusinessDirectory(postgres.engine)
         if workflows is None:
@@ -183,6 +188,7 @@ def wire(
             max_businesses=settings.applicability_dry_run_max,
         ),
         export_data=ExportTenantData(unit_of_work),
+        erased_tenants=erased,
     )
 
 
@@ -208,6 +214,7 @@ def build_app(
         readiness_checks=[("store", wiring.store_ready)],
         problem_status=PROBLEM_STATUS,
         authenticator=authenticator,
+        erased_tenants=wiring.erased_tenants,
     )
     app.state.wiring = wiring
     return app

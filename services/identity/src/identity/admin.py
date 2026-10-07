@@ -8,6 +8,7 @@
     identity-admin service-client list
     identity-admin bootstrap-internal --name "Regulatory team" --email admin@example.org
     identity-admin audit-export --from 2026-09-01 --to 2026-10-01 --out var/audit-export/2026-09
+    identity-admin erasure resend --tenant <tenant id> --reason "flag turned on"
 
 ``signing-key new`` prints a key set with one new ES256 key, the JSON ``CW_IDENTITY_SIGNING_KEYS``
 takes; it touches no store. To rotate, put the new record second in the environment's key set,
@@ -34,6 +35,14 @@ rows and the platform's, and it records itself as an ``audit.exported`` entry; t
 ``.partial`` names until that entry commits. Uploading the two files to the object-locked
 bucket is a manual step (docs/runbooks/audit-export.md).
 
+``erasure resend`` sends the tenant's open deletion request to the services again
+(``tenant.deletion.requested``, a new event, which becomes the one every service checks), for a
+request made while the flag ``identity.tenant_erasure`` was off or one a service dead-lettered;
+it prints the request and writes a ``data_request.resent`` entry with the reason. Each service's
+erasure is idempotent, so one that answered already erases nothing more; an older event still in
+flight is refused and dead-lettered. A completed request is not sent again
+(docs/runbooks/data-requests.md).
+
 Every command but ``signing-key`` uses the database at ``CW_DATABASE_URL``, whose search_path
 must name the identity schema, as ``make migrate`` sets it, and the service-client, bootstrap and
 export commands write their audit entries as ``system:identity-admin``.
@@ -50,6 +59,7 @@ from typing import TextIO
 from domain_kernel.access import Scope
 from domain_kernel.errors import DomainError
 from domain_kernel.events import utc_now
+from domain_kernel.ids import TenantId
 from identity.application.audit import ExportAuditTrail, settled_until
 from identity.application.bootstrap import (
     BootstrapInternalTenant,
@@ -57,6 +67,7 @@ from identity.application.bootstrap import (
     ListServiceClients,
     RevokeServiceClient,
 )
+from identity.application.erasure import ResendDeletion
 from identity.composition import identity_provider
 from identity.domain.audit import AuditReader
 from identity.domain.provider import IdentityProvider
@@ -119,6 +130,14 @@ def parser() -> argparse.ArgumentParser:
         help="exclusive: 2026-10-01; by default midnight UTC two days ago, so late rows are in",
     )
     export.add_argument("--out", required=True, type=Path, help="the directory to write")
+
+    erasure = commands.add_parser("erasure", help="a tenant's deletion request")
+    erasure_commands = erasure.add_subparsers(dest="action", required=True)
+    resend = erasure_commands.add_parser(
+        "resend", help="send the tenant's open deletion request to the services again"
+    )
+    resend.add_argument("--tenant", required=True, type=TenantId.parse, help="the tenant's id")
+    resend.add_argument("--reason", required=True, help="why it is sent again (audited)")
     return root
 
 
@@ -159,6 +178,8 @@ def main(
             store, chosen = unit_of_work, provider
         if args.command == "bootstrap-internal":
             return _bootstrap(args, store, chosen, stream)
+        if args.command == "erasure":
+            return _resend(args, store, stream)
         return _service_client(args, store, stream)
     except (DomainError, ValueError) as exc:
         sys.stderr.write(f"{PROG}: {exc}\n")
@@ -210,6 +231,22 @@ def _audit_export(
         f"{PROG}: upload {args.out / manifest.file} and its manifest.json to the object-locked "
         "bucket (docs/runbooks/audit-export.md)\n"
     )
+    return 0
+
+
+def _resend(args: argparse.Namespace, store: UnitOfWorkFactory, out: TextIO) -> int:
+    request = ResendDeletion(store).run(args.tenant, reason=args.reason)
+    described = {
+        "request_id": str(request.id),
+        "tenant_id": str(request.tenant_id),
+        "status": request.status.value,
+        "pass": request.erasure_pass,
+        "services_done": list(request.services_done),
+        "second_pass_done": list(request.second_pass_done),
+        "deletion_event_id": str(request.deletion_event_id),
+        "deadline_at": request.deadline_at.isoformat(),
+    }
+    out.write(json.dumps(described, indent=2) + "\n")
     return 0
 
 

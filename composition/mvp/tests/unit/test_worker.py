@@ -20,11 +20,15 @@ from cw_mvp.settings import MvpSettings
 from cw_mvp.testing import mvp_settings
 from cw_mvp.worker import WORKER_CLIENT_ID, build_registry, run_worker, worker_settings
 from cw_mvp.worker_health import HealthServer, WorkerHealth, health_app, heartbeat
+from domain_kernel.ids import TenantId
 from obligation.settings import ObligationSettings
 from obligation.worker import GROUP_ID as DECISIONS_GROUP
 from obligation.worker import RULES_GROUP_ID as OBLIGATION_RULES_GROUP
 from obligation.worker import SWEEP_JOB, WINDOW_JOB
 from pipeline.settings import PipelineSettings
+from py_common import erasure as erasure_module
+from py_common import flags as flags_module
+from py_common.erasure import reset_flags_once
 from py_common.idempotency.purge import JOB_NAME as PURGE_JOB
 from py_common.idempotency.schema import IDEMPOTENCY_TABLE
 from py_common.outbox.schema import OUTBOX_TABLE
@@ -86,14 +90,47 @@ async def test_relays_start_only_for_schemas_with_an_outbox() -> None:
     relaying = {entry.service for entry in hosted.hosted if entry.components.relays}
     assert relaying == OUTBOX_SCHEMAS
     assert hosted.consumer_groups() == (
+        "identity.erasure",
+        "identity.erasure-records",
+        "profile.erasure",
+        "rulebook.erasure",
         PROFILES_GROUP,
         RULES_GROUP,
+        "applicability-engine.erasure",
         DECISIONS_GROUP,
         OBLIGATION_RULES_GROUP,
+        "obligation.erasure",
         "notification.obligations",
+        "notification.erasure",
     )
     assert "profile/outbox-relay" in hosted.loops()
     assert hosted.task_queues() == ()
+
+
+async def test_the_worker_configures_the_flags_once_for_every_erasure_consumer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configured: list[Settings] = []
+    real = flags_module.configure_flags
+
+    def counting(settings: Settings) -> Any:
+        configured.append(settings)
+        return real(settings)
+
+    reset_flags_once()
+    monkeypatch.setattr("py_common.erasure.configure_flags", counting)
+    try:
+        root = _root(worker_kafka_enabled=True)
+        hosted = await build_registry(root, probe=_inspector())
+        erasing = [group for group in hosted.consumer_groups() if group.endswith(".erasure")]
+        assert len(erasing) == 6
+        assert configured == [root], "once, from the shared settings, before any component"
+        switch = erasure_module.erasure_switch(root)
+        assert switch is erasure_module.erasure_switch(Settings(_env_file=None, service_name="x"))
+        switch(TenantId.new())
+        assert len(configured) == 1, "the switches read the flags the worker set up"
+    finally:
+        reset_flags_once()
 
 
 async def test_obligation_consumes_decisions_with_kafka_and_sweeps_behind_its_own_switch() -> None:
@@ -413,9 +450,11 @@ def test_the_health_app_answers_on_its_own_thread(health_server: HealthServer) -
 def test_every_service_with_background_work_is_hosted_by_the_worker() -> None:
     assert {entry.name for entry in REGISTRY if entry.components is not None} == {
         "applicability-engine",
+        "identity",
         "notification",
         "obligation",
         "pipeline",
+        "profile",
         "rulebook",
     }
 

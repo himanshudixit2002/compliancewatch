@@ -139,13 +139,17 @@ def test_dev_clients_come_from_the_committed_file_or_the_setting() -> None:
         "pipeline",
         "profile",
         "qa",
+        "rulebook",
         "whatsapp-bot",
         "worker",
     }
-    assert committed["profile"] == {Scope.ENTITLEMENTS_READ}
-    assert committed["applicability-engine"] == {Scope.TENANT_ACT}
-    assert committed["obligation"] == {Scope.TENANT_ACT}
-    assert committed["notification"] == {Scope.TENANT_ACT}
+    assert committed["profile"] == {Scope.ENTITLEMENTS_READ, Scope.ERASURE_VERIFY}
+    assert committed["applicability-engine"] == {Scope.TENANT_ACT, Scope.ERASURE_VERIFY}
+    assert committed["obligation"] == {Scope.TENANT_ACT, Scope.ERASURE_VERIFY}
+    assert committed["notification"] == {Scope.TENANT_ACT, Scope.ERASURE_VERIFY}
+    assert committed["rulebook"] == {Scope.ERASURE_VERIFY}
+    assert Scope.ERASURE_VERIFY in committed["worker"]
+    assert Scope.ERASURE_VERIFY not in committed["qa"]
     given = identity_settings(
         identity_dev_clients="qa=llm:call, bot = tenant:act+llm:call"
     ).dev_clients

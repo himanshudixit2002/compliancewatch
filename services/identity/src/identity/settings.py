@@ -49,6 +49,26 @@ ports and the combined product points them at its internal listener (loopback).
 ``identity_export_concurrency`` (4) at a time, all of them within
 ``identity_export_deadline_seconds`` (45 s), so a download answers within about a minute, below
 a proxy's usual timeout, and a service still answering at the deadline counts as pending.
+
+``identity_erasure_services`` (``CW_IDENTITY_ERASURE_SERVICES``) are the services a deletion
+request waits for, as a comma-separated list: each must answer ``tenant.data.erased`` before the
+request completes. By default identity, profile, obligation, notification, applicability-engine
+and rulebook, the services with an erasure consumer; identity is always among them. Whether
+anything is erased at all is the flag ``identity.tenant_erasure`` (``CW_TENANT_ERASURE_ENABLED``,
+per tenant with ``CW_TENANT_ERASURE_TENANTS``), which the consumers read; it is not a field
+here. ``identity_erasure_second_pass_seconds`` (``CW_IDENTITY_ERASURE_SECOND_PASS_SECONDS``, 900)
+is how long after every service answered a deletion request identity sends it a second time; it
+must be longer than ``access_token_ttl_seconds``, so no token issued before the erasure is still
+alive when the second pass runs.
+
+``identity_erasure_pepper`` (``CW_IDENTITY_ERASURE_PEPPER``, secret) keys the pseudonyms an
+erasure leaves in the consent records and the billing customer (HMAC-SHA256,
+``identity.domain.erasure.pseudonym``). It is held outside the database: without it a pseudonym
+cannot be traced back to the phone number or address it replaced. It is required wherever the
+flag can be on (the worker refuses to start without it) and ``cw-mvp check-config`` refuses it
+missing outside local and test; local and test use ``DEV_ERASURE_PEPPER``, a documented
+placeholder that is not a secret. Changing it later leaves the pseudonyms already written as
+they are.
 """
 
 import tomllib
@@ -61,10 +81,15 @@ from pydantic import Field, SecretStr, field_validator, model_validator
 
 from domain_kernel.access import Scope
 from identity.domain.billing import MAX_QUANTITY
-from identity.domain.data_requests import parse_export_sources
+from identity.domain.data_requests import parse_export_sources, parse_services
+from identity.domain.erasure import ERASURE_SERVICES
 from py_common.settings import Settings
 
 MIN_FAKE_SECRET_BYTES = 32
+MIN_PEPPER_BYTES: Final = 32
+DEV_ERASURE_PEPPER: Final = "dev-only-erasure-pepper-not-a-secret-local-and-test"
+"""The pepper local and test use when ``CW_IDENTITY_ERASURE_PEPPER`` is empty: a placeholder,
+refused outside them (check-config's dev-only rule)."""
 MIN_DEV_CLIENT_SECRET_CHARS = 32
 DEV_ENVIRONMENTS: Final = ("local", "test")
 DEFAULT_EXPORT_SOURCES: Final = (
@@ -104,6 +129,9 @@ class IdentitySettings(Settings):
     identity_export_timeout_seconds: float = Field(default=20.0, gt=0, le=120)
     identity_export_concurrency: int = Field(default=4, ge=1, le=16)
     identity_export_deadline_seconds: float = Field(default=45.0, gt=0, le=120)
+    identity_erasure_services: str = ",".join(ERASURE_SERVICES)
+    identity_erasure_second_pass_seconds: int = Field(default=900, ge=60, le=7 * 24 * 3600)
+    identity_erasure_pepper: SecretStr | None = None
 
     @field_validator("razorpay_plan_ids", mode="before")
     @classmethod
@@ -172,6 +200,40 @@ class IdentitySettings(Settings):
                     "a service in the same process"
                 )
         return self
+
+    @model_validator(mode="after")
+    def _check_the_erasure_services(self) -> Self:
+        if "identity" not in self.erasure_services:
+            raise ValueError("CW_IDENTITY_ERASURE_SERVICES always names identity")
+        if self.identity_erasure_second_pass_seconds <= self.access_token_ttl_seconds:
+            raise ValueError(
+                "CW_IDENTITY_ERASURE_SECOND_PASS_SECONDS must be longer than "
+                "CW_ACCESS_TOKEN_TTL_SECONDS: the second pass runs once every token issued "
+                "before the erasure has expired"
+            )
+        pepper = _secret(self.identity_erasure_pepper)
+        if pepper and len(pepper.encode("utf-8")) < MIN_PEPPER_BYTES:
+            raise ValueError(f"CW_IDENTITY_ERASURE_PEPPER needs at least {MIN_PEPPER_BYTES} bytes")
+        return self
+
+    @property
+    def erasure_pepper(self) -> bytes:
+        """The pepper the pseudonyms are keyed with: ``CW_IDENTITY_ERASURE_PEPPER``, or in local
+        and test the placeholder ``DEV_ERASURE_PEPPER``. ValueError anywhere else without it."""
+        pepper = _secret(self.identity_erasure_pepper)
+        if pepper:
+            return pepper.encode("utf-8")
+        if self.is_dev:
+            return DEV_ERASURE_PEPPER.encode("utf-8")
+        raise ValueError(
+            f"CW_ENV={self.env} needs CW_IDENTITY_ERASURE_PEPPER to erase a tenant: the "
+            "pseudonyms of its consents and billing customer are keyed with it"
+        )
+
+    @property
+    def erasure_services(self) -> tuple[str, ...]:
+        """The services a deletion request waits for, sorted."""
+        return parse_services(self.identity_erasure_services, "CW_IDENTITY_ERASURE_SERVICES")
 
     @property
     def export_sources(self) -> Mapping[str, str]:

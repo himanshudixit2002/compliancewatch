@@ -4,6 +4,15 @@ Versions follow semver per topic. Adding an optional field is a minor bump, chan
 a field or making one required is a major bump and a new `v<major>` schema file, wording is a
 patch. Every line names the topic and its version.
 
+## 2026-10-07
+
+- tenant.data.erased 1.0.0: first version; identity, profile, obligation, notification, the
+  applicability engine and the rulebook each emit it once they have erased a tenant, and
+  identity's group identity.erasure-records completes the deletion request
+- tenant.deletion.requested 1.0.1: wording: the consumers are the services that erase, each in
+  its group <service>.erasure, each checks the event with identity first, and each answers with
+  tenant.data.erased; identity sends it again for the second pass
+
 ## 2026-10-06
 
 - rule.rejected 1.0.0: first version; the rulebook's review of a rule candidate produces it

@@ -25,7 +25,7 @@ from sqlalchemy.exc import DBAPIError
 from testcontainers.community.postgres import PostgresContainer
 
 from domain_kernel.access import ANONYMOUS
-from domain_kernel.ids import TenantId
+from domain_kernel.ids import EventId, TenantId
 from identity.application.data_requests import ExportTenantData, RequestExport
 from identity.domain.data_requests import (
     DataRequest,
@@ -169,9 +169,7 @@ def test_the_use_cases_keep_each_tenant_s_requests_apart(role_engine: Engine) ->
     tenant, other = TenantId.new(), TenantId.new()
     for each in (tenant, other):
         add_tenant(factory, each)
-    made = RequestExport(factory, clock=lambda: NOW).run(
-        ANONYMOUS, tenant, DataRequestKind.EXPORT, reason="Example reason"
-    )
+    made = RequestExport(factory, clock=lambda: NOW).run(ANONYMOUS, tenant, reason="Example reason")
     assert made.deadline_at == NOW + timedelta(days=30)
     with factory(other) as uow:
         assert uow.data_requests.get(made.id) is None
@@ -202,18 +200,23 @@ def test_the_directory_function_counts_every_tenant_s_open_requests(
     first, second = TenantId.new(), TenantId.new()
     long_ago = datetime.now(UTC) - timedelta(days=45)
     deletion = DataRequestKind.DELETION
+    sent = EventId.new()
+    partly = request_of(first, at=long_ago, kind=deletion).sent(sent)
+    partly = partly.record_erasure("profile", ("identity", "profile"), long_ago, event_id=sent)
+    assert partly.status is DataRequestStatus.IN_PROGRESS
     with factory(first) as uow:
         uow.data_requests.add(request_of(first, at=long_ago, kind=deletion))
         uow.data_requests.add(request_of(first, at=datetime.now(UTC), kind=deletion))
         uow.data_requests.add(request_of(first, at=datetime.now(UTC)))
+        uow.data_requests.add(partly)
     with factory(second) as uow:
         uow.data_requests.add(request_of(second, at=long_ago, kind=deletion))
         uow.data_requests.add(request_of(second, at=long_ago))
         done = request_of(second, at=long_ago)
         uow.data_requests.add(done.record_answers(["identity"], ["identity"], long_ago))
     found = counts(role_engine)
-    assert found[DataRequestKind.DELETION] == OpenRequests(DataRequestKind.DELETION, 3, 2), (
-        "never answered: open, and overdue past the deadline"
+    assert found[DataRequestKind.DELETION] == OpenRequests(DataRequestKind.DELETION, 4, 3), (
+        "not completed, answered or not: open, and overdue past the deadline"
     )
     assert found[DataRequestKind.EXPORT] == OpenRequests(DataRequestKind.EXPORT, 1, 0), (
         "an offered export is open until its deadline, then expires quietly; never overdue"
@@ -424,9 +427,7 @@ def test_two_downloads_at_once_each_keep_the_services_that_answered(
     factory = PostgresUnitOfWorkFactory(role_engine)
     tenant = TenantId.new()
     add_tenant(factory, tenant)
-    made = RequestExport(factory, clock=lambda: NOW).run(
-        ANONYMOUS, tenant, DataRequestKind.EXPORT, reason="Example reason"
-    )
+    made = RequestExport(factory, clock=lambda: NOW).run(ANONYMOUS, tenant, reason="Example reason")
     expected = ("identity", "obligation", "profile")
     second = ExportTenantData(
         factory, [SilentSource("profile"), AnsweringSource("obligation")], clock=lambda: NOW
@@ -458,9 +459,7 @@ def test_identity_s_own_data_reads_a_page_at_a_time_on_postgres(role_engine: Eng
     tenant = TenantId.new()
     add_tenant(factory, tenant)
     made = [
-        RequestExport(factory, clock=lambda: NOW).run(
-            ANONYMOUS, tenant, DataRequestKind.EXPORT, reason="Example reason"
-        )
+        RequestExport(factory, clock=lambda: NOW).run(ANONYMOUS, tenant, reason="Example reason")
         for _ in range(3)
     ]
     paged = ExportTenantData(factory, clock=lambda: NOW, page_size=1).run(

@@ -204,9 +204,13 @@ export type paths = {
     get: operations["list_data_requests_v1_identity_data_requests_get"];
     put?: never;
     /**
-     * Ask for a copy of the tenant's data; it is due within 30 days
+     * Ask for a copy of the tenant's data or its deletion; it is due within 30 days
      * @description ``tenant_id`` is for the regulatory team's admin recording a support request for that
-     *     tenant (a reason is then required); anyone else leaves it out or names their own tenant.
+     *     tenant (a reason is then required); anyone else leaves it out or names their own tenant. A
+     *     deletion shuts the tenant out of identity at once: 403 identity-tenant-deleting on its
+     *     sign-ins and on its later requests to identity but reading its data requests and its audit
+     *     trail. The other services take a token issued before it until the token expires (ten minutes
+     *     by default), and answer 410 tenant-erased once each has erased the tenant.
      */
     post: operations["make_data_request_v1_identity_data_requests_post"];
     delete?: never;
@@ -285,6 +289,28 @@ export type paths = {
      *     whether going over them is refused (the flag identity.plan_limits for the tenant).
      */
     get: operations["read_entitlements_v1_identity_entitlements_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/identity/erasures/{tenant_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * What identity holds of a tenant's deletion, checked before any service erases it
+     * @description 404 identity-tenant-not-found for a tenant identity does not hold: the consumer then
+     *     refuses the event. ``deletion_event_id`` is null when the tenant has no open deletion
+     *     request.
+     */
+    get: operations["check_erasure_v1_identity_erasures__tenant_id__get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -728,7 +754,7 @@ export type components = {
     DataRequestIn: {
       /**
        * Kind
-       * @description export; deletion is refused (422) until the erasure cascade exists
+       * @description export, a copy of the tenant's data; deletion, its erasure in every service, after which nobody signs in to the tenant
        * @enum {string}
        */
       kind: "export" | "deletion";
@@ -759,6 +785,11 @@ export type components = {
        */
       deadline_at: string;
       /**
+       * Erasure Pass
+       * @description A deletion's pass the services answer: 1, then 2 once every service has answered the first and identity has scheduled the second; null for an export
+       */
+      erasure_pass?: number | null;
+      /**
        * Id
        * Format: uuid
        */
@@ -766,7 +797,7 @@ export type components = {
       kind: components["schemas"]["DataRequestKind"];
       /**
        * Overdue
-       * @description Past its deadline and not completed
+       * @description Past its deadline and still owed: an export never answered, or a deletion not completed
        */
       overdue: boolean;
       /** Reason */
@@ -776,11 +807,24 @@ export type components = {
        * Format: date-time
        */
       requested_at: string;
-      /** Services Done */
+      /**
+       * Second Pass At
+       * @description When a deletion's second pass goes out to the services; null until then
+       */
+      second_pass_at?: string | null;
+      /**
+       * Second Pass Done
+       * @description The services that have answered a deletion's second pass
+       */
+      second_pass_done?: string[];
+      /**
+       * Services Done
+       * @description The services whose data an export of it held, or that erased the tenant in a deletion's first pass
+       */
       services_done: string[];
       /**
        * Services Pending
-       * @description The services whose data an export of it has not held yet
+       * @description The services whose data an export of it has not held yet, or that have not answered a deletion's current pass
        */
       services_pending: string[];
       source: components["schemas"]["DataRequestSource"];
@@ -846,6 +890,29 @@ export type components = {
        * @description The subscription's status, or free
        */
       status: string;
+    };
+    /**
+     * ErasureCheckOut
+     * @description What identity holds of a tenant's deletion, which every erasure is checked against.
+     */
+    ErasureCheckOut: {
+      /**
+       * Deletion Event Id
+       * @description The tenant.deletion.requested identity last sent for the tenant's open deletion request; null when it has none
+       */
+      deletion_event_id: string | null;
+      /**
+       * Internal
+       * @description Whether it is the regulatory team's internal tenant
+       */
+      internal: boolean;
+      /** @description The tenant's status at identity */
+      status: components["schemas"]["TenantStatus"];
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
     };
     /** HealthResponse */
     HealthResponse: {
@@ -1114,7 +1181,8 @@ export type components = {
       | "llm:call"
       | "identity:channel-consents"
       | "entitlements:read"
-      | "data:export";
+      | "data:export"
+      | "erasure:verify";
     /** ServiceTokenIn */
     ServiceTokenIn: {
       /** Client Id */
@@ -2262,6 +2330,64 @@ export interface operations {
       };
       /** @description Forbidden */
       403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  check_erasure_v1_identity_erasures__tenant_id__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenant_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErasureCheckOut"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
         headers: {
           [name: string]: unknown;
         };

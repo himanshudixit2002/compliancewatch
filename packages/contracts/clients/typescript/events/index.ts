@@ -20,6 +20,7 @@ export type { RuleRejected } from "./rule.rejected.v1";
 export type { RuleSuperseded } from "./rule.superseded.v1";
 export type { RuleWithdrawn } from "./rule.withdrawn.v1";
 export type { TenantCreated } from "./tenant.created.v1";
+export type { TenantDataErased } from "./tenant.data.erased.v1";
 export type { TenantDeletionRequested } from "./tenant.deletion.requested.v1";
 export type { UserRoleChanged } from "./user.role.changed.v1";
 
@@ -45,7 +46,8 @@ export const EVENT_TOPICS = {
   "rule.superseded": { version: "1.0.0", tenantScoped: false },
   "rule.withdrawn": { version: "1.0.0", tenantScoped: false },
   "tenant.created": { version: "1.0.0", tenantScoped: true },
-  "tenant.deletion.requested": { version: "1.0.0", tenantScoped: true },
+  "tenant.data.erased": { version: "1.0.0", tenantScoped: true },
+  "tenant.deletion.requested": { version: "1.0.1", tenantScoped: true },
   "user.role.changed": { version: "1.0.0", tenantScoped: true },
 } as const;
 

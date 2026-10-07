@@ -158,9 +158,10 @@ $roles$;
 -- gets CREATE on identity only while the function is (re)made. Until identity's migration 0010
 -- has made data_request, the role is created and the rest skipped with a notice.
 --
--- The function counts the open requests of each kind (neither completed nor, once offered and
--- past the deadline, expired) and the overdue ones: never answered (received) and past the
--- deadline (identity.domain.data_requests).
+-- The function counts the open requests of each kind (neither completed nor, for an export
+-- offered and past the deadline, expired) and the overdue ones past the deadline: an export
+-- never answered (received), or a deletion not completed, which never expires
+-- (identity.domain.data_requests).
 DO $directory$
 DECLARE
   directory_role CONSTANT text := 'cw_identity_directory';
@@ -233,10 +234,13 @@ BEGIN
     AS $body$
       SELECT r.kind::text,
              count(*),
-             count(*) FILTER (WHERE r.status = 'received' AND r.deadline_at < now())
+             count(*) FILTER (
+               WHERE r.deadline_at < now()
+                 AND (r.status = 'received' OR r.kind = 'deletion')
+             )
         FROM identity.data_request AS r
-       WHERE r.status = 'received' AND r.deadline_at < now()
-          OR r.status <> 'completed' AND r.deadline_at >= now()
+       WHERE r.status <> 'completed'
+         AND NOT (r.kind = 'export' AND r.status = 'in_progress' AND r.deadline_at < now())
        GROUP BY r.kind
     $body$
   $function$;

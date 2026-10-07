@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:compliancewatch:event:tenant.data.erased:v1",
+  "title": "tenant.data.erased",
+  "description": "One service erased what it holds for a tenant that asked for deletion (tenant.deletion.requested): the rows it deleted or pseudonymised per table, and the tables it kept with the reason. Each service emits it once for each tenant.deletion.requested it accepts (identity sends a deletion request twice, the second pass, and again on a resend), in the transaction of its erasure; an event identity did not send is refused and answered with nothing. Producers: identity, profile, obligation, notification, applicability-engine, rulebook. Consumers: identity, which completes the deletion request once every service has answered both passes.",
+  "type": "object",
+  "x-version": "1.0.0",
+  "x-producer": "identity, profile, obligation, notification, applicability-engine, rulebook",
+  "x-tenant-scoped": true,
+  "properties": {
+    "service": {
+      "type": "string",
+      "pattern": "^[a-z][a-z-]*$",
+      "description": "The service that erased, by its directory name, such as profile or applicability-engine."
+    },
+    "deletion_event_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The tenant.deletion.requested event the erasure answers; also the envelope's causation_id."
+    },
+    "erased_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the service's erasure committed."
+    },
+    "tables": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "description": "The rows deleted or pseudonymised, per table of the service, never negative; a table with no row of the tenant counts 0."
+    },
+    "retained": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "table": {
+            "type": "string",
+            "description": "A table the service keeps rows of, or keeps without any tenant reference."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why the rows stay, such as regulatory data of no tenant or a documented legal exception."
+          }
+        },
+        "required": ["table", "reason"]
+      },
+      "description": "The tables the service did not empty for the tenant, each with the reason; empty when it kept nothing."
+    }
+  },
+  "required": ["service", "deletion_event_id", "erased_at", "tables", "retained"]
+}

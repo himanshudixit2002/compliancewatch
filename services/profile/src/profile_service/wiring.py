@@ -4,6 +4,7 @@ the api package never imports infrastructure (import-linter keeps api and infras
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
+from domain_kernel.erasure import ErasedTenants
 from domain_kernel.ontology import Ontology, OntologyWording
 from profile_service.application.attributes import (
     BuildSnapshot,
@@ -48,3 +49,5 @@ class Wiring:
     add_registration: AddRegistration
     onboarding: OnboardingChecklist
     export_data: ExportTenantData
+    erased_tenants: ErasedTenants
+    """The tenants the profile has erased: its routes answer them 410."""

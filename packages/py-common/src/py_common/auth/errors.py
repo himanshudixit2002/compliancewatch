@@ -1,5 +1,6 @@
-"""The problems authentication answers with. py-common maps them for every service
-(``DEFAULT_STATUS_BY_ERROR``): 401, 401, 403, 403, 503 and 503.
+"""The problems authentication and the tenant scope answer with. py-common maps them for every
+service (``DEFAULT_STATUS_BY_ERROR``): 401, 401, 403, 403, 503, 503 and, for a tenant the
+service has erased, 410.
 
 A 401 carries ``WWW-Authenticate: Bearer`` (RFC 6750), with ``error="invalid_token"`` when a
 token came but failed verification.
@@ -69,3 +70,16 @@ class ServiceTokenUnavailableError(DomainError):
 
     type_slug = "service-token-unavailable"
     title = "Service access token could not be obtained"
+
+
+class TenantErasedError(DomainError):
+    """The request's tenant has been erased at this service (410): its data is gone and it
+    takes no more work (``py_common.erasure``)."""
+
+    type_slug = "tenant-erased"
+    title = "The tenant has been erased"
+
+    def __init__(self, detail: str = "") -> None:
+        super().__init__(
+            detail or "This tenant was deleted at its owner's request; nothing of it is served"
+        )

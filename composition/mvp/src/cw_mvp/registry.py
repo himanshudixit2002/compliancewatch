@@ -51,6 +51,7 @@ from eval_service.main import build_app as build_eval
 from eval_service.settings import EvalSettings
 from identity.main import build_app as build_identity
 from identity.settings import IdentitySettings
+from identity.worker import components as identity_components
 from llm_gateway.main import build_app as build_llm_gateway
 from llm_gateway.settings import GatewaySettings
 from notification.main import build_app as build_notification
@@ -64,6 +65,7 @@ from pipeline.settings import PipelineSettings
 from pipeline.worker import components as pipeline_components
 from profile_service.main import build_app as build_profile
 from profile_service.settings import ProfileSettings
+from profile_service.worker import components as profile_components
 from py_common.runtime import WorkerComponents
 from py_common.settings import Settings, with_search_path
 from qa.main import build_app as build_qa
@@ -157,6 +159,7 @@ REGISTRY: Final[tuple[ServiceEntry[Any], ...]] = (
             "GET /v1/identity/consents",
         ),
         takes_authenticator=False,
+        components=identity_components,
     ),
     ServiceEntry(
         "profile",
@@ -185,6 +188,7 @@ REGISTRY: Final[tuple[ServiceEntry[Any], ...]] = (
         ),
         takes_token_source=True,
         calls_identity=True,
+        components=profile_components,
     ),
     ServiceEntry(
         "rulebook", "rulebook", RulebookSettings, build_rulebook, components=rulebook_components

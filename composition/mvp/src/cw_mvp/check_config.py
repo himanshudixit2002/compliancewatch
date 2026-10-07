@@ -29,6 +29,9 @@ there:
 - synthetic approvals: a rulebook that would accept them (``synthetic_approvals_allowed``);
 - placeholder secrets: ``local-write-token``, ``local-review-token`` or a ``dev-only`` value in
   any secret setting;
+- identity's erasure pepper (``CW_IDENTITY_ERASURE_PEPPER``), whatever the flag
+  ``identity.tenant_erasure`` says: the pseudonyms an erasure leaves are keyed with it, and the
+  local placeholder is for local and test only;
 - secrets an enabled feature needs: WhatsApp's number id and token, email's SMTP host, sender,
   password (with a username) and feedback token, Razorpay's keys, the rulebook's review token
   for publishing and its write token for the pipeline outside token mode, and the worker's
@@ -291,6 +294,12 @@ def _pipeline(settings: PipelineSettings, root: MvpSettings) -> Iterator[str]:
 
 
 def _identity(settings: IdentitySettings) -> Iterator[str]:
+    if _unset(settings, "identity_erasure_pepper"):
+        yield (
+            "CW_IDENTITY_ERASURE_PEPPER is required outside local and test: a tenant's erasure "
+            "keys the pseudonyms of its consents and billing customer with it, and the identity "
+            "worker refuses to start without it while identity.tenant_erasure can be on"
+        )
     if settings.auth_provider == "fake" and settings.env == "staging":
         yield (
             "CW_AUTH_PROVIDER=fake signs anyone in; CW_ENV=staging needs supabase, as "

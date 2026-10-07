@@ -24,7 +24,9 @@ On top of it:
   it in ``x-tenant-id`` and needs ``tenant:act`` to do so, unless its token is bound to a tenant
   (``Principal.acts_for``): then it acts for that tenant only, and a header naming another is a
   403 ``auth-tenant-mismatch``. The anonymous principal names it in the header, as before. No
-  tenant at all is the service's own ``missing_error``.
+  tenant at all is the service's own ``missing_error``. A tenant the service has erased
+  (``app.state.erased_tenants``, which ``create_app`` sets from the service's erased markers) is
+  a 410 ``tenant-erased``, whoever asks: a token issued before the erasure opens nothing.
 - ``data_export_scope(service, missing_error)``: the tenant whose data export ``service``
   answers. A user with a tenant admin role (owner, ca_admin) for their own tenant; a service only
   with a token bound to that tenant, addressed to ``service`` and holding ``data:export``, as
@@ -41,7 +43,7 @@ On top of it:
 
 import hmac
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
-from typing import Annotated, Final, Literal, Self, overload
+from typing import Annotated, Final, Literal, Protocol, Self, overload
 from uuid import UUID
 
 import structlog
@@ -65,6 +67,7 @@ from py_common.auth.errors import (
     AuthForbiddenError,
     AuthTenantMismatchError,
     AuthTokenRequiredError,
+    TenantErasedError,
 )
 from py_common.auth.tokens import TokenVerifier
 from py_common.settings import AuthMode, Settings
@@ -119,6 +122,20 @@ class Authenticator:
         if self.verifier is None:  # pragma: no cover - refused by __init__
             raise AuthTokenRequiredError()
         return self.verifier.verify(token)
+
+
+class ErasedTenantsReader(Protocol):
+    """``domain_kernel.erasure.ErasedTenants``, as the app state holds it."""
+
+    def is_erased(self, tenant_id: TenantId) -> bool: ...
+
+
+async def refuse_erased(request: Request, tenant_id: TenantId) -> None:
+    """``TenantErasedError`` when the app's erased markers (``app.state.erased_tenants``) hold
+    the tenant; nothing when the app has none."""
+    erased = getattr(request.app.state, "erased_tenants", None)
+    if erased is not None and await run_in_threadpool(erased.is_erased, tenant_id):
+        raise TenantErasedError()
 
 
 def authenticator_of(request: Request) -> Authenticator:
@@ -219,6 +236,7 @@ def tenant_scope(
         raise ValueError("a required tenant scope needs the service's missing-tenant error")
 
     async def tenant(
+        request: Request,
         principal: CurrentPrincipal,
         x_tenant_id: Annotated[UUID | None, Header(description=description)] = None,
     ) -> AsyncIterator[TenantId | None]:
@@ -229,6 +247,7 @@ def tenant_scope(
                 raise missing_error()
             yield None
             return
+        await refuse_erased(request, resolved)
         structlog.contextvars.bind_contextvars(**{TENANT_FIELD: str(resolved)})
         try:
             yield resolved

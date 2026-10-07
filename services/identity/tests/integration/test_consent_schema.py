@@ -143,6 +143,8 @@ def test_web_settings_is_a_source_and_the_downgrade_keeps_the_evidence(
     assert state.source is ConsentSource.WEB_SETTINGS
 
     engine = create_engine(database_url)
+    # Below 0011 the records lose their guard, so the test may delete the web_settings ones.
+    command.downgrade(migrated, "0010")
     with pytest.raises(IntegrityError, match="ck_consent_record_source"):
         command.downgrade(migrated, "0003")
     assert "web_settings" in _source_check(engine), "the failed downgrade changed nothing"

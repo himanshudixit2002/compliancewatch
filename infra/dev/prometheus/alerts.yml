@@ -222,8 +222,9 @@ groups:
   - name: privacy
     rules:
       # identity_data_requests_overdue counts every tenant's data requests past their 30-day
-      # deadline that were never answered (still received: deletions, once the erasure cascade
-      # lands; an export is answered, offered for download, as soon as it is made, and one the
+      # deadline that are still owed by the operator: a deletion not completed (no service
+      # erased, as with the flag identity.tenant_erasure off, or one still pending), or an export
+      # never answered (an export is offered for download as soon as it is made, and one the
       # tenant never downloads expires without paging), read through identity.data_requests_open()
       # at most once a minute while telemetry is on. Every replica reports the same count, so the
       # max is taken. A request past its deadline is a breach of what the data map promises the
@@ -235,5 +236,5 @@ groups:
           severity: page
           team: identity-partner
         annotations:
-          summary: "A tenant's data request is past its 30-day deadline with no answer"
+          summary: "A tenant's data request is past its 30-day deadline and not answered"
           runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/data-requests.md

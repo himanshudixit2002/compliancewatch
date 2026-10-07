@@ -5,8 +5,8 @@ Design reference: Project Foundation guide, sections 7, 9 and 14.
 
 - **Owns:** Recipients and their addresses, notifications and their delivery state, channel adapters (WhatsApp, email over SMTP), preferences and suppressions; dedupe by occasion, batching, digests, quiet hours, template rendering per channel and language
 - **Owning team:** Core Product (guide section 14)
-- **Consumes:** obligation.created, obligation.due_soon, obligation.rescheduled, obligation.closed; delivery statuses forwarded by the WhatsApp bot; SES feedback through SNS
-- **Emits / publishes:** notification.sent, notification.failed (1.0.1, through the outbox)
+- **Consumes:** obligation.created, obligation.due_soon, obligation.rescheduled, obligation.closed; tenant.deletion.requested (group `notification.erasure`); delivery statuses forwarded by the WhatsApp bot; SES feedback through SNS
+- **Emits / publishes:** notification.sent, notification.failed (1.0.1) and tenant.data.erased (through the outbox)
 
 ## What is here
 
@@ -283,6 +283,30 @@ attempts are `notification_sends_total{outcome="sent"}` and `{outcome=~"retry|fa
 The `notification` alert group (`NotificationDeliveryFailures`, `NotificationDuplicateSent`,
 `NotificationPendingOverdue`, `NotificationEmailBounces`) reads them and links
 `docs/runbooks/notification-delivery.md`.
+
+## Erasure
+
+The worker's consumer of tenant.deletion.requested, group `notification.erasure`, only logs
+`erasure.off` while the flag `identity.tenant_erasure` (`CW_TENANT_ERASURE_ENABLED`, per tenant with
+`CW_TENANT_ERASURE_TENANTS`; off by default) is off for the tenant. On, it first checks the event
+with identity (`GET /v1/identity/erasures/{tenant_id}` at `CW_IDENTITY_URL`, the service client with
+`erasure:verify`, 5 s): one identity did not send for the tenant's open deletion request, or one for
+the internal tenant, erases nothing and is refused (a `tenant.erasure_refused` audit row,
+dead-lettered at once); identity unreachable is retried, then dead-lettered. Otherwise, in the
+transaction that marks the event processed (`infrastructure.erasure`), it deletes the tenant's
+`work_index` entries and notifications (the delivery receipts are the notification's own times and
+provider message id), `recipient_address`, `recipient_business` and `recipient` rows, its
+`address_directory` rows, its idempotency keys and its published events. The preferences, which
+belong to no tenant, follow this rule, for the preference of each address the tenant held (in its
+directory rows, or set by its user on the web): an opt-out stays, as the record that the person
+asked to stop, which must outlive the account; an opt-in stays while another tenant still holds the
+address (one of its recipients in the directory, read across tenants, or its user set the
+preference); any other opt-in is deleted; and whatever stays loses `set_for_tenant_id` when it named
+this tenant. Suppressions stay: they hold for every tenant and name none. It answers
+tenant.data.erased (service notification) with the row counts and the tables it kept, a
+`tenant.erased` audit row and its erased marker (`erased_tenant`, migration 0005). From then on
+every route answers the tenant 410 `tenant-erased`, and the consumer of the obligation events queues
+nothing for it (outcome `erased_tenant`).
 
 ## Layout
 

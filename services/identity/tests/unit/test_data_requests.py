@@ -41,7 +41,6 @@ from identity.domain.data_requests import (
     parse_export_sources,
 )
 from identity.domain.errors import (
-    DataRequestKindUnavailableError,
     DataRequestNotFoundError,
     SessionRevokedError,
     TenantNotFoundError,
@@ -85,7 +84,7 @@ def request_at(at: datetime = NOW, **changes: Any) -> DataRequest:
 def test_an_unanswered_request_is_due_thirty_days_later_and_overdue_after_that() -> None:
     request = request_at(kind=DataRequestKind.DELETION)
     assert request.deadline_at - request.requested_at == DEADLINE == timedelta(days=30)
-    assert request.status is DataRequestStatus.RECEIVED, "nothing answers a deletion yet"
+    assert request.status is DataRequestStatus.RECEIVED, "no service has erased yet"
     assert not request.is_overdue(request.deadline_at)
     late = request.deadline_at + timedelta(seconds=1)
     assert request.is_overdue(late)
@@ -248,7 +247,7 @@ def setup() -> Setup:
 
 
 def test_an_owner_requests_an_export_and_the_trail_records_it(setup: Setup) -> None:
-    made = setup.request.run(setup.owner, setup.tenant, DataRequestKind.EXPORT, reason="  copy ")
+    made = setup.request.run(setup.owner, setup.tenant, reason="  copy ")
     assert (made.source, made.reason, made.requested_by) == (
         DataRequestSource.SELF_SERVICE,
         "copy",
@@ -263,17 +262,11 @@ def test_an_owner_requests_an_export_and_the_trail_records_it(setup: Setup) -> N
     assert entry.after["kind"] == "export"
 
 
-def test_a_deletion_request_waits_for_the_erasure_cascade(setup: Setup) -> None:
-    with pytest.raises(DataRequestKindUnavailableError):
-        setup.request.run(setup.owner, setup.tenant, DataRequestKind.DELETION)
-    assert setup.store.data_requests == {}
-
-
 def test_only_the_tenant_s_owner_or_ca_admin_makes_or_reads_requests(setup: Setup) -> None:
     staff = setup.staff()
     with pytest.raises(AuthForbiddenError):
-        setup.request.run(staff, setup.tenant, DataRequestKind.EXPORT)
-    made = setup.request.run(setup.firm_admin, setup.firm, DataRequestKind.EXPORT)
+        setup.request.run(staff, setup.tenant)
+    made = setup.request.run(setup.firm_admin, setup.firm)
     assert made.tenant_id == setup.firm
     with pytest.raises(AuthForbiddenError):
         setup.list.run(staff, setup.tenant)
@@ -287,32 +280,26 @@ def test_the_admin_records_a_support_request_for_a_tenant(setup: Setup) -> None:
     made = setup.request.run(
         setup.admin,
         setup.internal,
-        DataRequestKind.EXPORT,
         reason="Asked by email",
         for_tenant=setup.tenant,
     )
     assert (made.tenant_id, made.source) == (setup.tenant, DataRequestSource.SUPPORT)
     assert setup.list.run(setup.owner, setup.tenant) == [made]
     with pytest.raises(InvariantViolationError):
-        setup.request.run(
-            setup.admin, setup.internal, DataRequestKind.EXPORT, for_tenant=setup.tenant
-        )
+        setup.request.run(setup.admin, setup.internal, for_tenant=setup.tenant)
     with pytest.raises(TenantNotFoundError):
         setup.request.run(
             setup.admin,
             setup.internal,
-            DataRequestKind.EXPORT,
             reason="Asked by email",
             for_tenant=TenantId.new(),
         )
     with pytest.raises(AuthForbiddenError):
-        setup.request.run(
-            setup.owner, setup.tenant, DataRequestKind.EXPORT, reason="x", for_tenant=setup.firm
-        )
+        setup.request.run(setup.owner, setup.tenant, reason="x", for_tenant=setup.firm)
 
 
 def test_the_export_holds_every_section_and_a_failed_source_stays_pending(setup: Setup) -> None:
-    made = setup.request.run(setup.owner, setup.tenant, DataRequestKind.EXPORT)
+    made = setup.request.run(setup.owner, setup.tenant)
     bundle = setup.export.run(setup.owner, setup.tenant, made.id)
     document = json.loads(json.dumps(bundle.document()))
     assert document["tenant_id"] == str(setup.tenant)
@@ -360,9 +347,7 @@ def test_the_export_holds_every_section_and_a_failed_source_stays_pending(setup:
 
 
 def test_a_support_request_does_not_show_the_admin_in_the_export(setup: Setup) -> None:
-    made = setup.request.run(
-        setup.admin, setup.internal, DataRequestKind.EXPORT, reason="Asked", for_tenant=setup.tenant
-    )
+    made = setup.request.run(setup.admin, setup.internal, reason="Asked", for_tenant=setup.tenant)
     document = setup.export.run(setup.owner, setup.tenant, made.id).document()
     (row,) = document["services"]["identity"]["sections"]["data_requests"]
     assert row["requested_by"] == "support"
@@ -370,7 +355,7 @@ def test_a_support_request_does_not_show_the_admin_in_the_export(setup: Setup) -
 
 
 def test_the_bundle_streams_as_the_same_document(setup: Setup) -> None:
-    made = setup.request.run(setup.owner, setup.tenant, DataRequestKind.EXPORT)
+    made = setup.request.run(setup.owner, setup.tenant)
     bundle = setup.export.run(setup.owner, setup.tenant, made.id)
     streamed = b"".join(bundle.chunks())
     assert json.loads(streamed) == json.loads(json.dumps(bundle.document()))
@@ -387,7 +372,7 @@ def test_identity_s_own_data_is_read_a_page_at_a_time(setup: Setup) -> None:
             notice_version="2000-01",
         )
     setup.staff()
-    made = [setup.request.run(setup.owner, setup.tenant, DataRequestKind.EXPORT) for _ in range(3)]
+    made = [setup.request.run(setup.owner, setup.tenant) for _ in range(3)]
     whole = ExportTenantData(setup.store, clock=lambda: NOW)
     paged = ExportTenantData(setup.store, clock=lambda: NOW, page_size=1)
     expected = whole.run(setup.owner, setup.tenant, made[0].id).document()
@@ -421,7 +406,7 @@ def test_the_sources_are_asked_together_and_a_late_one_is_pending(setup: Setup) 
         concurrency=2,
         deadline_seconds=0.2,
     )
-    made = setup.request.run(setup.owner, setup.tenant, DataRequestKind.EXPORT)
+    made = setup.request.run(setup.owner, setup.tenant)
     try:
         bundle = export.run(setup.owner, setup.tenant, made.id)
     finally:
@@ -447,7 +432,7 @@ def test_the_platform_s_payment_account_stays_out_of_the_billing_events(setup: S
     )
     with setup.store(setup.tenant) as uow:
         assert uow.billing.append_event(event)
-    made = setup.request.run(setup.owner, setup.tenant, DataRequestKind.EXPORT)
+    made = setup.request.run(setup.owner, setup.tenant)
     document = setup.export.run(setup.owner, setup.tenant, made.id).document()
     (row,) = document["services"]["identity"]["sections"]["billing_events"]
     assert row["payload"] == {"event": "subscription.activated"}
@@ -461,8 +446,8 @@ def test_the_directory_counts_every_tenant_s_open_requests(setup: Setup) -> None
         OpenRequests(DataRequestKind.EXPORT, 0, 0),
         OpenRequests(DataRequestKind.DELETION, 0, 0),
     ]
-    first = setup.request.run(setup.owner, setup.tenant, DataRequestKind.EXPORT)
-    setup.request.run(setup.firm_admin, setup.firm, DataRequestKind.EXPORT)
+    first = setup.request.run(setup.owner, setup.tenant)
+    setup.request.run(setup.firm_admin, setup.firm)
     unanswered = DataRequest.new(
         setup.firm,
         DataRequestKind.DELETION,
@@ -676,9 +661,6 @@ def test_the_routes_in_header_mode(header_mode: tuple[TestClient, FakeSource]) -
     tenant = signed_up_tenant(client)["tenant"]["id"]
     as_tenant = {"x-tenant-id": tenant}
     assert client.post(REQUESTS, json={"kind": "export"}).status_code == 401
-    refused = client.post(REQUESTS, json={"kind": "deletion"}, headers=as_tenant)
-    assert refused.status_code == 422
-    assert refused.json()["type"].endswith(":identity-data-request-kind-unavailable")
     made = client.post(REQUESTS, json={"kind": "export", "reason": "copy"}, headers=as_tenant)
     assert made.status_code == 201, made.text
     request = made.json()

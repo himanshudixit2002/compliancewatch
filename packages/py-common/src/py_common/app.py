@@ -15,7 +15,7 @@ from fastapi import APIRouter, FastAPI
 from starlette.types import Lifespan
 
 from domain_kernel.errors import DomainError
-from py_common.auth.fastapi import Authenticator
+from py_common.auth.fastapi import Authenticator, ErasedTenantsReader
 from py_common.health import ReadinessCheck, build_health_router
 from py_common.logging import configure_logging
 from py_common.problems import install_problem_handlers
@@ -38,6 +38,7 @@ def create_app(
     lifespan: Lifespan[FastAPI] | None = None,
     problem_status: Mapping[type[DomainError], int] | None = None,
     authenticator: Authenticator | None = None,
+    erased_tenants: ErasedTenantsReader | None = None,
 ) -> FastAPI:
     """Build the service app.
 
@@ -52,6 +53,9 @@ def create_app(
 
     ``app.state.readiness_checks`` keeps the checks behind ``/ready``, so a process that hosts
     this app next to others can report them under its own ``/ready``.
+
+    ``erased_tenants`` are the service's erased markers (``py_common.erasure``): every route
+    whose tenant ``tenant_scope`` resolves answers 410 ``tenant-erased`` for a tenant they hold.
     """
     settings = settings or Settings(service_name=service_name)
     configure_logging(
@@ -70,6 +74,7 @@ def create_app(
     app.state.telemetry = telemetry
     app.state.readiness_checks = tuple(readiness_checks)
     app.state.authenticator = authenticator or Authenticator.from_settings(settings)
+    app.state.erased_tenants = erased_tenants
     app.add_middleware(RequestContextMiddleware)
     install_problem_handlers(app, problem_status or {})
     app.include_router(

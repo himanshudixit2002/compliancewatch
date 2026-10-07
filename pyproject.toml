@@ -58,8 +58,9 @@ select = ["E", "W", "F", "I", "UP", "B", "SIM", "C4", "N", "RUF", "PT", "T20", "
 
 [tool.ruff.lint.per-file-ignores]
 "**/migrations/versions/*.py" = ["F401"]
-# Generated pydantic models: docstrings are the schema text, enum members are the schema values
-"packages/contracts/clients/python/src/cw_contracts/events/*.py" = ["E501", "N815"]
+# Generated pydantic models: docstrings are the schema text, enum members are the schema values,
+# and a constrained map value is the generator's TypeAliasType
+"packages/contracts/clients/python/src/cw_contracts/events/*.py" = ["E501", "N815", "UP040"]
 "packages/contracts/clients/python/src/cw_contracts/rest/*.py" = ["E501"]
 
 [tool.ruff.format]

@@ -23,6 +23,7 @@ from applicability_engine.application.review import ListReviewItems, ResolveRevi
 from applicability_engine.domain.ports import ProfileReader, RulebookReader
 from applicability_engine.domain.repository import UnitOfWorkFactory
 from applicability_engine.settings import ApplicabilityEngineSettings
+from domain_kernel.erasure import ErasedTenants
 from py_common.idempotency import IdempotencyStore
 
 
@@ -56,3 +57,5 @@ class Wiring:
     read_change_impact: ReadChangeImpact
     dry_run: DryRun
     export_data: ExportTenantData
+    erased_tenants: ErasedTenants
+    """The tenants the engine has erased: its routes answer them 410."""

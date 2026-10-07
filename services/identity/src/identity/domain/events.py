@@ -1,5 +1,6 @@
 """Events the identity service publishes through its outbox; payload fields follow
-packages/contracts/events (tenant.created and user.role.changed)."""
+packages/contracts/events (tenant.created, user.role.changed and tenant.deletion.requested;
+identity's tenant.data.erased is the kernel's ``domain_kernel.erasure.TenantDataErased``)."""
 
 from dataclasses import dataclass
 from datetime import datetime
@@ -8,6 +9,7 @@ from typing import ClassVar
 
 from domain_kernel._validation import require_aware, require_instance, require_int
 from domain_kernel.access import Role
+from domain_kernel.erasure import DELETION_REQUESTED_TOPIC
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.events import DomainEvent
 from domain_kernel.ids import UserId
@@ -70,6 +72,36 @@ class UserRoleChanged(DomainEvent):
         require_int(self.session_version, "session_version", minimum=0)
         if self.changed_by is not None:
             require_instance(self.changed_by, UserId, "changed_by")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class TenantDeletionRequested(DomainEvent):
+    """The tenant asked for its data to be deleted; every service that holds some erases it.
+    ``requested_by`` is the user who asked, None for a support request. Audit rows are kept
+    (``retain_audit``, always true): they are masked and kept seven years."""
+
+    topic: ClassVar[str] = DELETION_REQUESTED_TOPIC
+    schema_version: ClassVar[str] = "1.0.1"
+
+    requested_by: UserId | None
+    requested_at: datetime
+    deadline_at: datetime
+    retain_audit: bool = True
+    reason: str = ""
+
+    def __post_init__(self) -> None:
+        DomainEvent.__post_init__(self)
+        if self.tenant_id is None:
+            raise InvariantViolationError("tenant.deletion.requested names the tenant")
+        if self.requested_by is not None:
+            require_instance(self.requested_by, UserId, "requested_by")
+        require_aware(self.requested_at, "requested_at")
+        require_aware(self.deadline_at, "deadline_at")
+        if self.deadline_at <= self.requested_at:
+            raise InvariantViolationError("the deadline comes after the request")
+        if self.retain_audit is not True:
+            raise InvariantViolationError("audit records are always kept (retain_audit)")
+        require_instance(self.reason, str, "reason")
 
 
 def sorted_roles(roles: frozenset[Role]) -> tuple[Role, ...]:

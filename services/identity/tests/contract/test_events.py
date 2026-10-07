@@ -1,14 +1,20 @@
 """The events identity publishes serialise to messages the published event schemas accept."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from cw_contracts.events import TOPICS, EventEnvelopeV1
 from domain_kernel.access import Role
+from domain_kernel.erasure import Erased, TenantDataErased, retained
 from domain_kernel.events import DomainEvent
-from domain_kernel.ids import TenantId, UserId
-from identity.domain.events import RoleChangeReason, TenantCreated, UserRoleChanged
+from domain_kernel.ids import EventId, TenantId, UserId
+from identity.domain.events import (
+    RoleChangeReason,
+    TenantCreated,
+    TenantDeletionRequested,
+    UserRoleChanged,
+)
 from identity.domain.tenancy import TenantKind
 from py_common.events import decode, encode, to_message
 
@@ -36,6 +42,27 @@ EVENTS: list[DomainEvent] = [
         previous_roles=(Role.CA_STAFF, Role.COMPLIANCE_LEAD),
         reason=RoleChangeReason.DISABLED,
         session_version=4,
+    ),
+    TenantDeletionRequested(
+        tenant_id=TENANT,
+        requested_by=USER,
+        requested_at=NOW,
+        deadline_at=NOW + timedelta(days=30),
+        reason="Example closing",
+    ),
+    TenantDeletionRequested(
+        tenant_id=TENANT,
+        requested_by=None,
+        requested_at=NOW,
+        deadline_at=NOW + timedelta(days=30),
+    ),
+    TenantDataErased(
+        tenant_id=TENANT,
+        service="identity",
+        deletion_event_id=EventId.new(),
+        erased_at=NOW,
+        tables=Erased({"app_user": 2, "consent_record": 1}).tables,
+        retained=retained(("tenant", "the erased marker")),
     ),
 ]
 

@@ -13,9 +13,10 @@ Every route a hosted service serves has one class:
 - ``internal``: service-to-service routes (identity's service tokens, channel consents and the
   memberships services check, notification's send, preferences and WhatsApp receipts, the
   rulebook's pipeline writes, the gateway's model calls, the engine's evaluations, which call the
-  profile and the rulebook, and each service's part of a tenant's data export, which identity
-  reads) and starting an eval run, which spends compute and model budget,
-  served on the internal listener only.
+  profile and the rulebook, each service's part of a tenant's data export, which identity
+  reads, and identity's check of a tenant's deletion, which every erasure consumer reads) and
+  starting an eval run, which spends compute and model budget, served on the internal listener
+  only.
 
 The internal listener, on the private network, serves every route. The public listener answers
 any route without a class, and any path no service serves, with the same 404
@@ -80,6 +81,9 @@ EXPOSURE: Final[Mapping[str, Mapping[str, Exposure]]] = {
         "GET /v1/identity/data-requests": PUBLIC,
         "GET /v1/identity/data-requests/{request_id}": PUBLIC,
         "GET /v1/identity/data-requests/{request_id}/export": PUBLIC,
+        # What identity holds of a tenant's deletion, which every service's erasure consumer
+        # checks before erasing (erasure:verify).
+        "GET /v1/identity/erasures/{tenant_id}": INTERNAL,
     },
     "profile": {
         # One service's part of a tenant's export, which identity assembles (data:export).

@@ -24,6 +24,7 @@ STAGING: dict[str, str] = {
     "CW_PIPELINE_RAW_BUCKET": "cw-raw-staging",
     "CW_PIPELINE_RAW_ACCESS_KEY_ID": "raw-key-of-the-check",
     "CW_PIPELINE_RAW_SECRET_ACCESS_KEY": "raw-secret-of-the-check",
+    "CW_IDENTITY_ERASURE_PEPPER": "erasure-pepper-of-the-check-thirty-two-bytes",
 }
 """A staging environment with nothing to refuse."""
 PRODUCTION = STAGING | {"CW_ENV": "prod", "CW_AUTH_MODE": "token"}
@@ -295,6 +296,21 @@ def test_a_shared_secret_placeholder_is_reported_once_as_shared(
     found = report(monkeypatch, STAGING, service_client_secret="dev-only-worker-secret")
     assert only(found).where == SHARED
     assert only(found).message.startswith("CW_SERVICE_CLIENT_SECRET holds a dev-only placeholder")
+
+
+@pytest.mark.parametrize("base", [STAGING, PRODUCTION], ids=["staging", "prod"])
+def test_the_erasure_pepper_is_required_outside_local_and_test(
+    monkeypatch: pytest.MonkeyPatch, base: dict[str, str]
+) -> None:
+    found = report(monkeypatch, base, identity_erasure_pepper=None)
+    assert only(found).where == "identity"
+    assert only(found).message.startswith("CW_IDENTITY_ERASURE_PEPPER is required")
+    placeholder = report(
+        monkeypatch, base, identity_erasure_pepper="dev-only-erasure-pepper-not-a-secret-local"
+    )
+    assert only(placeholder).message.startswith(
+        "CW_IDENTITY_ERASURE_PEPPER holds a dev-only placeholder"
+    )
 
 
 def test_whatsapp_needs_its_number_and_token(monkeypatch: pytest.MonkeyPatch) -> None:

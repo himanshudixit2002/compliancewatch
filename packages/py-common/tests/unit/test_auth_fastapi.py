@@ -87,6 +87,16 @@ AdminAccess = Annotated[
 ]
 
 
+class ErasedSet:
+    """Erased markers held in a set."""
+
+    def __init__(self, tenants: frozenset[TenantId]) -> None:
+        self.tenants = tenants
+
+    def is_erased(self, tenant_id: TenantId) -> bool:
+        return tenant_id in self.tenants
+
+
 def _context() -> dict[str, Any]:
     fields = structlog.contextvars.get_contextvars()
     return {key: fields.get(key) for key in ("actor", "tenant_id")}
@@ -146,6 +156,7 @@ def _client(
     *,
     shared: str | None = _SHARED,
     authenticator: Authenticator | None = None,
+    erased: frozenset[TenantId] = frozenset(),
 ) -> TestClient:
     settings = DemoSettings(
         _env_file=None,
@@ -164,6 +175,7 @@ def _client(
             DemoAdminTokenInvalidError: 401,
         },
         authenticator=authenticator,
+        erased_tenants=ErasedSet(erased) if erased else None,
     )
     return TestClient(app)
 
@@ -538,3 +550,21 @@ def test_the_spec_declares_the_bearer_scheme_and_the_headers(token_client: TestC
     assert headers == {_ADMIN_TOKEN_HEADER}
     tenant = spec["paths"]["/v1/demo/tenant"]["get"]["parameters"]
     assert [(param["name"], param["required"]) for param in tenant] == [("x-tenant-id", False)]
+
+
+def test_a_tenant_the_service_erased_is_gone_for_every_caller(issuer: TestIssuer) -> None:
+    erased, kept = TenantId.new(), TenantId.new()
+    with _client(issuer, "dual", erased=frozenset({erased})) as client:
+        before_the_erasure = bearer(issuer.user(erased, [Role.OWNER]))
+        _problem(client.get("/v1/demo/tenant", headers=before_the_erasure), 410, "tenant-erased")
+        _problem(
+            client.get("/v1/demo/tenant", headers=_tenant_header(erased)), 410, "tenant-erased"
+        )
+        acting = bearer(issuer.service("qa", [Scope.TENANT_ACT]))
+        _problem(
+            client.get("/v1/demo/tenant", headers={**acting, **_tenant_header(erased)}),
+            410,
+            "tenant-erased",
+        )
+        assert client.get("/v1/demo/tenant", headers=_tenant_header(kept)).status_code == 200
+        assert client.get("/v1/demo/maybe-tenant").json() == {"tenant": None}
