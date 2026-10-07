@@ -118,6 +118,10 @@ TENANT_ROUTES: dict[str, frozenset[str]] = {
             "GET /v1/identity/users",
             "GET /v1/identity/audit",
             "GET /v1/identity/entitlements",
+            "GET /v1/identity/data-requests",
+            "POST /v1/identity/data-requests",
+            "GET /v1/identity/data-requests/{request_id}",
+            "GET /v1/identity/data-requests/{request_id}/export",
             "POST /v1/identity/users",
             "PUT /v1/identity/users/{user_id}/roles",
             "POST /v1/identity/users/{user_id}/disable",
@@ -130,6 +134,7 @@ TENANT_ROUTES: dict[str, frozenset[str]] = {
             "POST /v1/profile/registrations",
             "POST /v1/profile/locations",
             "GET /v1/profile/nodes/{node_id}",
+            "GET /v1/profile/data-export",
             "PUT /v1/profile/nodes/{node_id}/attributes",
             "GET /v1/profile/nodes/{node_id}/snapshot",
             "GET /v1/profile/nodes/{node_id}/next-question",
@@ -148,6 +153,7 @@ TENANT_ROUTES: dict[str, frozenset[str]] = {
         {
             "POST /v1/applicability-engine/businesses/{business_id}/decisions",
             "GET /v1/applicability-engine/businesses/{business_id}/decisions",
+            "GET /v1/applicability-engine/data-export",
             "GET /v1/applicability-engine/decisions/{decision_id}",
             "GET /v1/applicability-engine/review-items",
             "POST /v1/applicability-engine/review-items/{item_id}/resolve",
@@ -157,6 +163,7 @@ TENANT_ROUTES: dict[str, frozenset[str]] = {
     "obligation": frozenset(
         {
             "GET /v1/obligation/obligations",
+            "GET /v1/obligation/data-export",
             "GET /v1/businesses/{business_id}/obligations",
             *(
                 f"{method} {base}/{{obligation_id}}{suffix}"
@@ -178,6 +185,7 @@ TENANT_ROUTES: dict[str, frozenset[str]] = {
             "GET /v1/notification/recipients/{recipient_id}",
             "DELETE /v1/notification/recipients/{recipient_id}",
             "GET /v1/notification/notifications",
+            "GET /v1/notification/data-export",
             "GET /v1/notification/notifications/{notification_id}",
             "POST /v1/notification/notifications/{notification_id}/resend",
             "POST /v1/notification/bulk",
