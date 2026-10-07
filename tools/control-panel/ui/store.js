@@ -154,6 +154,7 @@ export function runStarted(data) {
     state: "running",
     startedAt: data.started_at ?? run.startedAt ?? Date.now() / 1000,
     steps: (data.steps ?? []).map(normalizeStep),
+    cleanup: (data.cleanup ?? run.cleanup ?? []).map(String),
     error: null,
   });
   touch(run);

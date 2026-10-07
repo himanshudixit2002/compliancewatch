@@ -926,11 +926,6 @@ GATE_TEXTS: Final[Mapping[str, tuple[str, str, str]]] = {
     "sast": ("Security scan (code)", "Semgrep on the code; needs the network.", "2 to 5 minutes"),
     "deps-scan": ("Security scan (dependencies)", "Trivy on the dependencies.", "2 to 5 minutes"),
     "web-screens-check": ("Check the screens list", "docs/web/screens.md is current.", "seconds"),
-    "web-e2e": (
-        "Click through the web app",
-        "Playwright with accessibility checks; needs the services running and seeded.",
-        "5 to 10 minutes",
-    ),
     "ci-lint": ("Check the CI files", "actionlint and the pre-commit config.", "under 1 minute"),
 }
 
@@ -959,14 +954,56 @@ GATE_WRITES: Final[Mapping[str, str]] = {
     "deps-scan": "It reads the checkout in a container and keeps Trivy's cache in a Docker "
     "volume; it changes no file here.",
     "web-screens-check": "It only reads.",
-    "web-e2e": "It builds the web app into .next and writes Playwright's reports "
-    "(playwright-report, test-results); all git-ignored.",
     "ci-lint": "It only reads.",
 }
 """What each CI gate writes when it runs here: nothing tracked but contracts-check's clients."""
 
+_CHECK_PORTS = core.web_check_ports()
+WEB_CHECK: Final = Spec(
+    id="gate:web-e2e",
+    title="Click through the web app",
+    summary="A robot browser clicks through every page of the web app on a separate, temporary "
+    "copy of the services, then the copy stops. Your own data is never touched.",
+    what_happens=(
+        "First checks that the copy can start: its ports are free, no other browser tests run "
+        "here, and there is a browser for the tests. If not, it stops there and says why.",
+        "Starts a separate, temporary copy of the ten services with throwaway data, and fills it "
+        "with made-up demo data.",
+        "Builds the web app in a folder of its own, then a robot browser clicks through every "
+        "page against the copy and checks each one for accessibility problems.",
+        "The robot browser is Playwright's own Chromium when it is downloaded on this Mac; when "
+        "it is not, the check uses your installed Google Chrome. With neither, it stops at the "
+        "start and offers Download the test browser (about 150 MB), which asks first.",
+        "Stops the copy at the end: after the tests pass or fail, and when you cancel. Its data "
+        "goes with it.",
+        "Your own data and running app are never touched: the copy uses none of your services, "
+        "databases or ports, and the web app you have open keeps running while it builds.",
+        f"The copy listens on ports {_CHECK_PORTS[0]} to {_CHECK_PORTS[-2]} and "
+        f"{_CHECK_PORTS[-1]}. It writes only files git ignores: {core.WEB_CHECK_DIR} (the "
+        f"copy's logs and seed state), apps/web/{core.WEB_CHECK_DIST_DIR} (the build) and "
+        "apps/web/test-results.",
+    ),
+    duration="10 to 15 minutes",
+    group="checks",
+    safety="safe",
+    button="Check",
+)
+"""The web check (``gate:web-e2e``): make web-e2e on a test copy of its own (Plans.web_check)."""
+
+WEB_E2E_ALONE: Final = (
+    "On its own it runs the browser tests against your own services (ports 8001 to 8010 unless "
+    ".env moves them) and leaves every test record in your database. Use Click through the web "
+    "app, which runs them on a separate test copy."
+)
+CHECK_RUNS_WEB_E2E: Final = (
+    "This checkout's make check now runs the browser tests (make web-e2e), which would test "
+    "against your own services and data. Run all checks instead, or each check on its own."
+)
+
 
 def gate_spec(gate: core.Gate) -> Spec:
+    if gate.target == "web-e2e":
+        return WEB_CHECK
     title, summary, duration = GATE_TEXTS.get(
         gate.target, (f"Run {gate.label}", gate.note or f"make {gate.target}", "a few minutes")
     )
@@ -1651,11 +1688,12 @@ MAKE_TEXTS: Final[Mapping[str, MakeText]] = {
         "changes-data",
     ),
     "web-e2e": _m(
-        "Click through the web app",
-        "Playwright with accessibility checks.",
-        "Builds the web app and runs browser tests.",
+        "Click through the web app (on your services)",
+        "Playwright with accessibility checks, against the services of your own stack.",
+        "Builds the web app and runs the browser tests against your own services and data.",
         "5 to 10 minutes",
-        "safe",
+        "refused",
+        refused=WEB_E2E_ALONE,
         covered_by="gate:web-e2e",
     ),
     "web-screens": _m(
@@ -1975,6 +2013,12 @@ class Catalog:
         for target, description in project.make_targets.items():
             if description.strip():  # only the ## documented targets: the rest are helpers
                 specs[f"make:{target}"] = make_spec(target, description)
+        if "web-e2e" in project.checks:  # make check would test against the person's stack
+            for action_id in ("gate:check", "make:check"):
+                if action_id in specs:
+                    specs[action_id] = replace(
+                        specs[action_id], safety="refused", refused=CHECK_RUNS_WEB_E2E
+                    )
         return cls(specs)
 
     def get(self, action_id: str) -> Spec | None:

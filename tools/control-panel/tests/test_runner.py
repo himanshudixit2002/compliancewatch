@@ -96,6 +96,8 @@ def test_the_programs_get_the_panel_s_environment(tmp_path: Path) -> None:
     code = "import os; print(os.environ['CW_PIPELINE_CRAWL_ENABLED'], 'ARGS' in os.environ)"
     events = run(tmp_path, core.Plan("env", (python("env", code),)))
     assert "false False" in events.lines()
+    # make web-e2e's allowance onto Postgres-backed services is never passed on
+    assert "E2E_ALLOW_POSTGRES" not in core.program_env({"E2E_ALLOW_POSTGRES": "1"})
 
 
 def test_a_failed_step_stops_the_plan(tmp_path: Path) -> None:
@@ -269,6 +271,176 @@ def test_cancel_kills_what_of_the_group_outlives_sigterm(
     assert events.done.wait(15)
     # The step's first process died of SIGTERM; its child ignored it and gets SIGKILL
     wait_for(lambda: gone(child), seconds=10)
+
+
+CLEANS = (
+    "import sys, time\n"
+    "print('cleaning', flush=True)\n"
+    "time.sleep(1.5)\n"
+    "open(sys.argv[1], 'w').close()\n"
+    "print('cleaned', flush=True)\n"
+)
+
+
+def clean_up(marker: Path) -> core.Cmd:
+    """A clean-up step that takes a moment and leaves a marker once it has finished."""
+    return core.Cmd("clean up", (PY, "-c", CLEANS, str(marker)), always=True)
+
+
+def test_a_clean_up_step_runs_after_a_failure(tmp_path: Path) -> None:
+    marker = tmp_path / "cleaned"
+    fail, never = python("fail", "raise SystemExit(2)"), python("never", "print('never')")
+    plan = core.Plan("fails", (fail, never, clean_up(marker)))
+    events = run(tmp_path, plan)
+    end = events.end()
+    assert [(result.label, result.state) for result in end.results] == [
+        ("fail", "failed"),
+        ("never", "skipped"),
+        ("clean up", "ok"),
+    ]
+    assert marker.exists()
+    assert "never" not in events.lines()
+    assert not end.ok
+    assert not end.cancelled
+    assert events.lines()[-1] == "✗ fails failed"
+
+
+def test_a_clean_up_step_runs_after_a_cancel_and_a_cancel_does_not_stop_it(tmp_path: Path) -> None:
+    marker = tmp_path / "cleaned"
+    plan = core.Plan(
+        "long", (python("sleep", SPAWN), python("after", "print('after')"), clean_up(marker))
+    )
+    made, events = runner(tmp_path)
+    assert made.start(plan)
+    child = child_of(events)
+    assert made.cancel()
+    wait_for(lambda: "cleaning" in events.lines())
+    assert made.cancel()  # held: the clean-up finishes first
+    assert events.done.wait(15)
+    end = events.end()
+    assert end.cancelled
+    assert not end.ok
+    assert [result.state for result in end.results] == ["cancelled", "cancelled", "ok"]
+    assert marker.exists()
+    lines = events.lines()
+    assert "after" not in lines
+    assert "cleaned" in lines
+    assert "Cancel: the clean-up step finishes first, so nothing is left running" in lines
+    assert lines[-1] == "■ long cancelled"
+    wait_for(lambda: gone(child))
+    assert not made.busy
+
+
+def test_a_cancel_during_the_last_clean_up_step_changes_nothing(tmp_path: Path) -> None:
+    marker = tmp_path / "cleaned"
+    made, events = runner(tmp_path)
+    assert made.start(core.Plan("quick", (python("say", "print('hi')"), clean_up(marker))))
+    wait_for(lambda: "cleaning" in events.lines())
+    assert made.cancel()
+    assert events.done.wait(15)
+    end = events.end()
+    assert end.ok
+    assert not end.cancelled
+    assert [result.state for result in end.results] == ["ok", "ok"]
+    assert marker.exists()
+
+
+def test_a_clean_up_step_that_fails_fails_the_run_even_after_a_cancel(tmp_path: Path) -> None:
+    # what it should have stopped may still run: the run says so as a failure, not a cancel
+    broken = core.Cmd("clean up", (PY, "-c", "raise SystemExit(1)"), always=True)
+    made, events = runner(tmp_path)
+    assert made.start(core.Plan("long", (python("sleep", SPAWN), broken)))
+    wait_for(lambda: core.pid_alive(child_of(events)))
+    assert made.cancel()
+    assert events.done.wait(15)
+    end = events.end()
+    assert not end.ok
+    assert not end.cancelled
+    assert [result.state for result in end.results] == ["cancelled", "failed"]
+    assert events.lines()[-1] == "✗ long failed"
+
+
+def test_a_cancel_held_by_a_clean_up_step_applies_to_the_steps_after_it(tmp_path: Path) -> None:
+    marker = tmp_path / "cleaned"
+    plan = core.Plan("middle", (clean_up(marker), python("after", "print('after')")))
+    made, events = runner(tmp_path)
+    assert made.start(plan)
+    wait_for(lambda: "cleaning" in events.lines())
+    assert made.cancel()
+    assert events.done.wait(15)
+    end = events.end()
+    assert [result.state for result in end.results] == ["ok", "cancelled"]
+    assert end.cancelled
+    assert marker.exists()
+    assert "after" not in events.lines()
+
+
+TRAPS = (
+    "import signal, sys, time\n"
+    "def stop(signum, frame):\n"
+    "    open(sys.argv[1], 'w').write(signal.Signals(signum).name)\n"
+    "    raise SystemExit(130)\n"
+    "signal.signal(signal.SIGINT, stop)\n"
+    "signal.signal(signal.SIGTERM, stop)\n"
+    "print('ready', flush=True)\n"
+    "time.sleep(60)\n"
+)
+
+
+@pytest.mark.parametrize(("interrupt", "first"), [(True, "SIGINT"), (False, "SIGTERM")])
+@pytest.mark.parametrize("kind", ["cmd", "call"])
+def test_an_interrupt_step_gets_sigint_before_sigterm(
+    tmp_path: Path, interrupt: bool, first: str, kind: str
+) -> None:
+    # Playwright stops its web server on SIGINT; on SIGTERM it dies and leaves it running
+    marker = tmp_path / "signal"
+    argv = (PY, "-c", TRAPS, str(marker))
+    step: core.Step = (
+        core.Cmd("browser tests", argv, interrupt=interrupt)
+        if kind == "cmd"
+        else core.Call("browser tests", lambda ctx: ctx.run(argv), (argv,), interrupt=interrupt)
+    )
+    made, events = runner(tmp_path)
+    assert made.start(core.Plan("tests", (step,)))
+    wait_for(lambda: "ready" in events.lines())
+    assert made.cancel()
+    assert events.done.wait(15)
+    assert marker.read_text() == first
+    assert [result.state for result in events.end().results] == ["cancelled"]
+
+
+def test_an_interrupt_step_that_ignores_sigint_gets_sigterm_then_sigkill(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(core, "INTERRUPT_GRACE_SECONDS", 0.5)
+    monkeypatch.setattr(core, "KILL_GRACE_SECONDS", 0.5)
+    deaf = (
+        "import signal, time\n"
+        "signal.signal(signal.SIGINT, signal.SIG_IGN)\n"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        "print('ready', flush=True)\n"
+        "time.sleep(60)\n"
+    )
+    started = time.monotonic()
+    made, events = runner(tmp_path)
+    assert made.start(core.Plan("deaf", (core.Cmd("deaf", (PY, "-c", deaf), interrupt=True),)))
+    wait_for(lambda: "ready" in events.lines())
+    assert made.cancel()
+    assert events.done.wait(15)
+    assert time.monotonic() - started < 10
+    assert [result.state for result in events.end().results] == ["cancelled"]
+
+
+def test_an_interrupt_step_that_overruns_gets_sigint_first(tmp_path: Path) -> None:
+    marker = tmp_path / "signal"
+    step = core.Cmd("browser tests", (PY, "-c", TRAPS, str(marker)), timeout=1, interrupt=True)
+    events = run(tmp_path, core.Plan("tests", (step,)))
+    assert marker.read_text() == "SIGINT"
+    assert [result.state for result in events.end().results] == ["timeout"]
+    assert (
+        "error: browser tests overran its 1 s: SIGINT to its process group, SIGTERM 15 s and "
+        "SIGKILL 5 s after that if it still runs"
+    ) in events.lines()
 
 
 def test_a_step_that_overruns_its_time_is_stopped(tmp_path: Path) -> None:

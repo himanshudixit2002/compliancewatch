@@ -162,6 +162,26 @@ marked optional may be missing or `null`; unknown fields must be ignored.
 - The CI gates that rewrite tracked files are `changes-data`, not `safe`: `gate:contracts-check`
   (it regenerates the generated clients before it compares them), `gate:check` and
   `make:check` (which run it), and `gates-in-order`. Their confirm says what they rewrite.
+- `gate:web-e2e` (Click through the web app, `safe`) runs `make web-e2e` on a test copy of its
+  own, never on the services Start everything runs or the web app on `WEB_PORT`: it checks that
+  the test copy's ports (9401-9410 and 3410) are free and that no other web check or browser
+  test run works in the checkout, stops what an earlier check left (only the pids of `var/web-stack-check`
+  that still run that service on its test port), starts `make web-stack`, waits
+  (`web-stack-wait`, 180 s), seeds (`web-seed`, state in `var/web-stack-check/seed.json`) and runs
+  `make web-e2e WEB_PORT=3410`, every make step with `STORE=memory
+  WEB_STACK_DIR=var/web-stack-check SERVICE_PORT_BASE=9400`. The web app is built into
+  `apps/web/.next/web-check` (`WEB_DIST_DIR`). The first step also chooses the tests' browser,
+  from files only: a channel `CW_E2E_BROWSER_CHANNEL` already names (the environment, then
+  `.env`) as it is; else Playwright's own Chromium when the headless shell of the revision the
+  web app's `playwright-core/browsers.json` names is downloaded (`PLAYWRIGHT_BROWSERS_PATH`, else
+  `~/Library/Caches/ms-playwright`); else Google Chrome, when
+  `/Applications/Google Chrome.app` has it, with `CW_E2E_BROWSER_CHANNEL=chrome` for the
+  browser-test step; else it refuses (`no-browser`, below). Its last step, `stop the test copy`
+  (`make web-stack-down` with the same variables), is a clean-up step: it runs after a failure
+  or a cancel too (section 4, Runs). `make:web-e2e` on its own is `refused`, with
+  `fix_action: "gate:web-e2e"`; and should the Makefile's `CHECKS` ever list `web-e2e`,
+  `gate:check` and `make:check` are `refused` too. No gate of `gates-in-order` reaches a running
+  service.
 - `enabled: false` comes with a plain `reason` ("Docker is not running.") and, when an action
   fixes it, `fix_action` (`"docker-start"`). What an action needs (Docker, the running product,
   a backup to choose, the `.env` file) is checked here, so a `safe` action that cannot run yet
@@ -270,6 +290,7 @@ gave one; `confirm` is accepted as another name for it).
     { "label": "stop the UI-only stack", "state": "running", "seconds": 11.2 },
     { "label": "stop Docker (colima stop)", "state": "queued", "seconds": 0 }
   ],
+  "cleanup": [],
   "error": null,
   "lines": [{ "text": "▸ stop the web app", "tag": "step" }]
 }
@@ -277,15 +298,29 @@ gave one; `confirm` is accepted as another name for it).
 
 - `state`: `running` | `ok` | `failed` | `cancelled`. Step `state`: `queued` | `running` | `ok`
   | `failed` | `timeout` | `cancelled` | `skipped`.
+- `cleanup`: the labels of the run's clean-up steps (`["stop the test copy"]` for
+  `gate:web-e2e`, else empty). A clean-up step runs whatever happened before it: after a failed
+  step (the steps between are `skipped`) and after a cancel (they are `cancelled`); its own state
+  is `ok`, `failed` or `timeout`. A cancel asked while a clean-up step runs does not stop it: the
+  run notes it and applies it to the steps after it; asked during the last clean-up step, it
+  changes nothing. A run is `cancelled` when a cancel stopped a step or kept one from running,
+  unless a clean-up step failed: then it is `failed`, since what that step should have stopped
+  may still run.
 - `tag` of a line: `step` | `err` | `ok` | `muted` | `null`.
 - `error` (on `failed`): `{"code", "message", "detail", "fix", "action"}` as in section 3, read
   from the run's own output, matched in this order: `docker-down` (`action: "docker-start"`),
   `product-down` (`action: "product-start"`), `databases-down` (`action: "databases-start"`),
   `extraction-off` (`action: "extract-backlog-count"`), `changed` (a stop found processes that
-  were not in its question: ask again), `port-in-use`, `no-target`, `refused` (only the runner's
-  own `error: ... refused: ...` lines, never a program's "connection refused"), `missing-tool`;
-  else `timeout` or `failed`. When `colima stop` overran its two minutes, `message` is "Docker
-  did not stop in time" and `action` is `"force-stop-docker"`.
+  were not in its question: ask again), `port-in-use` (also the web check's own `error: port N
+  is in use` lines), `busy` (the web check found another web check or browser test run in the
+  checkout),
+  `no-browser` (the web check found neither Playwright's Chromium nor Google Chrome;
+  `action: "make:web-e2e-install"`, the download, which asks first), `no-target`, `refused` (only
+  the runner's own `error: ... refused: ...` lines, never a program's "connection refused"),
+  `missing-tool` (`action: "make:ts-install"` when the web app's Playwright is not installed,
+  else `"doctor"`); else `timeout` or `failed`. When `colima
+  stop` overran its two minutes, `message` is "Docker did not stop in time" and `action` is
+  `"force-stop-docker"`.
 - `GET /api/runs?limit=20` (1 to 50) → `{"runs": [Run without "lines"]}`, newest first, this
   launch only. A run is `running` only while its runner is at work: one whose runner went idle
   without its end (a defect) is finished as `failed` two seconds later, with `error.code`
@@ -294,8 +329,12 @@ gave one; `confirm` is accepted as another name for it).
 - `GET /api/runs/{run_id}` → the Run with its last 2,000 `lines`.
 - `POST /api/runs/{run_id}/cancel` → `{"ok": true}`: SIGTERM to the running step's process
   group, SIGKILL five seconds later to what is left. Every step starts its program in a new
-  session of its own, so that group holds only what the step started. `409 not-running` when it
-  has finished.
+  session of its own, so that group holds only what the step started. The web check's browser
+  tests get SIGINT first, SIGTERM 15 s later and SIGKILL 5 s after that: Playwright stops the
+  web app it started on SIGINT, and leaves it running on SIGTERM (the clean-up step stops such a
+  web app too: this checkout's `next start` on port 3410, started since the browser tests
+  began). A running clean-up step is not stopped (above). `409 not-running` when it has
+  finished.
 
 ## 5. The event stream: `GET /api/events`
 
@@ -313,7 +352,7 @@ that id is too old, sends `hello` with `"resync": true` and the UI fetches every
 | `kafka` | the `/api/kafka` body, when a read finishes |
 | `features` | `{}`: a features read finished; fetch `/api/features` |
 | `github` | `{}`: a GitHub read finished; fetch `/api/github` |
-| `run.started` | `{"run_id", "action_id", "title", "kind", "steps": ["..."], "started_at", "params"}` |
+| `run.started` | `{"run_id", "action_id", "title", "kind", "steps": ["..."], "cleanup": ["..."], "started_at", "params"}` |
 | `run.step` | `{"run_id", "index", "label", "state", "seconds"}` |
 | `run.output` | `{"run_id", "lines": [{"text", "tag"}]}`, batched (at most every 100 ms, 200 lines) |
 | `run.finished` | `{"run_id", "action_id", "state", "ok", "cancelled", "seconds", "finished_at", "steps": [...], "error": Error or null}` |
@@ -422,15 +461,17 @@ the technical reason). Ids: `review-queue`, `pipeline-tasks`, `dead-outbox`, `ru
 ## 8. What the helper will never do
 
 The safety rules in `panel_core`, re-checked here: no shell; nothing that contacts the regulator
-sites (backfill, label index, a live crawl); no `--destructive` and no rollback step;
-`product-seed` only without arguments and while the product answers; no `ARGS`, `MAKEFLAGS` or
-similar passed on; the crawl forced off; no stop that reaches a process outside the checkout, a
-control window, or what an editor, Claude Code or another agent runs (language servers and
-editor helpers are never the checkout's processes); every stop previews the pids it reaches and
-signals only those, one by one, never a whole process group it did not start; no model call
-without a question. Make gets an `ARGS` only from a fixed allowlist keyed by action id
-(`extract-backlog-count`: `--dry-run`; `seed-check`: `--check`; `product-check`: `--step` and one
-of the checkout's steps), never from what a person types. It never writes the token, never
+sites (backfill, label index, a live crawl); no `--destructive` and no rollback step; `product-seed`
+only without arguments and while the product answers; no `ARGS`, `MAKEFLAGS`, `E2E_ALLOW_POSTGRES`
+or similar passed on; the crawl forced off; no stop that reaches a process outside the checkout, a
+control window, or what an editor, Claude Code or another agent runs (language servers and editor
+helpers are never the checkout's processes); every stop previews the pids it reaches and signals
+only those, one by one, never a whole process group it did not start; no model call without a
+question; no browser tests against the person's own services, web app or data (they run on the web
+check's test copy, whose services get no database, Temporal, Kafka or Redis of the person's, keep
+uploads in memory and use the fake model). Make gets an `ARGS` only from a fixed allowlist keyed by
+action id (`extract-backlog-count`: `--dry-run`; `seed-check`: `--check`; `product-check`: `--step`
+and one of the checkout's steps), never from what a person types. It never writes the token, never
 fetches, and never runs a git command that writes.
 
 ## 9. `--demo`
@@ -511,7 +552,8 @@ Answer: `{"ok": true, "world": {... the whole world, "fail_next", "speed"}, "pre
 `proc`), `load-demo-data`, `demo`, `migrate` (param `service`, optional), `migrations-check`,
 `migrations-catalog`, `data-quality`, `seed-check`, `backup`, `restore` (params `dump` and
 `backup_first`, boolean, default true), `reset` (param `backup_first`, boolean, default true),
-`psql`, `gates-in-order`, `gate:<target>` (for example `gate:check`, `gate:lint`),
+`psql`, `gates-in-order`, `gate:<target>` (for example `gate:check`, `gate:lint`, and
+`gate:web-e2e`, the web check on its test copy),
 `crawl-report`, `extract-backlog-count` and `extract-backlog` (both only where the checkout's
 Makefile has `extract-backlog`), `flags-check`, `doctor`, `dev-observability`, `dev-llm`,
 `dev-flags`, `dev-ps`,
@@ -521,8 +563,8 @@ Makefile has `extract-backlog`), `flags-check`, `doctor`, `dev-observability`, `
 
 Every `##`-documented Makefile target not covered above is in the catalog as `make:<target>`,
 classified; targets that contact the regulator sites, run forever in the foreground, need a
-terminal or arguments (`replay`, `golden-export`), or change the app or the git hooks are
-`refused` with the reason.
+terminal or arguments (`replay`, `golden-export`), change the app or the git hooks, or would
+test against the person's own stack (`web-e2e`) are `refused` with the reason.
 
 ## Changes from API-REQUESTS.md
 

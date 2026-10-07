@@ -30,6 +30,7 @@ import re
 import select
 import shlex
 import signal
+import socket
 import subprocess
 import threading
 import time
@@ -73,6 +74,9 @@ DROPPED_VARIABLES: Final = (
     "FOLLOW",
     "FILE",
     "WEB",
+    # make web-e2e's allowance onto services backed by Postgres: the web check's test copy runs
+    # on memory stores, and nothing here ever needs it
+    "E2E_ALLOW_POSTGRES",
 )
 """Never passed on to a program the panel runs."""
 
@@ -198,6 +202,97 @@ PRODUCT_WEB_PORT: Final = 3400
 it at 127.0.0.1 so the two sessions keep their own cookies (docs/onboarding/product.md)."""
 PRODUCT_E2E_PORT: Final = 3401
 """make product-e2e's next start: 3400 is the product's own web app when the panel started it."""
+
+# The web check (Click through the web app) runs make web-e2e on a test copy of its own: the
+# services on ports nothing else uses, memory stores, its own folder for pid files, logs and seed
+# state, and its own build folder. Never the services Start everything runs on 8001-8010 (the
+# shared development database) or the next dev on 3000.
+WEB_CHECK_DIR: Final = "var/web-stack-check"
+"""The test copy's WEB_STACK_DIR: its pid files, logs and seed state. Never var/web-stack, whose
+pid files name the services Start everything runs."""
+WEB_CHECK_PORT_BASE: Final = 9400
+"""The test copy's SERVICE_PORT_BASE: its services listen on 9401-9410, clear of the services
+Start everything runs (8001-8010), the product (8000, 8080, 8081) and a build agent's second
+clone (9201-9210)."""
+WEB_CHECK_WEB_PORT: Final = 3410
+"""The test copy's next start: clear of next dev (3000), the product's web app (3400), make
+product-e2e's (3401) and a second clone's (3200, docs/onboarding/local-dev.md; a build agent's
+3217). Playwright reuses whatever answers on its port, so the check refuses to start while
+anything does."""
+WEB_CHECK_DIST_DIR: Final = ".next/web-check"
+"""Where the check builds the web app (WEB_DIST_DIR, apps/web/next.config.ts). next build first
+empties its own folder, all but cache, dev, lock and trace: a build into .next would delete
+make product's .next/product under its running next dev. next dev builds into .next/dev, which
+no build touches."""
+WEB_CHECK_SEED: Final = f"{WEB_CHECK_DIR}/seed.json"
+"""The test copy's seed state (the seed's and the specs' CW_WEB_SEED_STATE_PATH), never
+var/seed/last.json, which the web app's sign-in offers for the services Start everything runs."""
+WEB_CHECK_WAIT_SECONDS: Final = 180
+NOWHERE: Final = "127.0.0.1:1"
+"""An address nothing listens on: a connection to it is refused at once."""
+WEB_CHECK_VARIABLES: Final = (
+    "STORE=memory",
+    f"WEB_STACK_DIR={WEB_CHECK_DIR}",
+    f"SERVICE_PORT_BASE={WEB_CHECK_PORT_BASE}",
+)
+"""What every make step of the web check is given. make passes command-line variables on to its
+recipes in their environment, where they win over .env (the recipes source .env, then give the
+environment back its own values), and over an environment's own STORE (STORE ?= memory)."""
+
+
+def web_check_ports() -> tuple[int, ...]:
+    """Every port of the web check's test copy: its ten services, then its web app."""
+    services = (WEB_CHECK_PORT_BASE + index for index in range(1, len(SERVICES) + 1))
+    return (*services, WEB_CHECK_WEB_PORT)
+
+
+def web_check_url(service: str) -> str:
+    return f"http://localhost:{WEB_CHECK_PORT_BASE + SERVICES.index(service) + 1}"
+
+
+def web_check_stack_env() -> tuple[tuple[str, str], ...]:
+    """What the test copy's services get, so they reach nothing of the person's, as on CI, which
+    has no .env and no container. The services read .env themselves too (py_common's settings),
+    under the environment and skipping an empty value, so each of these is set, never empty.
+
+    No database (memory stores need none); no Temporal, so an upload or a retry starts no ingest
+    on the person's Temporal for its worker to run against their database; no Kafka and no
+    Redis; uploaded files kept in memory, never in var/raw; no telemetry to the person's
+    collector (an endpoint of spaces is read as none); the fake model, never a paid one; no
+    WhatsApp or email, and no sink file; the services they call on the test copy's own ports, and
+    the links of its messages at its own web app. make web-stack gives every service the other
+    services' addresses on its base already; these stay for a Makefile from before it did."""
+    identity = web_check_url("identity")
+    return (
+        ("CW_DATABASE_URL", f"postgresql+psycopg://cw:cw@{NOWHERE}/compliancewatch"),
+        ("CW_TEMPORAL_ADDRESS", NOWHERE),
+        ("CW_KAFKA_BOOTSTRAP", NOWHERE),
+        ("CW_REDIS_URL", f"redis://{NOWHERE}/0"),
+        ("CW_PIPELINE_RAW_STORE", "memory"),
+        ("CW_OTEL_ENDPOINT", " "),
+        ("CW_LLM_PROVIDER", "fake"),
+        ("CW_WHATSAPP_ENABLED", "false"),
+        ("CW_EMAIL_ENABLED", "false"),
+        ("CW_NOTIFICATION_CHANNELS", "real"),
+        ("CW_IDENTITY_URL", identity),
+        ("CW_AUTH_JWKS_URL", f"{identity}/v1/identity/.well-known/jwks.json"),
+        ("CW_EVAL_GATEWAY_URL", web_check_url("llm-gateway")),
+        ("CW_WEB_BASE_URL", f"http://localhost:{WEB_CHECK_WEB_PORT}"),
+    )
+
+
+def web_check_web_env() -> tuple[tuple[str, str], ...]:
+    """What the seed and the browser tests get: every service address on the test copy (they win
+    over apps/web/.env.local, which names the person's services), the test copy's seed state
+    (relative to apps/web, as the seed and the specs read it) and the check's own build folder."""
+    urls = tuple(
+        (f"CW_WEB_{name.upper().replace('-', '_')}_URL", web_check_url(name)) for name in SERVICES
+    )
+    return (
+        *urls,
+        ("CW_WEB_SEED_STATE_PATH", f"../../{WEB_CHECK_SEED}"),
+        ("WEB_DIST_DIR", WEB_CHECK_DIST_DIR),
+    )
 
 
 @dataclass(frozen=True)
@@ -1937,6 +2032,9 @@ def has_outbox(repo: Path, service: str) -> bool:
 type LogFn = Callable[[str, str | None], None]
 
 KILL_GRACE_SECONDS: Final = 5.0
+INTERRUPT_GRACE_SECONDS: Final = 15.0
+"""How long a step stopped with SIGINT (``interrupt``) gets to wind down, Playwright closing its
+browsers and its web server, before SIGTERM."""
 
 
 class BackgroundManager:
@@ -2652,12 +2750,20 @@ class StepContext(Protocol):
 @dataclass(frozen=True)
 class Cmd:
     """A program run in the foreground, its output streamed into the panel. Past ``timeout``
-    seconds the runner stops it and marks the step timed out."""
+    seconds the runner stops it and marks the step timed out.
+
+    ``always``: a clean-up step. It runs even after an earlier step failed or the run was
+    cancelled, and a cancel does not stop it (its own time limit does). ``interrupt``: Cancel and
+    the time limit stop it with SIGINT first (a Playwright run closes its browsers and its web
+    server on SIGINT, and leaves the web server running on SIGTERM), SIGTERM
+    :data:`INTERRUPT_GRACE_SECONDS` later, SIGKILL :data:`KILL_GRACE_SECONDS` after that."""
 
     label: str
     argv: tuple[str, ...]
     env: tuple[tuple[str, str], ...] = ()
     timeout: float | None = None
+    always: bool = False
+    interrupt: bool = False
 
 
 @dataclass(frozen=True)
@@ -2665,13 +2771,16 @@ class Call:
     """A step the panel performs itself. ``commands`` is every program it may run, streamed or
     captured, and ``env`` what it adds to their environment: the plan checks read them, and the
     runner refuses any other program the step tries to run. ``timeout`` bounds the whole step:
-    its programs get what is left of it, and its waits end when it runs out."""
+    its programs get what is left of it, and its waits end when it runs out. ``always`` and
+    ``interrupt`` as for :class:`Cmd` (``interrupt`` for the programs it runs)."""
 
     label: str
     fn: Callable[[StepContext], bool]
     commands: tuple[tuple[str, ...], ...] = ()
     env: tuple[tuple[str, str], ...] = ()
     timeout: float | None = None
+    always: bool = False
+    interrupt: bool = False
 
 
 type Step = Cmd | Call
@@ -2758,7 +2867,7 @@ GATES: Final = (
     _gate("sast", note="Semgrep in Docker; its packs need the network"),
     _gate("deps-scan", note="Trivy in Docker"),
     _gate("web-screens-check", note="docs/web/screens.md"),
-    _gate("web-e2e", note="after make web-stack, web-stack-wait and web-seed"),
+    _gate("web-e2e", note="on a test copy of its own (Plans.web_check), never on its own"),
     _gate("ci-lint", note="actionlint and pre-commit"),
 )
 
@@ -2792,17 +2901,19 @@ CI_ORDER: Final = (
     "deps-scan",
 )
 """The order "run the CI gates in order" follows (.github/workflows/ci.yml's jobs). Not in it:
-make check itself (its gates run one by one), web-e2e (it needs the seeded UI-only stack) and the
-dev-stack job (product-check --destructive needs a database made for the run)."""
+make check itself (its gates run one by one), web-e2e (it needs a seeded stack: Click through the
+web app runs it on a test copy of its own) and the dev-stack job (product-check --destructive
+needs a database made for the run). No gate in it reaches a running service."""
 
 
 def ci_sequence(
     checks: Sequence[str], known_targets: Collection[str] | None = None
 ) -> tuple[Gate, ...]:
     """CI_ORDER, with any gate of make check that it lacks after make check's own gates, and
-    without a gate the checkout's Makefile no longer has (with ``known_targets``)."""
+    without a gate the checkout's Makefile no longer has (with ``known_targets``). Never
+    web-e2e, even when make check lists it: on its own it tests against the person's stack."""
     known = {gate.target: gate for gate in GATES}
-    order = list(CI_ORDER)
+    order = [name for name in CI_ORDER if name != "web-e2e"]
     at = order.index("openapi-ts-check") + 1
     for name in checks:
         if name not in order and name not in ("check", "web-e2e"):
@@ -2811,6 +2922,279 @@ def ci_sequence(
     if known_targets is not None:
         order = [name for name in order if name in known_targets]
     return tuple(known.get(name) or _gate(name) for name in order)
+
+
+# ---- the web check's test copy ------------------------------------------------------------------
+
+WEB_CHECK_START_SECONDS: Final = 120.0
+WEB_CHECK_SEED_SECONDS: Final = 300.0
+WEB_CHECK_E2E_SECONDS: Final = 1800.0
+"""The build and the browser tests together."""
+WEB_CHECK_STOP_SECONDS: Final = 180.0
+"""Stopping what an earlier check left, or the test copy at the end: a process scan, make
+web-stack-down (5 s at most a service) and the web app's grace."""
+WEB_CHECK_STARTED_SLACK: Final = 2.0
+"""How much earlier than the browser tests a web app may look started (ps counts whole seconds)
+and still be theirs."""
+_PLAYWRIGHT_RUN: Final = re.compile(r"playwright\S*\s+test(?:\s|$)")
+
+
+def port_answers(port: int, timeout: float = 0.3) -> bool:
+    """Something accepts connections on the port at 127.0.0.1 or ::1: localhost is both, and the
+    services' health checks and Playwright may reach either."""
+    for host in ("127.0.0.1", "::1"):
+        try:
+            with socket.create_connection((host, port), timeout=timeout):
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def web_check_pid_files(repo: Path, commands: Mapping[int, str]) -> list[tuple[Path, int, str]]:
+    """The pid files of the test copy's folder that make web-stack-down must not act on: each
+    names a running process (``commands``, every command line from ps) that is not the test
+    copy's service of that name, its uvicorn on the test copy's own port. Such a pid was used
+    again since the test copy wrote it. A pid file whose pid no longer runs is not listed: make
+    only removes its file."""
+    foreign: list[tuple[Path, int, str]] = []
+    with contextlib.suppress(OSError):
+        for path in sorted((repo / WEB_CHECK_DIR).glob("*.pid")):
+            pid = read_pid(path)
+            if pid is None or pid not in commands:
+                continue
+            command, name = commands[pid], path.stem
+            if name in SERVICES:
+                port = web_check_ports()[SERVICES.index(name)]
+                app = f"uvicorn {re.escape(service_package(name))}.main:app"
+                if re.search(app, command) and re.search(rf"--port {port}(?:\s|$)", command):
+                    continue
+            foreign.append((path, pid, command))
+    return foreign
+
+
+def web_check_runs(snapshot: ProcessSnapshot) -> list[int]:
+    """The make steps of another web check going on in this checkout now (another control
+    window's, or one run by hand): make naming the test copy's folder. Asked before this check
+    runs anything, so none of them is its own; the check must not stop that one's test copy."""
+    folder = f"WEB_STACK_DIR={WEB_CHECK_DIR}"
+    return sorted(
+        pid
+        for pid in snapshot.project | snapshot.guarded
+        if (proc := snapshot.procs.get(pid)) is not None
+        and _make_targets(proc.command) is not None
+        and folder in proc.command.split()
+    )
+
+
+def browser_test_runs(snapshot: ProcessSnapshot, repo: Path) -> list[int]:
+    """The Playwright runs of the web app going on in this checkout (working in apps/web), the
+    person's or another session's: every run shares apps/web/test-results, which a new run
+    empties as it starts."""
+    web = str(repo / "apps" / "web")
+    found = []
+    for pid in sorted(snapshot.project | snapshot.guarded):
+        proc = snapshot.procs.get(pid)
+        cwd = snapshot.names.get(pid, ("", ""))[1]
+        if proc is not None and _PLAYWRIGHT_RUN.search(proc.command) and _under(cwd, web):
+            found.append(pid)
+    return found
+
+
+def web_check_web_app(snapshot: ProcessSnapshot, since: float) -> tuple[StopTarget | None, str]:
+    """What a stop of the web app the browser tests left on the test copy's web port reaches:
+    this checkout's next start (or next-server) listening there, with its children, every one of
+    them started since ``since``, when the browser tests began. Anything else listening there is
+    left alone, and the second value says so."""
+    port = WEB_CHECK_WEB_PORT
+    listener = snapshot.listener_on(port)
+    if listener is None:
+        return None, ""
+    proc = snapshot.procs.get(listener.pid)
+    if (
+        proc is None
+        or listener.pid not in snapshot.project
+        or not any(marker in proc.command for marker in WEB_APP_MARKERS)
+    ):
+        held = f"port {port} is held by pid {listener.pid}"
+        return None, f"{held}, not the check's web app; left alone"
+    target = tree_target(web_app_root(listener.pid, snapshot), snapshot)
+    if target.refused:
+        return None, f"port {port}: pid {listener.pid} stays: {target.refused}"
+    earliest = since - WEB_CHECK_STARTED_SLACK
+    if any(
+        snapshot.taken_at - snapshot.procs[pid].elapsed < earliest
+        for pid in target.pids
+        if pid in snapshot.procs
+    ):
+        return None, (
+            f"port {port} is held by pid {listener.pid}, which started before the browser tests; "
+            "left alone"
+        )
+    return target, ""
+
+
+# ---- the browser of the web check's tests --------------------------------------------------------
+
+BROWSER_CHANNEL: Final = "CW_E2E_BROWSER_CHANNEL"
+"""The installed browser apps/web/playwright.config.ts drives instead of Playwright's own
+Chromium, by its Playwright channel (chrome: Google Chrome)."""
+CHROME_PROGRAMS: Final[Mapping[str, str]] = {
+    "darwin": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "linux": "/opt/google/chrome/chrome",
+}
+"""Where Playwright looks for Google Chrome, its channel chrome (playwright-core's registry)."""
+_HEADLESS_SHELLS: Final[Mapping[str, str]] = {
+    "mac-arm64": "chrome-headless-shell-mac-arm64/chrome-headless-shell",
+    "mac-x64": "chrome-headless-shell-mac-x64/chrome-headless-shell",
+    "linux-arm64": "chrome-headless-shell-linux-arm64/chrome-headless-shell",
+    "linux-x64": "chrome-headless-shell-linux64/chrome-headless-shell",
+}
+"""The program of Playwright's headless Chromium in its download folder, by host (playwright-core's
+registry); it is what Playwright launches for a headless chromium project with no channel."""
+
+
+@dataclass(frozen=True)
+class E2EBrowser:
+    """The browser the web check's tests drive: ``channel`` is what CW_E2E_BROWSER_CHANNEL gets
+    ("" for Playwright's own Chromium), None when there is none; ``line`` says which in plain
+    words, an ``error:`` line when there is none."""
+
+    channel: str | None
+    line: str
+
+
+def node_package(name: str, start: Path) -> Path | None:
+    """Where Node finds package ``name`` from the folder ``start``: in its node_modules, then in
+    each parent's, with links resolved (pnpm links a package's dependencies beside it)."""
+    for folder in (start, *start.parents):
+        candidate = (folder if folder.name == "node_modules" else folder / "node_modules") / name
+        if (candidate / "package.json").is_file():
+            return candidate.resolve()
+    return None
+
+
+def playwright_core(repo: Path) -> Path | None:
+    """The playwright-core the web app's Playwright runs on: apps/web's @playwright/test, its
+    playwright, and that one's playwright-core."""
+    found: Path | None = repo / "apps" / "web"
+    for name in ("@playwright/test", "playwright", "playwright-core"):
+        found = node_package(name, found) if found is not None else None
+    return found
+
+
+def playwright_browsers(
+    core_dir: Path, settings: Mapping[str, str], home: Path, system: str, cwd: Path
+) -> Path:
+    """The folder Playwright keeps its browsers in: PLAYWRIGHT_BROWSERS_PATH (0: inside
+    playwright-core), else the user's cache: ~/Library/Caches/ms-playwright on a Mac."""
+    configured = settings.get("PLAYWRIGHT_BROWSERS_PATH", "").strip()
+    if configured == "0":
+        return core_dir / ".local-browsers"
+    if configured:
+        return cwd / configured  # an absolute path stays itself
+    if system == "darwin":
+        return home / "Library" / "Caches" / "ms-playwright"
+    return Path(settings.get("XDG_CACHE_HOME") or home / ".cache") / "ms-playwright"
+
+
+def playwright_chromium(core_dir: Path, browsers: Path, host: str) -> bool | None:
+    """Whether the Chromium Playwright launches headless is downloaded for this playwright-core:
+    the headless shell of the revision its browsers.json names (its program, or, on a host this
+    does not know, the download's INSTALLATION_COMPLETE marker); None when browsers.json does not
+    say. Read from files only: no browser starts, nothing is fetched."""
+    try:
+        listing = json.loads((core_dir / "browsers.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    rows = listing.get("browsers") if isinstance(listing, dict) else None
+    entries = {str(row.get("name")): row for row in rows or [] if isinstance(row, dict)}
+    name = "chromium-headless-shell" if "chromium-headless-shell" in entries else "chromium"
+    entry = entries.get(name)
+    if entry is None:
+        return None
+    overrides = entry.get("revisionOverrides")
+    revisions = {str(entry.get("revision") or "")}
+    if isinstance(overrides, dict):
+        revisions |= {str(value) for value in overrides.values()}
+    program = _HEADLESS_SHELLS.get(host) if name == "chromium-headless-shell" else None
+    for revision in sorted(revision for revision in revisions if revision):
+        folder = browsers / f"{name.replace('-', '_')}-{revision}"
+        found = folder / program if program else folder / "INSTALLATION_COMPLETE"
+        if found.is_file():
+            return True
+    return False
+
+
+def e2e_browser(
+    repo: Path,
+    settings: Mapping[str, str],
+    *,
+    home: Path | None = None,
+    system: str | None = None,
+    machine: str | None = None,
+    chrome: str | None = None,
+) -> E2EBrowser:
+    """The browser the web check's tests drive. A channel the settings already name (the
+    environment, then .env, as the recipes read them) as it is; else Playwright's own Chromium
+    when it is downloaded for the checkout's Playwright, as on CI; else Google Chrome when it is
+    installed (CW_E2E_BROWSER_CHANNEL=chrome); else none, and the check stops before it starts
+    anything. ``home``, ``system``, ``machine`` and ``chrome`` stand in for this Mac in tests."""
+    named = settings.get(BROWSER_CHANNEL, "").strip()
+    if named:
+        line = f"the browser tests use the browser {BROWSER_CHANNEL} names: {named}"
+        return E2EBrowser(named, line)
+    core_dir = playwright_core(repo)
+    if core_dir is None:
+        return E2EBrowser(
+            None,
+            "error: the web app's Playwright is not installed (apps/web/node_modules): install "
+            "the JavaScript packages, then try again",
+        )
+    system = system or os.uname().sysname.lower()
+    machine = (machine or os.uname().machine).lower()
+    arm = machine in ("arm64", "aarch64")
+    host = {"darwin": "mac", "linux": "linux"}.get(system, "")
+    host = f"{host}-{'arm64' if arm else 'x64'}" if host else ""
+    browsers = playwright_browsers(core_dir, settings, home or Path.home(), system, repo)
+    downloaded = playwright_chromium(core_dir, browsers, host)
+    if downloaded is None:
+        return E2EBrowser(
+            "", "this app cannot tell whether Playwright's own Chromium is here; the tests try it"
+        )
+    if downloaded:
+        return E2EBrowser("", "the browser tests use Playwright's own Chromium, downloaded here")
+    if Path(chrome if chrome is not None else CHROME_PROGRAMS.get(system, "")).is_file():
+        return E2EBrowser(
+            "chrome",
+            "Playwright's own Chromium is not downloaded here, so the browser tests use your "
+            "installed Google Chrome",
+        )
+    return E2EBrowser(
+        None,
+        "error: there is no browser for the tests: Playwright's own Chromium is not downloaded "
+        "here and Google Chrome is not installed. Download the test browser (make "
+        "web-e2e-install, about 150 MB) or install Google Chrome, then try again",
+    )
+
+
+@dataclass
+class WebCheckRun:
+    """What one run of the web check learns as it goes: the browser channel its first step chose
+    for the tests, and when the tests began."""
+
+    channel: str = ""
+    began: float | None = None
+
+
+def describe_listener(port: int, snapshot: ProcessSnapshot, repo: Path) -> str:
+    """Who listens on a port, for a line naming it: its pid and program, when the scan saw it."""
+    listener = snapshot.listener_on(port)
+    if listener is None:
+        return "a program this app cannot see"
+    proc = snapshot.procs.get(listener.pid)
+    command = short_command(proc.command if proc else listener.command, repo, 70)
+    return f"pid {listener.pid}, {command}"
 
 
 class Plans:
@@ -3265,7 +3649,187 @@ class Plans:
 
     # quality gates
     def gate(self, gate: Gate) -> Plan:
+        if gate.target == "web-e2e":
+            return self.web_check()  # never on its own: it would test against the person's stack
         return Plan(gate.label, (Cmd(gate.label, gate.argv, gate.env),), gates=True)
+
+    # the web check: the browser tests on a test copy of their own
+    @staticmethod
+    def web_check_down() -> tuple[str, ...]:
+        return ("make", "web-stack-down", *WEB_CHECK_VARIABLES)
+
+    @staticmethod
+    def web_check_e2e() -> tuple[str, ...]:
+        return ("make", "web-e2e", *WEB_CHECK_VARIABLES, f"WEB_PORT={WEB_CHECK_WEB_PORT}")
+
+    def web_check(self) -> Plan:
+        """Click through the web app: make web-e2e on a test copy of its own, never on the
+        services Start everything runs (their data is the shared development database) or the
+        person's next dev. The copy runs on memory stores and its own ports, folder, seed state
+        and build folder, and stops at the end, after a failure or a cancel too. Every make step
+        is given the same STORE=memory, WEB_STACK_DIR and SERVICE_PORT_BASE. The tests drive
+        Playwright's own Chromium, or Google Chrome when that is not downloaded (e2e_browser)."""
+        run = WebCheckRun()
+        variables = WEB_CHECK_VARIABLES
+        return Plan(
+            "click through the web app",
+            (
+                Call(
+                    "check that the test copy can start",
+                    lambda ctx: self._web_check_ready(ctx, run),
+                    (*scan_commands(), self.web_check_down()),
+                    timeout=WEB_CHECK_STOP_SECONDS,
+                ),
+                make(
+                    "web-stack",
+                    *variables,
+                    label="start a separate test copy of the services",
+                    env=web_check_stack_env(),
+                    timeout=WEB_CHECK_START_SECONDS,
+                ),
+                make(
+                    "web-stack-wait",
+                    *variables,
+                    f"WEB_STACK_WAIT_SECONDS={WEB_CHECK_WAIT_SECONDS}",
+                    label="wait until the test copy answers",
+                    timeout=WEB_CHECK_WAIT_SECONDS + 60,
+                ),
+                make(
+                    "web-seed",
+                    *variables,
+                    label="add made-up demo data to the test copy",
+                    env=web_check_web_env(),
+                    timeout=WEB_CHECK_SEED_SECONDS,
+                ),
+                Call(
+                    "build the web app and click through it in a robot browser",
+                    lambda ctx: self._web_check_click(ctx, run),
+                    (self.web_check_e2e(),),
+                    web_check_web_env(),
+                    timeout=WEB_CHECK_E2E_SECONDS,
+                    interrupt=True,
+                ),
+                Call(
+                    "stop the test copy",
+                    lambda ctx: self._web_check_stop(ctx, run),
+                    (*scan_commands(), self.web_check_down()),
+                    timeout=WEB_CHECK_STOP_SECONDS,
+                    always=True,
+                ),
+            ),
+            gates=True,
+        )
+
+    def _clear_web_check(self, ctx: StepContext) -> bool:
+        """make web-stack-down for the test copy: it stops what the pid files of the test copy's
+        folder name, once each file whose pid runs another program now is set aside."""
+        repo = self.project.repo
+        if not any((repo / WEB_CHECK_DIR).glob("*.pid")):
+            ctx.log("no test copy is running")
+            return True
+        commands = process_commands(self.project.env, ctx.capture)
+        if not commands:
+            ctx.log(
+                "error: the processes could not be read, so the test copy's are left alone; "
+                "stop them in Processes",
+                "err",
+            )
+            return False
+        for path, pid, command in web_check_pid_files(repo, commands):
+            ctx.log(
+                f"left alone: {path.relative_to(repo)} names pid {pid}, which runs another "
+                f"program now: {short_command(command, repo, 70)}"
+            )
+            path.unlink(missing_ok=True)
+        return ctx.run(self.web_check_down())
+
+    def _web_check_ready(self, ctx: StepContext, run: WebCheckRun) -> bool:
+        """The test copy can start: no other web check runs (its test copy is not this one's to
+        stop) and no other browser test run of this checkout (they share apps/web/test-results),
+        there is a browser for the tests (chosen into ``run``), what an earlier check left is
+        stopped (only processes its pid files name that are still its own), and nothing answers
+        on the test copy's ports."""
+        repo = self.project.repo
+        snapshot = probe_processes(repo, self.project.env, self.manager.registry, ctx.capture)
+        if runs := web_check_runs(snapshot):
+            command = short_command(snapshot.procs[runs[0]].command, repo, 70)
+            ctx.log(
+                f"error: the web check is already running in this checkout: pid {runs[0]}, "
+                f"{command}. Its test copy is left alone: wait for it to finish, then try again.",
+                "err",
+            )
+            return False
+        if runs := browser_test_runs(snapshot, repo):
+            command = short_command(snapshot.procs[runs[0]].command, repo, 70)
+            ctx.log(
+                f"error: browser tests are already running in this checkout: pid {runs[0]}, "
+                f"{command}. They share apps/web/test-results with this check, which empties it "
+                "as it starts: wait for them to finish, then try again.",
+                "err",
+            )
+            return False
+        settings = {**read_env_file(repo / ".env"), **self.project.env}
+        browser = e2e_browser(repo, settings)
+        if browser.channel is None:
+            ctx.log(browser.line, "err")
+            return False
+        ctx.log(browser.line)
+        run.channel = browser.channel
+        if not self._clear_web_check(ctx):
+            return False
+        ports = web_check_ports()
+        busy = [port for port in ports if port_answers(port)]
+        for port in busy:
+            who = describe_listener(port, snapshot, repo)
+            ctx.log(f"error: port {port} is in use: {who}", "err")
+        services = f"{ports[0]} to {ports[-2]} and {ports[-1]}"
+        if busy:
+            ctx.log(
+                f"error: the test copy needs ports {services} free, and never uses yours; stop "
+                "what holds them, then try again",
+                "err",
+            )
+            return False
+        ctx.log(f"ports {services} are free", "ok")
+        return True
+
+    def _web_check_click(self, ctx: StepContext, run: WebCheckRun) -> bool:
+        """make web-e2e on the test copy, in the browser the first step chose. Its web port is
+        checked again first: Playwright would use whatever answers there instead of starting the
+        check's own web app."""
+        if port_answers(WEB_CHECK_WEB_PORT):
+            ctx.log(f"error: port {WEB_CHECK_WEB_PORT} is in use: something started there", "err")
+            return False
+        run.began = time.time()
+        channel = ((BROWSER_CHANNEL, run.channel),) if run.channel else ()
+        return ctx.run(self.web_check_e2e(), channel)
+
+    def _web_check_stop(self, ctx: StepContext, run: WebCheckRun) -> bool:
+        """The clean-up: the test copy's services (make web-stack-down), then the web app the
+        browser tests started, when they left it running (a cancel, a time limit)."""
+        ok = self._clear_web_check(ctx)
+        since = run.began
+        if since is None:
+            return ok
+        repo = self.project.repo
+        snapshot = probe_processes(repo, self.project.env, self.manager.registry, ctx.capture)
+        target, why = web_check_web_app(snapshot, since)
+        if why:
+            ctx.log(why)
+        if target is None:
+            return ok
+        ctx.log(f"the browser tests left their web app on port {WEB_CHECK_WEB_PORT}")
+        result = stop_named(
+            target.pids,
+            {pid: snapshot.procs[pid].command for pid in target.pids if pid in snapshot.procs},
+            snapshot,
+            repo,
+            ctx.log,
+            ctx.wait,
+            lambda: process_commands(self.project.env, ctx.capture),
+            grace=WEB_STOP_GRACE_SECONDS,
+        )
+        return ok and result is not None
 
     def gates_in_order(self) -> Plan:
         sequence = ci_sequence(self.project.checks, self.project.known_targets)
@@ -3509,7 +4073,11 @@ class _Context:
         if not self.allows(argv) or self.expired:
             return False
         return self._runner.execute(
-            self._call.label, argv, (*self._call.env, *env), timeout=self.remaining()
+            self._call.label,
+            argv,
+            (*self._call.env, *env),
+            timeout=self.remaining(),
+            interrupt=self._call.interrupt,
         )
 
     def capture(
@@ -3545,8 +4113,14 @@ class Runner:
     It refuses a plan :func:`plan_problems` finds anything wrong with, and checks every program
     again where it starts it. Each program starts a session of its own, so :meth:`cancel`, or a
     step overrunning its time limit, can end the running step's whole process group without
-    touching the panel: SIGTERM, then SIGKILL after a grace period to whatever of the group is
-    left. A step that overruns ends as ``timeout``.
+    touching the panel: SIGTERM (SIGINT first for an ``interrupt`` step), then SIGKILL after a
+    grace period to whatever of the group is left. A step that overruns ends as ``timeout``.
+
+    A clean-up step (``always``) runs whatever happened before it: after a failure, and after a
+    cancel, which does not stop it either. A cancel asked while one runs is held until it ends,
+    and then applies to the steps after it; asked during the last clean-up, it changes nothing,
+    since nothing is left to cancel. A clean-up step that fails fails the run, cancelled or not:
+    what it should have stopped may still run.
     """
 
     def __init__(
@@ -3571,6 +4145,12 @@ class Runner:
         self._busy = False
         self._plan: Plan | None = None
         self._proc: subprocess.Popen[bytes] | None = None
+        self._interrupt = False
+        """The running program stops with SIGINT first (its step's ``interrupt``)."""
+        self._sheltered = False
+        """A clean-up step runs: a cancel waits until it ends."""
+        self._held = False
+        """A cancel to apply once the clean-up step ends."""
         self._thread: threading.Thread | None = None
         self._timed_out = False
 
@@ -3619,18 +4199,42 @@ class Runner:
         with self._lock:
             if not self._busy:
                 return False
-            proc = self._proc
-        self.cancel_event.set()
-        if proc is not None:
-            self._terminate(proc)
+            held = self._sheltered
+            if held:
+                self._held = True
+                proc = None
+            else:
+                self.cancel_event.set()
+                proc = self._proc
+            interrupt = self._interrupt
+        if held:
+            self.line("Cancel: the clean-up step finishes first, so nothing is left running", None)
+        elif proc is not None:
+            self._terminate(proc, interrupt)
         return True
 
     def line(self, text: str, tag: str | None = None) -> None:
         self.emit(Line(self.name, text, tag))
 
-    def _terminate(self, proc: subprocess.Popen[bytes]) -> None:
-        """SIGTERM to the step's process group, and SIGKILL after the grace period to whatever of
-        the group is left, its first process gone or not."""
+    def _shelter(self) -> None:
+        """A clean-up step starts: a cancel asked so far waits until it ends."""
+        with self._lock:
+            self._held = self._held or self.cancel_event.is_set()
+            self._sheltered = True
+            self.cancel_event.clear()
+
+    def _unshelter(self) -> None:
+        """The clean-up step ended: a cancel it held now applies to the steps after it."""
+        with self._lock:
+            self._sheltered = False
+            if self._held:
+                self.cancel_event.set()
+            self._held = False
+
+    def _terminate(self, proc: subprocess.Popen[bytes], interrupt: bool = False) -> None:
+        """SIGTERM to the step's process group (SIGINT, and SIGTERM
+        :data:`INTERRUPT_GRACE_SECONDS` later, for an ``interrupt`` step), and SIGKILL after the
+        grace period to whatever of the group is left, its first process gone or not."""
         # The step's own group: each step starts with start_new_session, a new session that no
         # process outside it can join, so the group holds only what the step started. Cancel and
         # the time limits may signal it whole; a stop of another session's process never does.
@@ -3638,9 +4242,17 @@ class Runner:
         if proc.poll() is not None and not group_alive(pgid):
             return
         with contextlib.suppress(ProcessLookupError, PermissionError):
-            os.killpg(pgid, signal.SIGTERM)
+            os.killpg(pgid, signal.SIGINT if interrupt else signal.SIGTERM)
 
         def escalate() -> None:
+            if interrupt:
+                deadline = time.monotonic() + INTERRUPT_GRACE_SECONDS
+                while group_alive(pgid) and time.monotonic() < deadline:
+                    time.sleep(0.2)
+                if not group_alive(pgid):
+                    return
+                with contextlib.suppress(ProcessLookupError, PermissionError):
+                    os.killpg(pgid, signal.SIGTERM)
             time.sleep(KILL_GRACE_SECONDS)
             if group_alive(pgid):
                 with contextlib.suppress(ProcessLookupError, PermissionError):
@@ -3648,14 +4260,22 @@ class Runner:
 
         threading.Thread(target=escalate, daemon=True).start()
 
-    def _expire(self, proc: subprocess.Popen[bytes], label: str, limit: float) -> None:
+    def _expire(
+        self, proc: subprocess.Popen[bytes], label: str, limit: float, interrupt: bool = False
+    ) -> None:
         self._timed_out = True
-        self.line(
-            f"error: {label} overran its {format_seconds(limit)}: SIGTERM to its process group, "
-            f"SIGKILL {format_seconds(KILL_GRACE_SECONDS)} later if it is still running",
-            "err",
-        )
-        self._terminate(proc)
+        if interrupt:
+            how = (
+                f"SIGINT to its process group, SIGTERM {format_seconds(INTERRUPT_GRACE_SECONDS)} "
+                f"and SIGKILL {format_seconds(KILL_GRACE_SECONDS)} after that if it still runs"
+            )
+        else:
+            how = (
+                f"SIGTERM to its process group, SIGKILL {format_seconds(KILL_GRACE_SECONDS)} later "
+                "if it is still running"
+            )
+        self.line(f"error: {label} overran its {format_seconds(limit)}: {how}", "err")
+        self._terminate(proc, interrupt)
 
     def execute(
         self,
@@ -3663,10 +4283,13 @@ class Runner:
         argv: Sequence[str],
         env: Iterable[tuple[str, str]] = (),
         timeout: float | None = None,
+        *,
+        interrupt: bool = False,
     ) -> bool:
         """Run one program to its end, streaming its lines; True when it exits 0. The program and
         its whole environment are checked first, whoever asks. Past ``timeout`` seconds (else the
-        runner's own limit) the program's group is stopped and the step marked timed out."""
+        runner's own limit) the program's group is stopped and the step marked timed out; with
+        ``interrupt`` it gets SIGINT first, as on Cancel."""
         if self.cancel_event.is_set():
             return False
         full_env = {**self.env, **dict(env)}
@@ -3692,20 +4315,26 @@ class Runner:
             self.line(f"error: cannot run {argv[0]}: {exc.strerror or exc}", "err")
             return False
         with self._lock:
-            self._proc = proc
+            self._proc, self._interrupt = proc, interrupt
         if self.cancel_event.is_set():
-            self._terminate(proc)
+            self._terminate(proc, interrupt)
         if self.registry is not None:
             self.registry.add_group(proc.pid, label, argv)
         limit = timeout if timeout is not None else self.timeout
         try:
-            code = self._follow(proc, label, limit)
+            code = self._follow(proc, label, limit, interrupt)
         finally:
             with self._lock:
-                self._proc = None
+                self._proc, self._interrupt = None, False
         return code == 0 and not self.cancel_event.is_set() and not self._timed_out
 
-    def _follow(self, proc: subprocess.Popen[bytes], label: str, limit: float | None) -> int:
+    def _follow(
+        self,
+        proc: subprocess.Popen[bytes],
+        label: str,
+        limit: float | None,
+        interrupt: bool = False,
+    ) -> int:
         """Stream a program's lines until it ends, and stop it past ``limit``. Once it has
         exited, its output is read for :data:`PIPE_GRACE_SECONDS` more at most: a process it left
         behind may hold the pipe open, and must not hold the step."""
@@ -3719,7 +4348,7 @@ class Runner:
         while True:
             now = time.monotonic()
             if deadline is not None and now >= deadline and not self._timed_out:
-                self._expire(proc, label, limit or 0.0)
+                self._expire(proc, label, limit or 0.0, interrupt)
             ready, _, _ = select.select([fd], [], [], 0.2)
             if ready:
                 chunk = os.read(fd, 65536)
@@ -3739,7 +4368,7 @@ class Runner:
                 return proc.wait(timeout=0.2)
             except subprocess.TimeoutExpired:
                 if deadline is not None and time.monotonic() >= deadline and not self._timed_out:
-                    self._expire(proc, label, limit or 0.0)
+                    self._expire(proc, label, limit or 0.0, interrupt)
 
     def _lines(self, text: str) -> str:
         """Stream every complete line of ``text`` (a newline, a carriage return or both end
@@ -3754,7 +4383,9 @@ class Runner:
     def _run_step(self, step: Step) -> bool:
         self._timed_out = False
         if isinstance(step, Cmd):
-            return self.execute(step.label, step.argv, step.env, step.timeout)
+            return self.execute(
+                step.label, step.argv, step.env, step.timeout, interrupt=step.interrupt
+            )
         deadline = time.monotonic() + step.timeout if step.timeout else None
         context = _Context(self, step, deadline)
         ok = bool(step.fn(context))
@@ -3769,14 +4400,20 @@ class Runner:
     def _work(self, plan: Plan) -> None:
         results: list[StepResult] = []
         failed = False
+        cancelled = False  # a cancel stopped a step or kept one from running
+        unclean = False  # a clean-up step failed: what it should stop may still run
         self.emit(Begin(self.name, plan))
         try:
             for index, step in enumerate(plan.steps):
-                if self.cancel_event.is_set() or (failed and not plan.keep_going):
+                stop = self.cancel_event.is_set() or (failed and not plan.keep_going)
+                if stop and not step.always:
                     state: StepState = "cancelled" if self.cancel_event.is_set() else "skipped"
+                    cancelled = cancelled or state == "cancelled"
                     results.append(StepResult(step.label, state, 0.0))
                     self.emit(StepUpdate(self.name, plan, index, step.label, state, 0.0))
                     continue
+                if step.always:
+                    self._shelter()
                 self.line(f"\n▸ {step.label}", "step")
                 self.emit(StepUpdate(self.name, plan, index, step.label, "running", 0.0))
                 started = time.monotonic()
@@ -3785,9 +4422,13 @@ class Runner:
                 except Exception as exc:  # a defect in one step must not leave the panel busy
                     self.line(f"error: {step.label}: {exc!r}", "err")
                     ok = False
+                finally:
+                    if step.always:
+                        self._unshelter()
                 seconds = time.monotonic() - started
-                if self.cancel_event.is_set():
+                if self.cancel_event.is_set() and not step.always:
                     state = "cancelled"
+                    cancelled = True
                 elif self._timed_out:
                     state = "timeout"
                 else:
@@ -3796,10 +4437,12 @@ class Runner:
                 self.emit(StepUpdate(self.name, plan, index, step.label, state, seconds))
                 if state in ("failed", "timeout"):
                     failed = True
-                    tail = "" if plan.keep_going else " — stopped here"
+                    unclean = unclean or step.always
+                    tail = "" if plan.keep_going or step.always else " — stopped here"
                     what = "timed out" if state == "timeout" else "failed"
                     self.line(f"✗ {step.label} {what} after {format_seconds(seconds)}{tail}", "err")
-            cancelled = self.cancel_event.is_set()
+            # a failed clean-up outweighs a cancel: the run fails, so its error shows
+            cancelled = cancelled and not unclean
             if len(plan.steps) > 1 and plan.keep_going:
                 self._summary(plan, results)
             if cancelled:
@@ -3811,15 +4454,8 @@ class Runner:
         finally:
             with self._lock:
                 self._busy, self._plan, self._proc = False, None, None
-            self.emit(
-                End(
-                    self.name,
-                    plan,
-                    not failed and not self.cancel_event.is_set(),
-                    self.cancel_event.is_set(),
-                    tuple(results),
-                )
-            )
+                self._sheltered = self._held = False
+            self.emit(End(self.name, plan, not failed and not cancelled, cancelled, tuple(results)))
 
     def _summary(self, plan: Plan, results: Sequence[StepResult]) -> None:
         passed = sum(1 for r in results if r.state == "ok")

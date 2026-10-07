@@ -2,6 +2,7 @@
 with plain words and a safety class; whatever the runner would refuse is refused here first,
 and nothing refused can be previewed or run."""
 
+import dataclasses
 import os
 from pathlib import Path
 
@@ -23,6 +24,7 @@ NEVER = (
     "hooks",
     "control-panel",
     "control-panel-app",
+    "web-e2e",  # on its own it tests against the person's stack: gate:web-e2e uses a test copy
 )
 
 pytestmark = pytest.mark.skipif(not (ROOT / "Makefile").is_file(), reason=f"no Makefile in {ROOT}")
@@ -144,3 +146,77 @@ def test_optional_choices_and_booleans_are_checked(app: server.App) -> None:
     assert catalog.normalise(app, reset, {}) == {"backup_first": True}
     with pytest.raises(catalog.ParamError):
         catalog.normalise(app, reset, {"backup_first": "no"})
+
+
+def test_the_web_check_is_safe_and_runs_on_a_test_copy_of_its_own(app: server.App) -> None:
+    spec = app.catalog.specs["gate:web-e2e"]
+    assert spec.title == "Click through the web app"
+    assert spec.safety == "safe"
+    assert not spec.needs_confirm
+    assert spec.needs == ()  # memory stores: no Docker
+    assert spec.duration == "10 to 15 minutes"
+    words = " ".join(spec.what_happens)
+    assert "separate, temporary copy of the ten services with throwaway data" in words
+    assert "Stops the copy at the end: after the tests pass or fail, and when you cancel" in words
+    assert "Your own data and running app are never touched" in words
+    assert "the web app you have open keeps running while it builds" in words
+    assert "ports 9401 to 9410 and 3410" in words
+    assert "when it is not, the check uses your installed Google Chrome" in words
+    assert "offers Download the test browser (about 150 MB), which asks first" in words
+    built = catalog.build(app, spec, {})
+    assert built.plan is not None
+    assert [step.label for step in built.plan.steps] == [
+        step.label for step in app.plans.web_check().steps
+    ]
+    entry = app.entry(spec)
+    assert entry["enabled"] is True
+    assert entry["safety"] == "safe"
+    assert entry["steps"][0] == "check that the test copy can start"
+    assert entry["steps"][-1] == "stop the test copy"
+    variables = "STORE=memory WEB_STACK_DIR=var/web-stack-check SERVICE_PORT_BASE=9400"
+    assert entry["command"].splitlines() == [
+        f"make web-stack-down {variables}",
+        f"make web-stack {variables}",
+        f"make web-stack-wait {variables} WEB_STACK_WAIT_SECONDS=180",
+        f"make web-seed {variables}",
+        f"make web-e2e {variables} WEB_PORT=3410",
+        f"make web-stack-down {variables}",
+    ]
+
+
+def test_the_browser_tests_on_their_own_are_never_run_here(app: server.App) -> None:
+    spec = app.catalog.specs["make:web-e2e"]
+    assert spec.safety == "refused"
+    assert spec.refused == catalog.WEB_E2E_ALONE
+    assert "ports 8001 to 8010" in spec.refused
+    assert spec.covered_by == "gate:web-e2e"
+    entry = app.entry(spec)
+    assert (entry["enabled"], entry["reason"], entry["fix_action"]) == (
+        False,
+        catalog.WEB_E2E_ALONE,
+        "gate:web-e2e",
+    )
+    for call in (app.preview, app.run):
+        with pytest.raises(server.ApiError) as caught:
+            call("make:web-e2e", {"params": {}})
+        assert caught.value.code == "refused"
+
+
+def test_the_test_browser_download_always_asks_first(app: server.App) -> None:
+    # the web check offers it when there is no browser for its tests: it fetches about 150 MB
+    spec = app.catalog.specs["make:web-e2e-install"]
+    assert spec.needs_confirm
+    assert spec.confirm == "Downloads about 150 MB from the internet."
+    with pytest.raises(server.ApiError) as caught:
+        app.run("make:web-e2e-install", {"params": {}})
+    assert caught.value.status == 428
+
+
+def test_make_check_is_refused_once_it_runs_the_browser_tests(project: core.Project) -> None:
+    assert catalog.Catalog.load(project).specs["gate:check"].safety == "changes-data"
+    with_e2e = dataclasses.replace(project, checks=[*project.checks, "web-e2e"])
+    specs = catalog.Catalog.load(with_e2e).specs
+    for action_id in ("gate:check", "make:check"):
+        assert specs[action_id].safety == "refused"
+        assert specs[action_id].refused == catalog.CHECK_RUNS_WEB_E2E
+    assert specs["gates-in-order"].safety == "changes-data"  # it never runs web-e2e
