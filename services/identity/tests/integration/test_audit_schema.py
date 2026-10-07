@@ -106,7 +106,7 @@ def test_the_migration_creates_the_schema_and_the_table(engine: Engine) -> None:
         version: str = connection.execute(
             text(f"SELECT version_num FROM {SCHEMA}.alembic_version")
         ).scalar_one()
-    assert version == "0011"
+    assert version == "0012"
 
 
 def test_the_table_and_py_common_agree(engine: Engine) -> None:

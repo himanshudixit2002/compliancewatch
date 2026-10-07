@@ -99,6 +99,7 @@ TABLES = {
     KEYS,
     "outbox_event",
     "processed_event",
+    "erased_tenant",
     "alembic_version",
 }
 GROUP = "notification.obligations"

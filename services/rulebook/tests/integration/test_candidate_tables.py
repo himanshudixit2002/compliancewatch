@@ -294,7 +294,7 @@ def test_migration_0010_keeps_the_seed_tasks_and_goes_down_and_up(
     assert scalar(engine, "SELECT to_regclass('processed_event')") is None
     assert before_0010() == stored
     command.upgrade(alembic_config, "head")
-    assert scalar(engine, "SELECT version_num FROM alembic_version") == "0011"
+    assert scalar(engine, "SELECT version_num FROM alembic_version") == "0012"
     assert scalar(engine, nullable, schema=SCHEMA) == "YES"
     assert before_0010() == stored
 
@@ -501,7 +501,7 @@ def test_migration_0011_goes_down_and_up_over_drafted_candidates(
     assert scalar(engine, "SELECT version_num FROM alembic_version") == "0010"
     assert _keys_0011(engine) == []
     command.upgrade(alembic_config, "head")
-    assert scalar(engine, "SELECT version_num FROM alembic_version") == "0011"
+    assert scalar(engine, "SELECT version_num FROM alembic_version") == "0012"
     assert _keys_0011(engine) == list(KEYS_0011)
 
 
@@ -926,6 +926,6 @@ def test_migration_0010_goes_down_only_while_no_candidate_is_stored(
         RuntimeError, match=f"found {candidates} rule candidates and {tasks} candidate tasks"
     ):
         command.downgrade(alembic_config, "0009")
-    assert scalar(engine, "SELECT version_num FROM alembic_version") == "0011"
+    assert scalar(engine, "SELECT version_num FROM alembic_version") == "0012"
     assert _keys_0011(engine) == list(KEYS_0011), "the refused downgrade changed nothing"
     assert scalar(engine, "SELECT count(*) FROM rule_candidate") == candidates
