@@ -13,9 +13,9 @@ the candidates whose target is one of those mentions at the entity.
 
 A decision writes one ``entity_review.decided`` audit entry in its transaction
 (``rulebook.application.audit``). A group has no id of its own, so the entry's subject id is
-the group's key, ``<entity_type>:<proposed_name>`` (``group_key``); the entry's ``after`` holds
-the decision, the entity it chose, how many open mentions it closed and, for a decision by
-mention, the review ids.
+the group's key, ``<entity_type>:<proposed_name>`` with the name masked (``group_key``); the
+entry's ``after`` holds the decision, the entity it chose, how many open mentions it closed and,
+for a decision by mention, the review ids.
 """
 
 import hashlib
@@ -29,6 +29,7 @@ from domain_kernel.audit import MAX_SUBJECT_ID_CHARS
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.ids import CanonicalEntityId
 from domain_kernel.knowledge import EntityType
+from domain_kernel.pii import mask_pii_in
 from rulebook.application.alignment import Clock, default_clock
 from rulebook.application.audit import actor_for, entry
 from rulebook.domain.errors import (
@@ -57,11 +58,14 @@ SUBJECT: Final = "entity_review"
 
 def group_key(entity_type: EntityType, proposed_name: str) -> str:
     """The audit subject id of a mention group: ``<entity_type>:<proposed_name>``, or, for a name
-    too long for a subject id, ``<entity_type>:sha256:<digest of the name>``."""
-    key = f"{entity_type.value}:{proposed_name}"
+    too long for a subject id, ``<entity_type>:sha256:<digest of the name>``. The name comes from
+    document text, so it is masked first as every audit row is (``mask_pii_in``): the audit
+    writer masks the reason, before and after, never the subject id."""
+    name = mask_pii_in(proposed_name)
+    key = f"{entity_type.value}:{name}"
     if len(key) <= MAX_SUBJECT_ID_CHARS:
         return key
-    digest = hashlib.sha256(proposed_name.encode()).hexdigest()
+    digest = hashlib.sha256(name.encode()).hexdigest()
     return f"{entity_type.value}:sha256:{digest}"
 
 

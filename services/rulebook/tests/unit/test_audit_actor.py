@@ -69,3 +69,12 @@ def test_a_group_key_fits_a_subject_id() -> None:
     long_key = group_key(EntityType.FORM, "x" * 400)
     assert long_key.startswith("form:sha256:")
     assert len(long_key) <= 200
+
+
+def test_a_group_key_masks_personal_identifiers_in_the_name() -> None:
+    assert group_key(EntityType.FORM, "return of owner@example.com") == "form:return of [EMAIL]"
+    assert group_key(EntityType.SECTION, "notice to +919876543210") == "section:notice to [PHONE]"
+    masked_long = group_key(EntityType.FORM, "x" * 400 + " ABCDE1234F")
+    assert masked_long == group_key(EntityType.FORM, "x" * 400 + " [PAN]"), (
+        "a long name's digest is of the masked name"
+    )
