@@ -12,6 +12,14 @@ process that hosts several services adds to its own:
   event that sends nothing (a manual reschedule, the user's own completion) is only marked
   processed. A message the handler cannot read goes to ``<topic>.notification.obligations.dlq``
   after the consumer's retries.
+- a consumer in group ``notification.erasure`` of ``tenant.deletion.requested``
+  (``py_common.erasure``): while the flag ``identity.tenant_erasure`` is off for the tenant it
+  only logs ``erasure.off``; on, it deletes the tenant's notifications with their receipts and
+  work, its recipients and their addresses and businesses, its directory rows, the preferences
+  of addresses no other tenant holds, its idempotency keys and published events
+  (``infrastructure.erasure.PostgresNotificationEraser``, which states the rule), keeps the
+  suppressions, and writes ``tenant.data.erased`` (service notification) and its
+  ``tenant.erased`` audit entry with the ``processed_event`` row.
 - the dispatcher, ``DispatchDue.run``, every ``CW_NOTIFICATION_DISPATCH_INTERVAL_SECONDS``
   (5 seconds): it sends what is due, several workers side by side included. The daily digests
   are due at ``CW_NOTIFICATION_DIGEST_AT`` (09:00 IST) and go out through it too.
@@ -42,9 +50,11 @@ from notification.domain.ports import RuleVersionReader
 from notification.domain.preferences import IST
 from notification.domain.repository import UnitOfWork
 from notification.domain.routing import TOPICS
+from notification.infrastructure.erasure import PostgresNotificationEraser
 from notification.infrastructure.events_in import notice_from
 from notification.infrastructure.repository import SqlAlchemyUnitOfWork
 from notification.settings import NotificationSettings
+from py_common.erasure import Enabled, ErasureSwitch, erasure_component
 from py_common.events import EventMessage
 from py_common.logging import get_logger
 from py_common.outbox import sync_handler
@@ -63,6 +73,7 @@ RETENTION_JOB = "notification-retention"
 RETENTION_AT = time(3, 0, tzinfo=IST)
 """03:00 IST, when little else runs."""
 SERVICE_NAME = "notification-worker"
+ERASURE_SERVICE = "notification"
 
 log = get_logger(__name__)
 
@@ -130,9 +141,11 @@ def components(
     *,
     channels: Mapping[Channel, ChannelAdapter] | None = None,
     rules: RuleVersionReader | None = None,
+    erasure: Enabled | None = None,
 ) -> WorkerComponents:
-    """The consumer, the dispatcher loop and the retention sweep; ``channels`` and ``rules``
-    replace the configured channels and rulebook reader."""
+    """The two consumers, the dispatcher loop and the retention sweep; ``channels`` and
+    ``rules`` replace the configured channels and rulebook reader, ``erasure`` the flag of the
+    erasure consumer."""
     if settings.notification_store != "postgres":
         raise ValueError("the notification worker needs CW_NOTIFICATION_STORE=postgres")
     wiring = wire(settings, channels=channels, rules=rules)
@@ -142,6 +155,11 @@ def components(
                 group_id=GROUP_ID,
                 topics=TOPICS,
                 handler=sync_handler(obligation_handler(wiring.enqueue)),
+            ),
+            erasure_component(
+                ERASURE_SERVICE,
+                PostgresNotificationEraser,
+                enabled=erasure or ErasureSwitch(settings),
             ),
         ),
         periodic=(

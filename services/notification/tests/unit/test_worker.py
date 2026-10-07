@@ -171,7 +171,11 @@ def test_the_components_are_the_consumer_the_dispatcher_loop_and_the_sweep() -> 
         notification_store="postgres", notification_dispatch_interval_seconds=2.5
     )
     components = worker.components(settings, rules=FakeRuleVersionReader())
-    (consumer,) = components.consumers
+    consumer, erasure = components.consumers
+    assert (erasure.group_id, erasure.topics) == (
+        "notification.erasure",
+        ("tenant.deletion.requested",),
+    )
     assert consumer.group_id == "notification.obligations"
     assert consumer.topics == (
         "obligation.created",
