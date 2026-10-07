@@ -81,6 +81,8 @@ outside `src` and outside the floor.
 | `features/auth`                  | the form (roles per kind, the busy state, the errors it shows) with a fake action; the action's cookie and redirect; the seed-state reader |
 | `src/proxy.ts`                   | the matcher through `next/experimental/testing/server` and the pass-or-redirect decision for every registry page (excluded from the coverage floor) |
 | `src/test/architecture.test.ts`  | the layer rules over the real tree; the parked folder map: every feature folder no route file imports is parked for registry screens that exist and are not live, and a folder a page imports leaves the map ([architecture.md](architecture.md), "Parked feature folders") |
+| `src/test/handler-gate.test.ts`  | every `route.ts` under `app/api-bff/` exports its methods as functions whose first statements await `gateHandler` from `server/bff/gate.ts` with the handler's own request and the registry entry of the file's route, and return its refusal; anything else fails naming the file (D-059) |
+| `server/bff/gate.ts`             | the origin of a write before the session, a reader without a session sent to sign in and back and a writer answered 401, a tenant role's 404 for a regulatory tool, a short role's 403 naming the entry's roles, a tenant kind the entry does not list |
 | `src/test/synthetic-fixtures.test.ts` | no realistic token in a test or a fixture of the web app or the UI kit ("Synthetic fixtures" above) |
 | `src/test/screens-doc.test.ts`   | `docs/web/screens.md` equals the generator's output; the awaits audit                                                                      |
 | `packages/ui` tokens             | `contrast.test.ts` (4.5:1 text, 3:1 UI, both schemes), `tokens.test.ts` (the two dark blocks agree), `tokens.build.test.ts` (the utilities compile) |
@@ -91,10 +93,11 @@ outside `src` and outside the floor.
 `apps/web/playwright.config.ts` runs the specs in `apps/web/e2e` against `next start` on `PORT`
 (3000 unless set) with `CW_WEB_ENV=test`, `CW_WEB_AUTH_PROVIDER=fake` and a fixed session
 secret (32 bytes of `e2e`; it keys the cookies of one run and is not a secret), chromium only,
-and waits for `/api/health` before the first test. It has two projects: `chromium`, every spec but
-`e2e/product`, against the memory stack (`make web-e2e` and the `web-e2e` job run it with
-`--project=chromium`), and `product`, the real-data journeys against `make product` (below). The
-config turns `web.publish_actions`, `web.admin_rulebook_writes` and `web.qa_enabled` on for the
+and waits for `/api/health` before the first test. It has three projects: `chromium`, every spec
+but `e2e/product`, against the memory stack (`make web-e2e` and the `web-e2e` job run it with
+`--project=chromium`); `stack-guard`, which `chromium` depends on and so runs first (below,
+"Never against the shared database"); and `product`, the real-data journeys against `make product`
+(below), which depends on nothing. The config turns `web.publish_actions`, `web.admin_rulebook_writes` and `web.qa_enabled` on for the
 run. Outside CI it reuses a
 server already listening on that port. On CI it retries once and writes the HTML report.
 `e2e/fixtures.ts` extends `test` with `checkA11y(selector?)`, which runs `AxeBuilder` on the page
@@ -110,6 +113,14 @@ Its one write, `stageReview(forms, relations)`, registers a synthetic document o
 through the pipeline's routes (the write token, as the seed sends it), with a form mention per
 review group and the relation candidates asked, each named for the run (`EX-<nine digits>`), so the
 review specs decide what no other run or spec touches.
+`e2e/pipeline-helpers.ts` does the same for the pipeline: reads to compare the source and pipeline
+pages with (`pipelineGet`, `sources`), and staging through the pipeline's routes with the write
+token: `stageUploadSource()` adds a synthetic upload-only source for the test (`example_<nine
+digits>`, no site, statutes), `stageUpload(key, title, file?)` uploads synthetic bytes to it
+(`syntheticPdf` or `syntheticHtml`, each different every time, with the id the pipeline will give
+them), which the stack stores and answers 503 for (no Temporal), and `crawlIsOff()` asks the
+pipeline whether crawling is off the way `cw-product check` does, before any spec fetches a built-in
+source (D-060).
 
 The specs on `main`:
 
@@ -139,6 +150,9 @@ The specs on `main`:
 | `admin-rulebook-entities.spec.ts` | the resolve tool and an entity's page (needs the seed for the resolutions): a tenant role gets a 404, a malformed id the not-found page; an analyst opens the tool from the sidebar and resolves a recorded mention's name, a section without its statute and a code with no digits, each status and normalised name compared with the rulebook's answer; a blank name refused on its field; an entity a name resolves to opened when the rulebook holds one (skipped on a stack without entities); an unknown id is the not-found page |
 | `admin-rulebook-search.spec.ts` | the clause search (needs the seed): a tenant role gets a 404; an analyst opens it from the sidebar, searches words of the recorded notification and finds its clause with the ranks the rulebook gives (compared with the service), the words marked, the address unchanged and the words kept, and opens the clause marked in its document; blank words refused with focus on the field; words nothing matches give the empty state; axe on each |
 | `admin-rulebook-graph.spec.ts` | the relations graph: a tenant role gets a 404; the form and a malformed id on its field; from a version's page, the graph drawn around it (the start node in the picture, which is hidden from assistive technology) with the relations the rulebook holds from and to it in the table, or the empty state (needs the seed); an unknown id answered on the field with the depth kept; axe |
+| `admin-sources.spec.ts`  | the source tools against the pipeline the stack runs: a tenant role gets a 404 for the list, a source and a stored file, a key that cannot be a source's the not-found page; against the stack (needs the seed), an analyst opens the list from the sidebar under the crawl switch (off by default) and finds every source the pipeline lists (the built-in ones exactly; sources other tests stage meanwhile are left out of the count), opens a listing source with its documents and runs and no control, and follows its runs to the pipeline page; an admin's Fetch now of a built-in source, sent only once the pipeline says crawling is off, is refused in plain words and nothing is recorded; an admin renames and pauses a staged source (only what changed is saved, read back from the pipeline) and saving nothing says so; a form opened before another admin paused the source saves only its rename and the pause stands, and its cadence, changed meanwhile by the other admin too, is refused by name with nothing saved; an admin uploads a synthetic PDF to a staged source through the page (the dialog, the plain answer, the document listed and read back), whose bytes stream back with their type, disposition and headers; the upload handler refuses another site, a file that is not a document, a short reason and an analyst, and stores nothing; a stored HTML page is served sandboxed (its script does not run, its image is refused by the policy); an unknown document's file is a plain 404 and a visitor is sent to sign in; axe on each page |
+| `admin-pipeline.spec.ts` | the pipeline's operations and a stored document: a tenant role gets a 404 for each page, a malformed id the not-found page; against the stack (needs the seed), an analyst opens the runs from the sidebar (compared with the pipeline's, a backfill filter kept in the address), lists a staged document with how the pipeline reads it and is refused a date range the wrong way round, reads the dead outbox (compared with the pipeline's) with a topic checked on its field, and reads a stored document without the retry (an unknown id is the not-found page); an admin's retry from extract is refused plainly (nothing to extract, then no rule extracted from the type it is read as) and records nothing, and a retry from parse says Temporal did not answer and sends the same request again, the form's own Retry after it included, all under one Idempotency-Key though the page renders again with a new one; axe on each state |
+| `admin-pipeline-tasks.spec.ts` | the pipeline's tasks: a tenant role gets a 404; against the stack (needs the seed), an analyst opens them from the sidebar and finds the open tasks, then the triage tasks of every status, as the pipeline lists them (the stack runs no ingest, so none opens: the empty states), read-only; an admin reads the dismissed ones with nothing held back; axe |
 | `not-available.spec.ts`  | an admin tool's awaited routes and breadcrumbs, a parameterised tenant route through the catch-all, `/forbidden` for the wrong tenant kind, a planned tool's sentence and note, a ready tool's sentence and what it will use, real 404s with and without a session |
 | `forbidden.spec.ts`      | the page and its two links                                                                                                                                |
 | `health.spec.ts`         | the health JSON, the static security headers, no `x-powered-by`                                                                                            |
@@ -226,8 +240,8 @@ pnpm --filter web exec playwright test --ui                    # the Playwright 
 pnpm --filter web exec playwright show-report                  # the last HTML report
 ```
 
-`make web-e2e` sources `.env` for `WEB_PORT`, builds the app and runs the suite with
-`CW_WEB_ENV=test`. Running `playwright test` directly needs a build first (`pnpm --filter web
+`make web-e2e` sources `.env` for `WEB_PORT`, checks the services it would use (below), builds
+the app and runs the suite with `CW_WEB_ENV=test`. Running `playwright test` directly needs a build first (`pnpm --filter web
 build`) and, if a dev server is on the port, that server is reused. Reports land in
 `apps/web/playwright-report/` and `apps/web/test-results/`, both git-ignored. Typed links are
 checked against `.next/types`, which `next build`, `next dev` and `next typegen` write; after
@@ -246,6 +260,26 @@ No page on `main` calls a service yet, so the suite passes without the stack apa
 seeded-tenant test, which is skipped; with `make web-stack && make web-stack-wait && make
 web-seed` first, `make web-e2e` runs everything, as the CI job does. A spec for a page that
 reads a service later relies on the same order.
+
+**Never against the shared database.** The chromium specs stage synthetic data through the
+services: the review items of the entity and relation specs (`stageReview`), and the sources,
+uploads, retries and requeues of the source and pipeline specs. On a memory stack all of it goes
+when the stack stops; on a stack started with `STORE=postgres` (the shared development database)
+it would stay for good, and a stored document cannot be deleted. So `make web-stack` records its
+store and port base in `$(WEB_STACK_DIR)/store` (`store=unknown` when it found services running
+that it had not started), `make web-stack-down` removes the record, and the guard in
+`apps/web/scripts/stack-guard` refuses the run, with a plain message saying why and what to do,
+when a service the run would use answers and is not that recorded memory stack's: a record saying
+`postgres` or `unknown`, no record at all (a running stack whose store is unknown counts as
+Postgres), another port base, or a port no live process of the stack's pid files was started on.
+A service that does not answer passes, since nothing can be staged there. `make web-e2e` runs the
+guard before its build, with `CW_E2E_WEB_STACK_DIR` naming its `WEB_STACK_DIR`; the chromium
+project's `stack-guard` setup runs it again, so `playwright test` run directly is guarded too
+(the directory defaults to `var/web-stack`). `E2E_ALLOW_POSTGRES=1` lets a run go on against such
+services, and says so. CI is unaffected: its `make web-stack` is a memory stack in `var/web-stack`
+on the default ports. The product project stages none of this: its specs (`e2e/product`) are the
+journeys against `make product`, and they depend on no guard. The guard's decision is tested in
+the unit suite (`scripts/stack-guard/lib.test.mts`).
 
 `make web-seed` is the seed for that stack (`apps/web/scripts/seed`, run by Node's type
 stripping on the openapi-fetch clients typed from the contracts): real HTTP calls only, no mock

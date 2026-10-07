@@ -473,8 +473,8 @@ class admin: the internal listener, and the public one in `token` mode only). Th
 regulatory role (analyst, reviewer or admin) a token names; the writes an admin, or in `header`
 and `dual` mode the shared write token, and each names its actor and a reason of ten characters
 or more and writes its `audit.event` row, of no tenant, in the transaction of the change. The
-admin screen `admin.pipeline` (`apps/web/src/shared/config/screens.ts`) is ready for them; no UI
-reads them yet.
+web app's admin tools read and write them (`/admin/sources`, `/admin/pipeline` and its document and
+task pages; `docs/web/admin-tools.md`), with the shared write token, as an admin.
 
 | Route | What |
 | --- | --- |

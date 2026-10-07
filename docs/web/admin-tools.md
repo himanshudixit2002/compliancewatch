@@ -10,11 +10,12 @@ The admin layout runs `requireAdmin()` before anything renders, so a tenant role
 404 with no admin markup; each page calls its gate again on its first line
 (`requireScreenSession`), and a regulatory role a tool's entry does not list gets the not-found
 page as well ([auth-and-roles.md](auth-and-roles.md)). The flags, ontology, notification,
-template, rulebook, review queue, decision review, fan-out, impact, LLM gateway, review task and
-system pages each have a sibling `loading.tsx` with a skeleton (the console's sits in the route
-group `(console)`, the rule version list's and the fan-out list's in `(list)`, the resolve tool's
-in `(resolve)` and the two review queues' in `(queue)`, so each wraps that page alone, as the
-home's sits in `(home)`); under one, a
+template, rulebook, review queue, decision review, fan-out, impact, LLM gateway, review task,
+system, source and pipeline pages each have a sibling `loading.tsx` with a skeleton (the console's
+sits in the route group `(console)`, the rule version list's, the fan-out list's and the source
+list's in `(list)`, the resolve tool's in `(resolve)`, the two review queues' in `(queue)` and the
+pipeline's operations' in `(operations)`, so each wraps that page alone, as the home's sits in
+`(home)`); under one, a
 not-found answer (an unknown id, a regulatory role the tool does not list) is streamed with status
 200 and a `noindex` tag rather than a 404 status, as on the business pages (D-029 in
 [decisions.md](decisions.md)). A tenant role still gets the real 404 from the layout's gate. The
@@ -47,6 +48,11 @@ document tool has no loading boundary, so its unknown ids stay real 404s (D-037)
 | Model routes        | `/admin/llm/models`                      | every regulatory role   | `GET /v1/llm-gateway/models` (cached five minutes, no tenant header)  |
 | Usage and budgets   | `/admin/llm/usage`                       | every regulatory role   | `GET /v1/llm-gateway/usage` (no tenant header), once per feature or once for the question asked |
 | Profile review tasks| `/admin/profiles/review-tasks`           | every regulatory role   | `GET /v1/profile/nodes/{node_id}`, `.../review-tasks`, `.../snapshot`, for the tenant looked up; the ontology |
+| Sources             | `/admin/sources`                         | every regulatory role   | `GET /v1/pipeline/sources` and the schedule's latest run (`GET /v1/pipeline/runs?trigger=schedule&limit=1`); the crawl flag as `packages/flags/registry.json` declares it |
+| Source              | `/admin/sources/[key]`                   | every regulatory role reads; an admin changes | the sources (for its record), `GET .../sources/{key}/documents`, its latest runs; `PATCH .../sources/{key}` and `POST .../fetch` through `server/api/pipeline-write.ts`; an upload-only source's upload through `/api-bff/pipeline/sources/[key]/uploads` |
+| Pipeline            | `/admin/pipeline`                        | every regulatory role reads; an admin requeues | `GET /v1/pipeline/runs`, `.../documents` or `.../outbox/dead`, and the sources' keys; `POST .../outbox/{event_id}/requeue` |
+| Stored document     | `/admin/pipeline/documents/[documentId]` | every regulatory role reads; an admin retries | `GET /v1/pipeline/documents/{document_id}`; `POST .../retry` with an Idempotency-Key; the stored file through `/api-bff/pipeline/documents/[documentId]/raw` |
+| Pipeline tasks      | `/admin/pipeline/tasks`                  | every regulatory role reads; an admin resolves | `GET /v1/pipeline/tasks`; `POST .../tasks/{task_id}/resolve` and `/dismiss` |
 | System              | `/admin/system`                          | every regulatory role   | `GET /health` and `GET /ready` of every service; the screen registry; the web server's settings |
 
 ## Internal tools: `/admin`
@@ -455,6 +461,145 @@ year, each value worded by the ontology (shown as stored when the ontology canno
 the tenant does not hold is answered as such. Read-only: a task closes when the attribute is
 answered on the business's own pages, and no route lists a tenant's tasks.
 
+## Sources: `/admin/sources`
+
+Every source the pipeline reads, read fresh: its name and key (opening its page), its adapter
+type, regulator and site, the type it publishes and how many documents it holds, how it stands
+(healthy, failing, fetching, paused) and whether the schedule may crawl it (enabled, disabled,
+paused, or upload-only: a statute no site lists, which no crawl reads), its cadence, its freshness
+(how long since a crawl listed it, in time and in cadences), its last listing, its latest run (a
+backfill marked as one), its watermark and its last error. Counts above the table: the sources,
+the failing ones, the late or stale ones and the upload-only ones.
+
+Above them, the crawl switch as the web server can know it. The pipeline holds `pipeline.crawl` in
+its own environment (`CW_PIPELINE_CRAWL_ENABLED`) and no route reads it, so the page shows the flag
+as `packages/flags/registry.json` declares it (off by default), what off means (no source is crawled
+on its schedule, "Fetch now" is refused without reading any site, uploads still work) and, as the
+evidence, the schedule's latest crawl (the latest run with the trigger `schedule`), or that the
+schedule has crawled nothing (D-058). An admin reads why the page offers no way to add a source:
+the capability `admin.sources.add` is ready (the pipeline's `POST /v1/pipeline/sources` exists) and
+not built.
+
+## Source: `/admin/sources/[key]`
+
+One source, its record taken from the list (the pipeline has no read of one source): its facts,
+its adapter type's parameters, a page of its stored documents (keyset, 25 at a time, each opening
+its page on the pipeline tool and its stored file in a new tab) and its latest ten crawl runs with
+a link to every run of it on the pipeline page (not for an upload-only source, which has none). The
+documents and the runs each have their own error state; a key the pipeline does not hold is the
+not-found page.
+
+For an admin (`admin.sources.write`, with the write token set; otherwise the page says which one is
+missing):
+
+- **Settings**: the name, the cadence, the enabled and paused switches and the parameters (as JSON,
+  which the pipeline checks against the adapter type), with a reason of ten characters or more.
+  The form posts the values it was rendered with beside the edited ones, and only the settings the
+  admin changed from those are sent (`PATCH`): a setting someone else changed since, which this
+  admin left alone, stands. A setting this admin changed that someone else changed since is
+  refused by name with its value now, nothing is sent, and the page renders again so the form
+  shows the source as it is (the fields start again whenever the page renders other settings). The
+  dialog says what is recorded, and saving nothing says so without a request.
+- **Fetch now**, for a source that lists documents: a crawl started at once (`POST .../fetch`,
+  202 with its run and workflow), a paused source included. The panel says up front that while
+  crawling is off the pipeline refuses, reads no site and records no run, and a refusal says
+  exactly that rather than passing on a 503; a crawl already running, a source the pipeline cannot
+  crawl and Temporal not answering are said plainly too.
+- **Upload**, for an upload-only source: a PDF or an HTML page of at most the pipeline's limit
+  (25 MB), what it is (the source's type unless one is chosen), its title, reference and
+  publication date, and the reason. The form posts to the upload handler (below), which streams
+  the file on; the answer links to the stored document, says whether these bytes were stored
+  before, and says plainly when the document is stored but its ingest did not start (Temporal did
+  not answer: uploading the same file again starts it, and nothing is stored twice). The page's
+  documents are read again.
+
+## Pipeline: `/admin/pipeline`
+
+The pipeline's operations, one view at a time behind chips, each filtered by a GET form and paged
+by the pipeline's cursor (25 a page), every filter in the address:
+
+- **Crawl runs** (the default): every source's runs, the latest started first, of a source, a
+  status and a trigger; each with when it started and ended, its source, why it ran (a backfill
+  is marked as one: it lists part of history and leaves the watermark as it was), how it ended
+  and its error, what its listing found (listed; stored, duplicates and failed) and its workflow.
+- **Documents**: every source's stored documents, the latest first fetch first, of a status, a
+  source, a type and publication dates (a date out of shape, or a range the wrong way round, is
+  refused on its field); each with the type the pipeline reads it as, its classification (the
+  route, the confidence and who decided: the detector, a person's triage or a person's type on a
+  retry) and its rule extraction by the current prompt. A document opens its own page.
+- **Dead outbox**: the rows the relay gave up on after eight failed sends, the newest dead first,
+  of a topic (checked as the pipeline checks it); each with its topic and key, its attempts and
+  last error, when it went dead and what it is about (never its body). An admin requeues one
+  (`admin.pipeline.control`) with a reason in a dialog: the row goes back to pending and the relay
+  sends it on its next pass; a row that is no longer dead is said as such.
+
+## Stored document: `/admin/pipeline/documents/[documentId]`
+
+One stored document: where it was listed or uploaded (by whom, for an upload), when it was first
+fetched, its digest, size and type, its stored file (a link to the raw handler, below), its last
+parse; how the pipeline reads it (its type, its classification with who decided it and why, its
+extraction by the current prompt with its issues and whether it needs review); and the retries
+people asked for, newest first, with their stage, type, reason, person and workflow. A malformed or
+unknown id is the not-found page.
+
+An admin retries it: from parse (its whole ingest again, without a new fetch), classify (the
+detector reads it again; a person's decision stands) or extract (the rule extraction alone),
+optionally read as a type a person gives (which reclassifies it and brings back a document set
+aside), with a reason. The form carries the Idempotency-Key minted when the page rendered
+(`pipeline.retry-document`), so sending the same request again (an answer that never came,
+Temporal not answering) replays its attempt and records nothing twice. After such an answer the
+page renders again with a new key, and the form keeps the first until an answer settles the
+request (a success, or a refusal the same request cannot mend): pressing Retry again then starts
+the attempt the pipeline recorded rather than a second one. Reloading the page gives a new key. The answers are said plainly: an ingest already running (wait for it), a triage task
+holding it or nothing left to extract, a type no rule is extracted from, the key reused with another
+retry, the key missing, and Temporal not answering ("send the same request again", with the button
+that sends exactly it).
+
+## Pipeline tasks: `/admin/pipeline/tasks`
+
+The work people do on stored documents: manual parses (a document no parser reads, waiting for an
+analyst to type it in) and triages (a document whose text names another type than its source
+publishes), open ones first and oldest first, resolved and dismissed ones behind the chips, of a
+kind. Each task names its document (its page and its stored file), why it opened and, once closed,
+who closed it, when and why.
+
+An admin resolves an open task with a reason: a manual parse with the transcript (typed as plain
+text, one block per paragraph: a heading line marked `#`, a numbered paragraph, a table as rows of
+cells; the page reads it as the pipeline will, counts its clauses and refuses what the pipeline
+would before anything is sent), a triage with the decision (relevant and of a type, or not a
+regulatory document). Either can be dismissed with a reason instead. The dialogs say what follows
+(an ingest from the transcript, a document kept for reference, set aside or extracted). The same
+resolution sent again is answered as the first was and said as done; a closed task, a resolution
+that does not fit the task and an invalid transcript are said plainly.
+
+## Stored files and uploads: `/api-bff/pipeline/...`
+
+Two route handlers carry what a server action cannot: a document's bytes to the browser and a
+file to the pipeline, each streamed rather than held whole (D-059). The proxy never sees them, so
+each starts with the shared gate (`server/bff/gate.ts`) and its registry entry's roles.
+
+- `GET /api-bff/pipeline/documents/[documentId]/raw` (`system.raw-document`): for a regulatory
+  role (a visitor goes to sign in, a tenant role gets a 404), the document's record first (its
+  content type and title), then its bytes from the raw store as they arrive, with the stored type
+  (a PDF, an HTML page; anything else as `application/octet-stream`), `Content-Disposition`
+  (inline for a PDF or an HTML page, an attachment otherwise; named by the id, with the title in
+  `filename*`, well formed and at most 100 characters), `nosniff` and `private, no-store`. An HTML
+  page is served under `sandbox; default-src 'none'`: its scripts do not run and it loads nothing.
+  An unknown document, the role, a file missing or altered in the raw store and the raw store away
+  are each a plain problem.
+- `POST /api-bff/pipeline/sources/[key]/uploads` (`system.uploads`): for an admin only, from this
+  site only (the gate's origin check, the sign-out handler's), with the write token set. It checks
+  the key, that the body is a form with a file, the declared length, the file's type (a PDF or an
+  HTML page, 415 otherwise) and the fields (the reason of 10 to 2000 characters, the title,
+  reference, date and type, a 422 naming each), then sends the pipeline a new form (the session's
+  user as `actor_id`, the checked fields, the file's bytes streamed through, counted against the
+  limit) and answers the stored document or a plain problem. The limit is the pipeline's
+  (`CW_PIPELINE_UPLOAD_MAX_BYTES`, mirrored as `CW_WEB_PIPELINE_UPLOAD_MAX_BYTES`, 25 MB by default)
+  and the types are its own; `upload.test.ts` reads both from the service's code. A pipeline set
+  lower refuses on its own, and the page shows its detail, which names its limit. A slow upload is
+  never cut for its length: it stops only when no byte arrives for 30 seconds (nothing is stored),
+  and the pipeline then has 60 seconds to answer.
+
 ## System: `/admin/system`
 
 Every service as the web server reaches it: `GET /health` (up or down, the version, the time it
@@ -492,3 +637,10 @@ exporting, or failed; the flag is not read again; D-057). Refresh probes again.
   decision review is a lookup by tenant.
 - The admin's name in the engine's audit rows for a hold or a control: the engine reads no token
   in `header` mode and records the system until identity issues tokens.
+- Adding a source: the pipeline's `POST /v1/pipeline/sources` exists, the form does not (the ready
+  capability `admin.sources.add`); the e2e suite adds its synthetic sources through the route.
+- Turning crawling on or off from a page: the switch is the pipeline's environment
+  (`CW_PIPELINE_CRAWL_ENABLED`), which no route reads or sets.
+- Resolving and dismissing tasks and requeueing dead rows end to end on the UI-only stack: tasks
+  open in the ingest and rows die in the relay, and the stack runs neither (no Temporal, no relay),
+  so the e2e suite reads their empty states and the unit tests cover the writes (D-060).

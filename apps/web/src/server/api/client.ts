@@ -52,6 +52,14 @@ export interface ServiceClientOptions {
   service: ServiceName;
   baseUrl: string;
   timeoutMs: number;
+  /**
+   * What the time limit covers: the whole exchange (the default: the call fails when the body has
+   * not arrived in time either); only the wait for the response to start, for a body streamed on
+   * to the browser (a stored document's bytes), which may take longer than any limit; or nothing
+   * (`caller`): the call's own signal is its only limit, for a request body streamed up from the
+   * browser (an upload), whose caller times the stream and the wait for the answer itself.
+   */
+  timeoutScope?: "exchange" | "response-start" | "caller";
   fetchImpl?: FetchImpl;
   /** Headers every request of this client sends, on top of accept and x-request-id. */
   headers?: Readonly<Record<string, string>>;
@@ -91,6 +99,39 @@ function fetchInit(request: Request, timeoutMs: number): RequestInit {
   return init;
 }
 
+/**
+ * A fetch whose time limit ends once the response starts: the timer aborts the request only while
+ * no response has arrived, and the call's own signal (a browser that went away) still ends the
+ * body afterwards.
+ */
+async function fetchUntilResponse(
+  fetchImpl: FetchImpl,
+  request: Request,
+  timeoutMs: number,
+): Promise<Response> {
+  const timer = new AbortController();
+  const handle = setTimeout(
+    () => timer.abort(new DOMException(`no response within ${timeoutMs} ms`, "TimeoutError")),
+    timeoutMs,
+  );
+  const init: RequestInit = { signal: AbortSignal.any([request.signal, timer.signal]) };
+  const next = (request as CacheableRequest).next;
+  if (next !== undefined) init.next = next;
+  try {
+    return await fetchImpl(request, init);
+  } finally {
+    clearTimeout(handle);
+  }
+}
+
+/** The init of a call its caller times: the call's own signal, plus its `next` options. */
+function callerInit(request: Request): RequestInit {
+  const init: RequestInit = { signal: request.signal };
+  const next = (request as CacheableRequest).next;
+  if (next !== undefined) init.next = next;
+  return init;
+}
+
 export function createServiceClient<Paths extends object>(
   options: ServiceClientOptions,
 ): Client<Paths> {
@@ -98,7 +139,12 @@ export function createServiceClient<Paths extends object>(
   const client = createClient<Paths>({
     baseUrl: options.baseUrl,
     headers: { accept: "application/json", ...options.headers },
-    fetch: (request) => fetchImpl(request, fetchInit(request, options.timeoutMs)),
+    fetch: (request) =>
+      options.timeoutScope === "response-start"
+        ? fetchUntilResponse(fetchImpl, request, options.timeoutMs)
+        : options.timeoutScope === "caller"
+          ? fetchImpl(request, callerInit(request))
+          : fetchImpl(request, fetchInit(request, options.timeoutMs)),
   });
   client.use({
     onRequest({ request }) {

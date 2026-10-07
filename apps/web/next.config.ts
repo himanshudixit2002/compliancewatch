@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
-// Static security headers; vercel.json carries the same set for the Vercel edge. Per-request
-// values (the CSP nonce) are added by proxy.ts, not here.
+// Static security headers; vercel.json carries all but Permissions-Policy for the Vercel edge. The
+// pages have no Content-Security-Policy and nothing makes a nonce; the stored-file handler sets a
+// policy of its own on an HTML page it serves (server/bff/raw-document.ts).
 const SECURITY_HEADERS = [
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "X-Frame-Options", value: "DENY" },

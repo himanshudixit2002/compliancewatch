@@ -483,7 +483,12 @@ web-dev: check-pnpm ## next dev on WEB_PORT from .env; /admin lists the internal
 # GSTIN lookup (the demo GSTIN pre-fills), the billing provider "none" (subscribe answers 503;
 # BILLING=memory starts subscriptions in memory for a manual demo, and make web-e2e takes the
 # same BILLING so the billing spec expects that state), the KAG layer off, the pipeline's crawl
-# off (it would read the live regulator sites), the inter-service URLs
+# off (it would read the live regulator sites), the pipeline and the applicability engine pointed
+# at a Temporal address nothing listens on (the stack has no worker: an upload, a retry or a task's
+# resolution is stored and answers that its ingest did not start, rather than queueing a workflow
+# on a developer's Temporal for some other worker to run against another store; the engine's API
+# only signals fan-outs, and a lost signal costs a run one poll of 30 seconds) with the
+# pipeline's raw files in memory on the memory store, the inter-service URLs
 # on the same base, and the rulebook's two tokens from .env or the placeholders local-write-token
 # and local-review-token (not secrets), as make product passes them. The rulebook publishes
 # (CW_RULEBOOK_PUBLISH_ENABLED=true) and, on the memory store, starts with the seed calendar's
@@ -491,7 +496,9 @@ web-dev: check-pnpm ## next dev on WEB_PORT from .env; /admin lists the internal
 # publish workflow have versions to show; every draft still needs review, and only an analyst's
 # steps through the web app move one. Memory stores lose their rows when the stack stops;
 # STORE=postgres runs every store on the compose Postgres instead (make dev, make migrate and
-# make seed SERVICE=rulebook first), with the schema search path make run uses.
+# make seed SERVICE=rulebook first), with the schema search path make run uses. The store and the
+# port base are recorded in $(WEB_STACK_DIR)/store (store=unknown when services this command did
+# not start were running already), which make web-e2e reads; make web-stack-down removes it.
 WEB_STACK_DIR := var/web-stack
 WEB_STACK_WAIT_SECONDS ?= 60
 STORE ?= memory
@@ -503,19 +510,21 @@ web-stack: check-uv ## UI-only stack, no worker: every service on SERVICE_PORT_B
 	[ "$(BILLING)" = "none" ] || [ "$(BILLING)" = "memory" ] || { echo "usage: make web-stack [BILLING=none|memory]"; exit 1; }; \
 	mkdir -p $(WEB_STACK_DIR); base=$${SERVICE_PORT_BASE:-8000}; i=0; \
 	token="$${CW_RULEBOOK_WRITE_TOKEN:-local-write-token}"; review="$${CW_RULEBOOK_REVIEW_TOKEN:-local-review-token}"; \
-	seed=false; if [ "$(STORE)" = "memory" ]; then seed=true; fi; \
+	seed=false; raw=local; if [ "$(STORE)" = "memory" ]; then seed=true; raw=memory; fi; \
 	echo "web stack: services on $$((base+1))-$$((base+10)), $(STORE) stores, billing provider $(BILLING), rulebook publishing on"; \
+	kept=0; \
 	for svc in $(SERVICES); do \
 	  i=$$((i+1)); port=$$((base+i)); pidfile=$(WEB_STACK_DIR)/$$svc.pid; \
 	  if [ -f "$$pidfile" ] && kill -0 "$$(cat "$$pidfile")" 2>/dev/null; then \
-	    echo "  $$svc already running (pid $$(cat "$$pidfile")) on http://localhost:$$port"; continue; fi; \
+	    kept=$$((kept+1)); echo "  $$svc already running (pid $$(cat "$$pidfile")) on http://localhost:$$port"; continue; fi; \
 	  case "$$svc" in profile) pkg=profile_service ;; eval) pkg=eval_service ;; *) pkg=$$(echo "$$svc" | tr - _) ;; esac; \
 	  case "$$svc" in applicability-engine) schema=applicability ;; llm-gateway) schema=llm_gateway ;; *) schema=$$svc ;; esac; \
 	  url="$${CW_DATABASE_URL:-}"; \
 	  if [ "$(STORE)" = "postgres" ]; then \
 	    url="postgresql+psycopg://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}?options=-csearch_path%3D$${schema}%2Cpublic"; \
 	  fi; \
-	  CW_DATABASE_URL="$$url" CW_DB_SCHEMA="$$schema" \
+	  temporal="$${CW_TEMPORAL_ADDRESS:-localhost:7233}"; case "$$svc" in pipeline|applicability-engine) temporal=127.0.0.1:1 ;; esac; \
+	  CW_DATABASE_URL="$$url" CW_DB_SCHEMA="$$schema" CW_TEMPORAL_ADDRESS="$$temporal" CW_PIPELINE_RAW_STORE=$$raw \
 	  CW_IDENTITY_STORE=$(STORE) CW_PROFILE_STORE=$(STORE) CW_RULEBOOK_STORE=$(STORE) CW_OBLIGATION_STORE=$(STORE) CW_NOTIFICATION_STORE=$(STORE) CW_EVAL_STORE=$(STORE) CW_APPLICABILITY_ENGINE_STORE=$(STORE) CW_PIPELINE_STORE=$(STORE) CW_LLM_LEDGER=$(STORE) \
 	  CW_PROFILE_GSTIN_LOOKUP=static CW_BILLING_PROVIDER=$(BILLING) CW_RULEBOOK_PUBLISH_ENABLED=true CW_QA_KAG_ENABLED=false CW_PIPELINE_CRAWL_ENABLED=false \
 	  CW_RULEBOOK_SEED_ON_START=$$seed CW_RULEBOOK_WRITE_TOKEN="$$token" CW_RULEBOOK_REVIEW_TOKEN="$$review" \
@@ -526,6 +535,11 @@ web-stack: check-uv ## UI-only stack, no worker: every service on SERVICE_PORT_B
 	  echo $$! > "$$pidfile"; \
 	  echo "  $$svc  http://localhost:$$port  (log $(WEB_STACK_DIR)/$$svc.log)"; \
 	done; \
+	record=$(WEB_STACK_DIR)/store; now="store=$(STORE)"; now="$$now$$(printf '\nbase=%s' "$$base")"; \
+	prev=""; [ -f "$$record" ] && prev=$$(cat "$$record"); \
+	if [ "$$kept" -eq 0 ] || [ "$$prev" = "$$now" ]; then printf '%s\n' "$$now" > "$$record"; \
+	else printf 'store=unknown\nbase=%s\n' "$$base" > "$$record"; \
+	  echo "  services this command did not start were running already, so $$record says store=unknown (make web-e2e treats it as Postgres)"; fi; \
 	echo "Next: make web-stack-wait, then make web-seed"
 
 web-stack-wait: ## Wait until every web-stack service answers /health (WEB_STACK_WAIT_SECONDS, default 60)
@@ -558,7 +572,8 @@ web-stack-down: ## Stop the web-stack services and remove their pid files (logs 
 	  if kill -0 "$$pid" 2>/dev/null; then pkill -KILL -P "$$pid" 2>/dev/null; kill -KILL "$$pid" 2>/dev/null; fi; \
 	  echo "  $$svc stopped (pid $$pid)"; \
 	  rm -f "$$pidfile"; \
-	done; true
+	done; \
+	set -- $(WEB_STACK_DIR)/*.pid; [ -e "$$1" ] || rm -f $(WEB_STACK_DIR)/store; true
 
 control-panel: ## Open ComplianceWatch Control in your browser (tools/control-panel); Ctrl-C stops it
 	@.venv/bin/python tools/control-panel/panel_server.py --open
@@ -592,7 +607,13 @@ web-e2e-install: check-pnpm ## Download Chromium for Playwright, once per machin
 # unless CW_WEB_RULEBOOK_*_TOKEN is already set; playwright.config.ts turns web.publish_actions
 # on for the run. Without the stack and the seed, the specs that need them are skipped locally
 # (and fail on CI). BILLING names the billing provider the stack was started with (none unless
-# make web-stack had BILLING=memory).
+# make web-stack had BILLING=memory). The specs stage synthetic data through the services (review
+# items, sources, uploads, retries, requeues), which a Postgres store would keep for good, so before
+# the build the guard (apps/web/scripts/stack-guard) refuses services that answer and are not the
+# memory stack $(WEB_STACK_DIR)/store records, a stack recorded as postgres or unknown included,
+# unless E2E_ALLOW_POSTGRES=1; Playwright's chromium project runs the same guard first, with the
+# directory and the allowance this passes on (CW_E2E_WEB_STACK_DIR, E2E_ALLOW_POSTGRES).
+E2E_ALLOW_POSTGRES ?=
 web-e2e: check-pnpm ## Build the web app and run Playwright with axe against next start on WEB_PORT and the web-stack services (after make web-stack-wait and make web-seed)
 	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
 	base=$${SERVICE_PORT_BASE:-8000}; i=0; \
@@ -602,6 +623,8 @@ web-e2e: check-pnpm ## Build the web app and run Playwright with axe against nex
 	done; \
 	export CW_WEB_RULEBOOK_WRITE_TOKEN="$${CW_WEB_RULEBOOK_WRITE_TOKEN:-$${CW_RULEBOOK_WRITE_TOKEN:-local-write-token}}"; \
 	export CW_WEB_RULEBOOK_REVIEW_TOKEN="$${CW_WEB_RULEBOOK_REVIEW_TOKEN:-$${CW_RULEBOOK_REVIEW_TOKEN:-local-review-token}}"; \
+	export CW_E2E_WEB_STACK_DIR="$(abspath $(WEB_STACK_DIR))" E2E_ALLOW_POSTGRES="$${E2E_ALLOW_POSTGRES:-$(E2E_ALLOW_POSTGRES)}"; \
+	$(PNPM) --silent --filter web e2e:guard && \
 	$(PNPM) --filter web build && \
 	PORT=$${WEB_PORT:-3000} CW_WEB_ENV=test WEB_STACK_BILLING=$(BILLING) $(PNPM) --filter web e2e --project=chromium
 

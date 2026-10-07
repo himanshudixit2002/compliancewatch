@@ -79,7 +79,9 @@ never a token field). Rotating the secret signs everyone out.
 ## The request path: proxy, then the gates
 
 **`src/proxy.ts`** runs before a route renders (Next 16's proxy, Node runtime). Its matcher
-skips `_next` assets, `/api/` handlers and paths with a file extension. For the rest,
+skips `_next` assets, `/api/` and `/api-bff/` handlers and paths with a file extension (Next buffers
+a request body for the proxy, which would cut an upload short; each `/api-bff/` handler runs the
+shared handler gate first, below, D-059). For the rest,
 `decide(pathname, search, hasCookie)` sends the visitor to `/sign-in?next=<path and query>`
 when the path is under `/admin` or matches a registry page whose roles are not `"public"`, and
 no `cw_session` cookie is present at all. It does not decrypt, check roles or write anything:
@@ -106,6 +108,16 @@ waiting screen is gated exactly like the live one it will become; the admin layo
 `requireAdmin` (the outer wall: a tenant role gets the 404 before any admin markup exists) and
 every admin page calls it again, because a layout does not re-run on every navigation; every
 server action calls its gate again. The gates never write a cookie.
+
+**The handlers under `/api-bff/`** (a stored file's bytes, an upload) are reached by no proxy, so
+each route file's exported method starts with `gateHandler(entry, request)` from
+`server/bff/gate.ts`, given its own registry entry: for a method that writes, the origin check
+(below) before anything else; without a session, a GET goes to `/sign-in?next=` and comes back
+and any other method is a 401 problem; a tenant role gets a 404 for a regulatory tool, and a role
+short of the entry a 403 that names the entry's roles. `src/test/handler-gate.test.ts` fails,
+naming the file, for a handler that does anything before it. When the proxy takes on the token
+refresh, the `/me` re-read, the stale-session sign-out and the `/admin` allow-list (below), the gate
+takes them on for these handlers too (D-059).
 
 **Where a visitor lands.** `signInHref(next)` builds `/sign-in?next=` only for a same-origin
 path worth returning to (not `/`, not the sign-in page itself). `safeNext(next, fallback)`
@@ -165,8 +177,9 @@ constructor refuses again (D-016).
 
 The cookie is `SameSite=Lax`, so a cross-site POST does not carry it. Next compares a server
 action's `Origin` with the host before running it, and the sign-out handler runs the same kind
-of check itself (`server/origin.ts`): `Sec-Fetch-Site` decides when the browser sends it (only
-`same-origin` passes); otherwise `Origin`'s host must equal the request's `Host` header, or the
+of check itself (`server/origin.ts`), as does the handler gate for a write under `/api-bff/` (the
+upload handler's): `Sec-Fetch-Site` decides when the browser sends it (only `same-origin`
+passes); otherwise `Origin`'s host must equal the request's `Host` header, or the
 first `X-Forwarded-Host` value when `CW_WEB_TRUST_FORWARDED_IP` says the deployment trusts its
 proxy's forwarded headers; a request with neither header is not a browser's cross-site
 submission and passes. The check never uses `request.nextUrl`: under `next start` Next builds
@@ -186,8 +199,9 @@ JavaScript: the cookie is httpOnly and the server passes only the `SessionDto`.
   second factor.
 - `CW_WEB_ADMIN_IP_ALLOWLIST` and `CW_WEB_TRUST_FORWARDED_IP` are parsed and validated by
   `server/env.ts`, but the proxy does not check an allow-list yet; `/admin` is guarded by the
-  session gates alone. `CW_WEB_TRUST_FORWARDED_IP` is read today only by the sign-out origin
-  check, for `X-Forwarded-Host`.
+  session gates alone. `CW_WEB_TRUST_FORWARDED_IP` is read today only by the origin checks of
+  the sign-out handler and of the upload handler (the `/api-bff/` handlers' gate,
+  `server/bff/gate.ts`), for `X-Forwarded-Host`.
 - The services trust `x-tenant-id` from their caller (ADR-014 names that a dev-stage
   limitation); the web server sends the session's tenant, and no screen lets a user choose
   another.

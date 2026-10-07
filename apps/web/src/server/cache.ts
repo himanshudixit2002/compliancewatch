@@ -1,6 +1,6 @@
 import "server-only";
 
-import { revalidatePath, updateTag } from "next/cache";
+import { refresh, revalidatePath, updateTag } from "next/cache";
 
 /**
  * What the data layer caches, and how a mutation invalidates it.
@@ -130,4 +130,13 @@ export interface Invalidation {
 export function afterMutation({ tags: tagList = [], paths = [] }: Invalidation): void {
   for (const tag of tagList) updateTag(tag);
   for (const path of paths) revalidatePath(path);
+}
+
+/**
+ * Called by a server action that wrote nothing because its page was out of date (a setting
+ * someone else changed since the form rendered): `refresh()` (Next 16, server actions only)
+ * renders the page again with what the services hold now, and expires nothing.
+ */
+export function renderAgain(): void {
+  refresh();
 }

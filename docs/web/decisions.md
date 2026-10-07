@@ -972,3 +972,128 @@ rather than reading the flag again, which would show a state that never register
 with the flag on and no endpoint, spans (Next.js's own, the fetch instrumentation and the product
 events) stay in the process; turning export on is two variables; a new route that names a person
 in its path joins `PERSONAL_ROUTES` with a test.
+
+## D-058: The source and pipeline tools write with the shared token as an admin, and show the crawl switch as declared
+
+2026-10-07. The pipeline's source manager and operations routes take an admin a token names or, in
+`header` and `dual` mode, the shared write token. The web server has no tokens yet, so every write
+goes through `server/api/pipeline-write.ts` with the value the rulebook's admin client already sends
+(`CW_WEB_RULEBOOK_WRITE_TOKEN`), and only for an admin: `admin.sources.write` for a source's settings,
+fetch and uploads, `admin.pipeline.control` for retries, requeues and tasks, checked before any
+request; analysts and reviewers read every page. Each body names the session's user as `actor_id`
+with a reason of ten characters or more. The crawl switch (`pipeline.crawl`) is the pipeline's own
+environment, and no route reads it; the web server's environment could hold a different value, so
+the sources page shows the flag as the registry declares it (off by default), what off means and,
+as evidence, the schedule's latest crawl, and a refused "Fetch now" says plainly that crawling is
+off and nothing was read. A source's record comes from the list, since the pipeline has no read of
+one source. A stored document has a page of its own (`admin.pipeline.document`) rather than a row
+that expands: the retry's Idempotency-Key is minted per render, and the source pages, the task list
+and the review work link to one document. The retry key replays for as long as the pipeline keeps
+the retry, and the form keeps the key of a request Temporal did not start (a 503) or whose answer
+never came across the page's next render, which mints a new one, until an answer settles it:
+pressing Retry again after a 503 then starts the attempt the pipeline recorded instead of recording
+a second and leaving the first never started. A task's resolution takes no key, because the
+pipeline answers the same resolution again as it answered the first, and the page says that as
+done. Adding a source is the ready capability `admin.sources.add` (D-039), so the list went live
+without its form. The settings form posts the values it was rendered with as hidden fields, and
+the action sends only what the admin changed from them: compared with the source at save time
+instead, a form opened before another admin's pause sent the old switch back and undid it. A
+setting the admin changed that the pipeline now holds otherwise than the form showed is refused by
+name with its value now, with nothing sent, and the page renders again (`refresh()`), its form
+keyed on the settings it shows; the pipeline's `PATCH` takes no precondition, so a change in the
+moment between that read and the write still lands last. Consequences: once identity issues
+tokens, `pipeline-write.ts` sends the admin's token instead of the shared one and the pipeline
+names the person from it; a pipeline route that reports its flags would let the banner show the
+value itself.
+
+## D-059: Stored bytes and uploads stream through route handlers the proxy does not see
+
+2026-10-07. A server action cannot stream bytes to the browser, and its body limit (1 MB by default)
+would have to rise for every action to carry a 25 MB file it then holds whole. Two route handlers
+under `/api-bff/pipeline/` take the work instead: `system.raw-document` streams a stored document's
+bytes, and `system.uploads` streams an admin's file on to the pipeline. The proxy is left off that
+prefix (its matcher skips `api-bff/`): Next 16 buffers a request body for the proxy and cuts it at
+`proxyClientMaxBodySize` (10 MB) with only a warning, which would have truncated an upload silently.
+So every handler there runs one gate first, `gateHandler` (`server/bff/gate.ts`) with its own
+registry entry: for a method that writes, the sign-out handler's origin check; then the session (a
+read without one goes to sign in and back, a write is a 401); then the entry's roles and tenant
+kinds (a tenant role gets a 404 for a regulatory tool, any other role short of the entry a 403).
+`src/test/handler-gate.test.ts` fails, naming the file, for any `route.ts` under `app/api-bff/`
+whose exported methods do not start with that gate given the entry of their route. The upload
+then needs the write token, as every pipeline write does. The proxy's other duties arrive with the
+identity work (W3) and run only for the paths it sees, so these handlers must then do them
+themselves, in the gate: refreshing a token about to expire, re-reading `/me` when the session's
+check is old, revoking a session whose version is stale, and the `/admin` IP allow-list
+(`CW_WEB_ADMIN_IP_ALLOWLIST`), which covers the tools' bytes and uploads as much as their pages.
+
+The raw handler reads the document's record first, so the content type and the file name come
+from the stored metadata rather than the byte stream, and builds the answer's headers from it
+before asking for the bytes; if the answer still cannot be built once the bytes are open, their
+stream is cancelled. The bytes' time limit covers only the wait for the response to start; the
+answer is `nosniff` and `private, no-store`, inline for a PDF or an HTML page and an attachment
+otherwise, named by the id with the title in `filename*` (made well formed and cut at 100
+characters by code point, so no title fails the encoding). An HTML page is served under `sandbox;
+default-src 'none'`, so a regulator's page runs no script under this origin and loads nothing (the
+e2e suite checks both). A PDF is served inline, from this origin and without a sandbox: Chrome's
+PDF viewer does not render a document served under a sandbox, and the scripts a PDF may carry run
+in the browser's PDF viewer (Chrome's and Firefox's alike), outside the page's origin, not as a page
+of this site. The two ways to take a PDF off this origin, if a viewer ever stops keeping its scripts
+to itself, are to serve it as an attachment (saved, never shown in the browser) or from a separate
+origin of its own, which shares no cookie or storage with the app. The app's static headers still
+apply: `X-Frame-Options: DENY`, and the app's referrer policy replaces any a handler sets.
+
+The upload form sends its fields first and the file last; the handler reads at most 64 KiB of
+fields, checks them as the pipeline does, and sends a new multipart body with the session's user as
+`actor_id` and the file part streamed through, counted against the limit and hashed on the way, so
+nothing is held whole and a file past this server's limit stops with a 413 that names that limit.
+A pipeline configured lower refuses on its own, and that refusal keeps the pipeline's detail, which
+names its own limit. The limit and the types are the pipeline's, and a test reads them from the
+service's code. The upload is not timed as one exchange, which cut a 25 MB file on a link under
+about 1.8 Mbit/s every time: while the file streams on, only a stall stops it (no byte from the
+browser for 30 seconds, a 400 that says nothing was stored), and once the closing delimiter is sent
+the pipeline has 60 seconds to answer (a 504 that says the file may be stored). Consequences: a
+proxy in front of the app must allow bodies of the upload limit on `/api-bff/`, and its own time
+limits bound an upload as Node's do (`next start` keeps Node's 300 seconds for receiving a whole
+request); a page that wants to show a stored PDF inside itself needs a framing decision first.
+
+## D-060: The web stack's pipeline and engine have no Temporal, and the specs stage their own sources, never in Postgres
+
+2026-10-07. `make web-stack` gives the pipeline a Temporal address nothing listens on
+(`127.0.0.1:1`) and, on the memory store, its raw files in memory. With the developer's Temporal
+from `make dev`, an upload or a retry from the web stack would queue an ingest that the product's
+worker runs against another store, which holds no such document; without one, the pipeline stores
+the document and answers 503, which the pages say as "stored, but its ingest did not start" and
+"Temporal did not answer: send the same request again", the same on CI, which runs no Temporal.
+The applicability engine gets the same address, so nothing of the web stack reaches the
+developer's Temporal: the engine's API connects to Temporal only to signal a fan-out run (its
+worker, which the stack does not run, starts them), never at boot; on the memory store it signals
+nothing (no run exists there, D-050), and on Postgres with the fan-out flag on, a control's signal
+is lost, which costs the run one poll (30 seconds), since the run's row decides what it does and
+the controls change the row first. The full e2e suite passes on it as before. The specs stage what they act on through the pipeline's routes with the write token (as
+`stageReview` does for the rulebook): an upload-only source of their own per test
+(`example_<nine digits>`) and synthetic PDF and HTML bytes, so they run again on the same stack and
+never touch a built-in source; a spec that lists every source counts the built-in ones exactly and
+leaves the ones other tests stage meanwhile out of the count. A spec fetches a built-in source only
+after asking whether crawling is off (a fetch of a key no source has answers
+`pipeline-crawl-disabled`, as `cw-product check` asks), so nothing reads a regulator's site. Tasks
+open only inside the ingest and outbox rows die only in the relay, and no route creates either, so
+on this stack the specs check the task and dead-row views and their empty states against the
+pipeline's answers, and the unit tests cover resolving, dismissing and requeueing against the
+spec's shapes.
+
+What the specs stage stays wherever the services keep it, and on `make web-stack STORE=postgres`
+(the shared development database, which a developer's control app starts) a stored document cannot
+even be deleted. So `make web-stack` records its store and port base in `$(WEB_STACK_DIR)/store`
+(`store=unknown` when it found services running that it had not started; `make web-stack-down`
+removes the record), and a guard (`apps/web/scripts/stack-guard`) refuses the run, in plain words,
+when a service the run would use answers and is not that recorded memory stack's: a record saying
+`postgres` or `unknown`, no record (a running stack whose store is unknown counts as Postgres),
+another port base, or a port that no live process of the stack's pid files was started on.
+`make web-e2e` runs it before its build, with `CW_E2E_WEB_STACK_DIR` naming its `WEB_STACK_DIR`,
+and the chromium project depends on a setup project that runs it again, so Playwright run directly
+is guarded too; `E2E_ALLOW_POSTGRES=1` lets a run go on and says so. The product project
+(`e2e/product`, `make product-e2e` and the CI dev-stack job) holds none of the staging specs and
+depends on no guard, and the CI web-e2e job's memory stack passes it. Consequences: resolving a
+task end to end needs a staging route in the pipeline for local and test, or a spec on the product
+stack, which runs the worker; a stack started some other way than `make web-stack` has no record,
+so the suite refuses it until it is restarted that way or allowed.

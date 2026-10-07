@@ -78,13 +78,19 @@ const schema = z
     CW_WEB_SESSION_SECRET: sessionSecret.optional(),
     CW_WEB_SESSION_TTL_SECONDS: positiveInt.max(86_400).default(28_800),
     CW_WEB_REQUEST_TIMEOUT_MS: positiveInt.max(120_000).default(10_000),
-    // The rulebook's two shared secrets, sent only by server/api/rulebook-write.ts: the write
-    // token opens the pipeline's writes, the review token the analyst's decisions (ADR-018).
+    // The two shared secrets (ADR-018). The write token is the rulebook's CW_RULEBOOK_WRITE_TOKEN,
+    // which the pipeline reads as its own copy: server/api/rulebook-write.ts sends it to the
+    // rulebook and server/api/pipeline-write.ts to the pipeline, for an admin's writes. The review
+    // token opens the analyst's decisions, sent by server/api/rulebook-write.ts alone.
     CW_WEB_RULEBOOK_WRITE_TOKEN: z.string().min(1).optional(),
     CW_WEB_RULEBOOK_REVIEW_TOKEN: z.string().min(1).optional(),
+    // The largest file the upload handler forwards to the pipeline: the pipeline's own
+    // CW_PIPELINE_UPLOAD_MAX_BYTES, with the same default and ceiling (server/bff/upload.ts).
+    CW_WEB_PIPELINE_UPLOAD_MAX_BYTES: positiveInt.max(100_000_000).default(25_000_000),
     CW_WEB_ADMIN_IP_ALLOWLIST: cidrList,
     // Trust the reverse proxy's forwarded headers: the client IP (x-real-ip, x-forwarded-for)
-    // and, for the sign-out origin check, the host (x-forwarded-host).
+    // and, for the origin checks of the sign-out handler and of the upload handler (the
+    // /api-bff/ handlers' gate, server/bff/gate.ts), the host (x-forwarded-host).
     CW_WEB_TRUST_FORWARDED_IP: envBoolean.default(false),
     CW_WEB_SEED_STATE_PATH: z.string().min(1).default("../../var/seed/last.json"),
     CW_WEB_BUILD_SHA: z.string().min(1).optional(),

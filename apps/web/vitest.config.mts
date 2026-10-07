@@ -12,8 +12,13 @@ export default defineConfig({
     environment: "jsdom",
     // The seed's tests run under node (a file-level directive) over its helpers, its HTTP layer
     // with a recording fetch, its report and the recorded fixtures; its steps and entry point
-    // talk to the running services and are exercised by make web-seed.
-    include: ["src/**/*.test.{ts,tsx}", "scripts/seed/*.test.mts"],
+    // talk to the running services and are exercised by make web-seed. The end-to-end guard's
+    // decision is tested the same way; its entry point asks the running services.
+    include: [
+      "src/**/*.test.{ts,tsx}",
+      "scripts/seed/*.test.mts",
+      "scripts/stack-guard/*.test.mts",
+    ],
     setupFiles: ["src/test/setup.ts"],
     // axe runs in jsdom take seconds on hosted CI runners (a month grid took 5.6 s there, over
     // the 5 s default), so tests get a wider ceiling; a real hang still fails.

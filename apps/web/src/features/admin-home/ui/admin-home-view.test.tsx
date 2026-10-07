@@ -53,9 +53,11 @@ describe("AdminHomeView", () => {
     const flags = container.querySelector("[data-tool='admin.flags']");
     expect(flags?.textContent).toContain("Available");
     const sources = container.querySelector("[data-tool='admin.sources']");
-    expect(sources?.textContent).toContain("Ready to build");
+    expect(sources?.textContent).toContain("Available");
     const pipeline = container.querySelector("[data-tool='admin.pipeline']");
-    expect(pipeline?.textContent).toContain("Ready to build");
+    expect(pipeline?.textContent).toContain("Available");
+    const team = container.querySelector("[data-tool='admin.team']");
+    expect(team?.textContent).toContain("Ready to build");
     const audit = container.querySelector("[data-tool='admin.audit']");
     expect(audit?.textContent).toContain("Waiting for a backend");
     // axe over every tool group is page sized and slow in jsdom on CI runners, so it checks one
