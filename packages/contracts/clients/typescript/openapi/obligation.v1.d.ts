@@ -62,6 +62,30 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  "/v1/obligation/data-export": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Everything the service holds of the tenant, for the tenant's data export
+     * @description The tenant's obligations in any status (``obligations``), the change log of each
+     *     (``changes``) and the comments on them (``comments``), each oldest first and then by id,
+     *     every section present and empty when there is nothing. For a user with owner or ca_admin, and
+     *     for a service with data:export naming the tenant in ``x-tenant-id`` (with tenant:act);
+     *     anyone else is a 403, and no tenant a 401.
+     */
+    get: operations["data_export_v1_obligation_data_export_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/obligation/obligations": {
     parameters: {
       query?: never;
@@ -475,6 +499,34 @@ export type components = {
        */
       obligation_id: string;
     };
+    /**
+     * DataExportOut
+     * @description The obligation service's part of a tenant's data export. ``sections`` holds every section,
+     *     an empty list when the tenant has nothing in it: ``obligations`` (every obligation, in any
+     *     status), ``changes`` (the change log of each) and ``comments``, each oldest first and then by
+     *     id. Rows carry the fields of the records under their own names, ids as strings, instants and
+     *     days in ISO 8601, enums as their values.
+     */
+    DataExportOut: {
+      /**
+       * Generated At
+       * Format: date-time
+       */
+      generated_at: string;
+      /** Sections */
+      sections: {
+        [key: string]: {
+          [key: string]: unknown;
+        }[];
+      };
+      /** Service */
+      service: string;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+    };
     /** HealthResponse */
     HealthResponse: {
       /** Service */
@@ -849,6 +901,56 @@ export interface operations {
       };
       /** @description Service Unavailable */
       503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  data_export_v1_obligation_data_export_get: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
+        "x-tenant-id"?: string | null;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DataExportOut"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
         headers: {
           [name: string]: unknown;
         };

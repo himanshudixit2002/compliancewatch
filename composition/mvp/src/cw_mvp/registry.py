@@ -21,6 +21,9 @@ entry names:
   flag can be on in this process (``loopback_routes_for``);
 - ``called_routes``, for a service with loopback routes of its own that another service's
   loopback routes call: the routes those calls reach, none of them a loopback route;
+- ``service_maps``, settings that name other services with their URLs as
+  ``service=url,service=url`` (identity's ``identity_export_sources``), as ``(field, services)``
+  pairs: every URL is set to the internal listener, and the services count among its calls;
 - ``takes_authenticator`` and ``takes_token_source``, whether ``build`` accepts identity's
   authenticator and a source of service tokens minted in the process.
 
@@ -89,6 +92,7 @@ class ServiceEntry[S: Settings]:
     loopback_routes: tuple[str, ...] = ()
     flagged_loopback_routes: tuple[tuple[str, tuple[str, ...]], ...] = ()
     called_routes: tuple[str, ...] = ()
+    service_maps: tuple[tuple[str, tuple[str, ...]], ...] = ()
     takes_authenticator: bool = True
     takes_token_source: bool = False
     calls_identity: bool = False
@@ -97,6 +101,9 @@ class ServiceEntry[S: Settings]:
         for field in self.url_fields:
             if not field.endswith(URL_SUFFIX) or field not in self.settings_type.model_fields:
                 raise ValueError(f"{self.name}: {field!r} is not a URL field of its settings")
+        for field, _ in self.service_maps:
+            if field not in self.settings_type.model_fields:
+                raise ValueError(f"{self.name}: {field!r} is not a field of its settings")
 
     def loopback_routes_for(self, flag_may_be_on: Callable[[str], bool]) -> tuple[str, ...]:
         """Its loopback routes, with the flagged ones whose flag ``flag_may_be_on``."""
@@ -118,7 +125,8 @@ class ServiceEntry[S: Settings]:
         """The services it calls: ``rulebook_url`` names rulebook, ``llm_gateway_url``
         llm-gateway, and identity with ``calls_identity``."""
         named = tuple(field.removesuffix(URL_SUFFIX).replace("_", "-") for field in self.url_fields)
-        return (("identity",) if self.calls_identity else ()) + named
+        mapped = tuple(service for _, services in self.service_maps for service in services)
+        return (("identity",) if self.calls_identity else ()) + named + mapped
 
     @property
     def store_field(self) -> str | None:
@@ -129,10 +137,26 @@ class ServiceEntry[S: Settings]:
 
 
 PLAN_LIMITS_FLAG: Final = "identity.plan_limits"
+EXPORT_SOURCES: Final = ("profile", "applicability-engine", "obligation", "notification")
+"""The services whose part of a tenant's data export identity reads."""
 
 REGISTRY: Final[tuple[ServiceEntry[Any], ...]] = (
     ServiceEntry(
-        "identity", "identity", IdentitySettings, build_identity, takes_authenticator=False
+        "identity",
+        "identity",
+        IdentitySettings,
+        build_identity,
+        # The export download reads each service's part of the tenant's data.
+        loopback_routes=("GET /v1/identity/data-requests/{request_id}/export",),
+        service_maps=(("identity_export_sources", EXPORT_SOURCES),),
+        # Profile reads entitlements, obligation a membership and notification a consent; none
+        # of them calls anything.
+        called_routes=(
+            "GET /v1/identity/entitlements",
+            "GET /v1/identity/users/{user_id}/membership",
+            "GET /v1/identity/consents",
+        ),
+        takes_authenticator=False,
     ),
     ServiceEntry(
         "profile",
@@ -157,6 +181,7 @@ REGISTRY: Final[tuple[ServiceEntry[Any], ...]] = (
             "GET /v1/profile/nodes/{node_id}",
             "GET /v1/profile/nodes/{node_id}/snapshot",
             "GET /v1/businesses/{business_id}",
+            "GET /v1/profile/data-export",
         ),
         takes_token_source=True,
         calls_identity=True,
@@ -177,6 +202,8 @@ REGISTRY: Final[tuple[ServiceEntry[Any], ...]] = (
             "POST /v1/applicability-engine/businesses/{business_id}/decisions",
             "POST /v1/applicability-engine/dry-runs",
         ),
+        # Identity's export reads the tenant's decisions, which calls nothing.
+        called_routes=("GET /v1/applicability-engine/data-export",),
         takes_token_source=True,
     ),
     ServiceEntry(
@@ -197,7 +224,8 @@ REGISTRY: Final[tuple[ServiceEntry[Any], ...]] = (
             "GET /v1/businesses/{business_id}/obligations",
         ),
         # qa's ask and notification's bulk read a business's obligations, which calls nothing.
-        called_routes=("GET /v1/obligation/obligations",),
+        # and identity's export reads the tenant's part, which calls nothing.
+        called_routes=("GET /v1/obligation/obligations", "GET /v1/obligation/data-export"),
         takes_token_source=True,
     ),
     ServiceEntry(
@@ -207,9 +235,16 @@ REGISTRY: Final[tuple[ServiceEntry[Any], ...]] = (
         build_notification,
         components=notification_components,
         url_fields=("rulebook_url", "obligation_url"),
-        # A CA firm's bulk notification reads each client's open obligations of the change.
-        loopback_routes=("POST /v1/notification/bulk",),
+        # A CA firm's bulk notification reads each client's open obligations of the change, and
+        # a web opt-in asks identity whether the person's consent is recorded.
+        loopback_routes=(
+            "POST /v1/notification/bulk",
+            "PUT /v1/notification/preferences/{channel}/{recipient}",
+        ),
+        # Identity's export reads the tenant's part, which calls nothing.
+        called_routes=("GET /v1/notification/data-export",),
         takes_token_source=True,
+        calls_identity=True,
     ),
     ServiceEntry(
         "qa",
@@ -263,6 +298,8 @@ def service_settings[S: Settings](
         auth_jwks_url=base + JWKS_PATH,
     )
     values.update(dict.fromkeys(entry.url_fields, base))
+    for field, services in entry.service_maps:
+        values[field] = ",".join(f"{service}={base}" for service in services)
     values.update(overrides)
     env_files = list(root.env_files) or None
     return entry.settings_type(_env_file=env_files, **values)

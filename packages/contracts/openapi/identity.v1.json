@@ -521,6 +521,165 @@
         "title": "CreatedTenantOut",
         "type": "object"
       },
+      "DataRequestIn": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "description": "export; deletion is refused (422) until the erasure cascade exists",
+            "enum": [
+              "export",
+              "deletion"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "reason": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Reason",
+            "type": "string"
+          },
+          "tenant_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The tenant a support request is for, by the regulatory team's admin (a reason is then required); others leave it out",
+            "title": "Tenant Id"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "DataRequestIn",
+        "type": "object"
+      },
+      "DataRequestKind": {
+        "enum": [
+          "export",
+          "deletion"
+        ],
+        "title": "DataRequestKind",
+        "type": "string"
+      },
+      "DataRequestOut": {
+        "properties": {
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "deadline_at": {
+            "description": "30 days after it was made",
+            "format": "date-time",
+            "title": "Deadline At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/DataRequestKind"
+          },
+          "overdue": {
+            "description": "Past its deadline and not completed",
+            "title": "Overdue",
+            "type": "boolean"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "requested_at": {
+            "format": "date-time",
+            "title": "Requested At",
+            "type": "string"
+          },
+          "services_done": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Services Done",
+            "type": "array"
+          },
+          "services_pending": {
+            "description": "The services whose data an export of it has not held yet",
+            "items": {
+              "type": "string"
+            },
+            "title": "Services Pending",
+            "type": "array"
+          },
+          "source": {
+            "$ref": "#/components/schemas/DataRequestSource"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DataRequestStatus"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "source",
+          "reason",
+          "requested_at",
+          "deadline_at",
+          "status",
+          "overdue",
+          "services_done",
+          "services_pending",
+          "completed_at"
+        ],
+        "title": "DataRequestOut",
+        "type": "object"
+      },
+      "DataRequestSource": {
+        "enum": [
+          "self_service",
+          "support"
+        ],
+        "title": "DataRequestSource",
+        "type": "string"
+      },
+      "DataRequestStatus": {
+        "enum": [
+          "received",
+          "in_progress",
+          "completed"
+        ],
+        "title": "DataRequestStatus",
+        "type": "string"
+      },
+      "DataRequestsOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DataRequestOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "DataRequestsOut",
+        "type": "object"
+      },
       "DevProviderTokenIn": {
         "additionalProperties": false,
         "properties": {
@@ -2577,6 +2736,404 @@
           }
         ],
         "summary": "Record a consent or a withdrawal (append-only)",
+        "tags": [
+          "identity"
+        ]
+      }
+    },
+    "/v1/identity/data-requests": {
+      "get": {
+        "operationId": "list_data_requests_v1_identity_data_requests_get",
+        "parameters": [
+          {
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
+            "in": "header",
+            "name": "x-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataRequestsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "The tenant's data requests, newest first",
+        "tags": [
+          "identity"
+        ]
+      },
+      "post": {
+        "description": "``tenant_id`` is for the regulatory team's admin recording a support request for that\ntenant (a reason is then required); anyone else leaves it out or names their own tenant.",
+        "operationId": "make_data_request_v1_identity_data_requests_post",
+        "parameters": [
+          {
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
+            "in": "header",
+            "name": "x-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DataRequestIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataRequestOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Ask for a copy of the tenant's data; it is due within 30 days",
+        "tags": [
+          "identity"
+        ]
+      }
+    },
+    "/v1/identity/data-requests/{request_id}": {
+      "get": {
+        "operationId": "read_data_request_v1_identity_data_requests__request_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Request Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
+            "in": "header",
+            "name": "x-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataRequestOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "One data request, with the services that have not answered it yet",
+        "tags": [
+          "identity"
+        ]
+      }
+    },
+    "/v1/identity/data-requests/{request_id}/export": {
+      "get": {
+        "description": "409 identity-export-not-ready for a request that is not an export. The file name is\nbuilt from the request id alone.",
+        "operationId": "download_export_v1_identity_data_requests__request_id__export_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Request Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
+            "in": "header",
+            "name": "x-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The export: one entry per service with its generated_at, or status unavailable and why; services_pending names those still owed"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Download the tenant's data as a JSON file, assembled now",
         "tags": [
           "identity"
         ]

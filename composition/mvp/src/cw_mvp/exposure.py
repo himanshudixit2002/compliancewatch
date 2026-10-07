@@ -13,7 +13,8 @@ Every route a hosted service serves has one class:
 - ``internal``: service-to-service routes (identity's service tokens, channel consents and the
   memberships services check, notification's send, preferences and WhatsApp receipts, the
   rulebook's pipeline writes, the gateway's model calls, the engine's evaluations, which call the
-  profile and the rulebook) and starting an eval run, which spends compute and model budget,
+  profile and the rulebook, and each service's part of a tenant's data export, which identity
+  reads) and starting an eval run, which spends compute and model budget,
   served on the internal listener only.
 
 The internal listener, on the private network, serves every route. The public listener answers
@@ -73,8 +74,16 @@ EXPOSURE: Final[Mapping[str, Mapping[str, Exposure]]] = {
         # What the tenant's plan entitles it to: a user's own tenant, or a service with
         # entitlements:read for the tenant it names (profile's registration check).
         "GET /v1/identity/entitlements": PUBLIC,
+        # A tenant's data requests and the export download: its owner or CA admin (the
+        # regulatory team's admin makes support requests); staff and services are refused.
+        "POST /v1/identity/data-requests": PUBLIC,
+        "GET /v1/identity/data-requests": PUBLIC,
+        "GET /v1/identity/data-requests/{request_id}": PUBLIC,
+        "GET /v1/identity/data-requests/{request_id}/export": PUBLIC,
     },
     "profile": {
+        # One service's part of a tenant's export, which identity assembles (data:export).
+        "GET /v1/profile/data-export": INTERNAL,
         "GET /v1/profile/ping": PUBLIC,
         "POST /v1/profile/entities": PUBLIC,
         "POST /v1/profile/registrations": PUBLIC,
@@ -144,6 +153,8 @@ EXPOSURE: Final[Mapping[str, Mapping[str, Exposure]]] = {
         "GET /v1/rulebook/clauses/unembedded": INTERNAL,
     },
     "applicability-engine": {
+        # One service's part of a tenant's export, which identity assembles (data:export).
+        "GET /v1/applicability-engine/data-export": INTERNAL,
         "GET /v1/applicability-engine/ping": INTERNAL,
         # A tenant's decisions, read by its members, and what a change means for its businesses
         # (the public API's impact of a change).
@@ -175,6 +186,8 @@ EXPOSURE: Final[Mapping[str, Mapping[str, Exposure]]] = {
         "POST /v1/applicability-engine/dry-runs": ADMIN,
     },
     "obligation": {
+        # One service's part of a tenant's export, which identity assembles (data:export).
+        "GET /v1/obligation/data-export": INTERNAL,
         "GET /v1/obligation/ping": PUBLIC,
         "GET /v1/obligation/obligations": PUBLIC,
         # Tracking, read by the tenant's members (and services acting for it) and changed by its
@@ -191,6 +204,8 @@ EXPOSURE: Final[Mapping[str, Mapping[str, Exposure]]] = {
         "GET /v1/businesses/{business_id}/obligations": PUBLIC,
     },
     "notification": {
+        # One service's part of a tenant's export, which identity assembles (data:export).
+        "GET /v1/notification/data-export": INTERNAL,
         "GET /v1/notification/ping": PUBLIC,
         "GET /v1/notification/templates": PUBLIC,
         "GET /v1/notification/recipients": PUBLIC,

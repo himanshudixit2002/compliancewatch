@@ -132,6 +132,27 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  "/v1/profile/data-export": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Everything the profile holds for the tenant, for its data export
+     * @description The tenant's nodes (PAN and GSTIN included), attribute values, history and review tasks,
+     *     read a page at a time. Identity calls it when the tenant downloads its export.
+     */
+    get: operations["data_export_v1_profile_data_export_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/profile/entities": {
     parameters: {
       query?: never;
@@ -530,6 +551,37 @@ export type components = {
        * Format: date-time
        */
       updated_at: string;
+    };
+    /**
+     * DataExportOut
+     * @description What the profile service holds for one tenant, for the tenant's data export. Every
+     *     section is present, empty when the tenant has no rows in it.
+     */
+    DataExportOut: {
+      /**
+       * Generated At
+       * Format: date-time
+       */
+      generated_at: string;
+      /**
+       * Sections
+       * @description nodes, attributes, versions and review_tasks: JSON rows, oldest first, then the key
+       */
+      sections: {
+        [key: string]: {
+          [key: string]: unknown;
+        }[];
+      };
+      /**
+       * Service
+       * @description The service the sections come from: profile
+       */
+      service: string;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
     };
     /** EntityIn */
     EntityIn: {
@@ -1592,6 +1644,56 @@ export interface operations {
       };
       /** @description Internal Server Error */
       500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  data_export_v1_profile_data_export_get: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
+        "x-tenant-id"?: string | null;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DataExportOut"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
         headers: {
           [name: string]: unknown;
         };

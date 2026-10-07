@@ -522,7 +522,8 @@ web-dev: check-pnpm ## next dev on WEB_PORT from .env; /admin lists the internal
 # pipeline's raw files in memory on the memory store, every address one service has of another
 # on the same base whatever .env says (CW_IDENTITY_URL and CW_AUTH_JWKS_URL at identity,
 # CW_PROFILE_URL, CW_RULEBOOK_URL, CW_OBLIGATION_URL, and CW_LLM_GATEWAY_URL and
-# CW_EVAL_GATEWAY_URL at the gateway: every localhost URL the services' settings default to, so a
+# CW_EVAL_GATEWAY_URL at the gateway, and CW_IDENTITY_EXPORT_SOURCES at profile, the engine,
+# obligation and notification: every localhost URL the services' settings default to, so a
 # stack on another base never calls one on 8001-8010), the notification service's links at
 # CW_WEB_BASE_URL (the web app on WEB_PORT unless set), and the rulebook's two tokens from .env or
 # the placeholders local-write-token and local-review-token (not secrets), as make product passes
@@ -572,6 +573,7 @@ web-stack: check-uv ## UI-only stack, no worker: every service on SERVICE_PORT_B
 	  CW_PROFILE_URL="http://localhost:$$((base+2))" CW_RULEBOOK_URL="http://localhost:$$((base+3))" \
 	  CW_OBLIGATION_URL="http://localhost:$$((base+5))" CW_LLM_GATEWAY_URL="http://localhost:$$((base+8))" \
 	  CW_EVAL_GATEWAY_URL="http://localhost:$$((base+8))" CW_WEB_BASE_URL="$${CW_WEB_BASE_URL:-http://localhost:$${WEB_PORT:-3000}}" \
+	  CW_IDENTITY_EXPORT_SOURCES="profile=http://localhost:$$((base+2)),applicability-engine=http://localhost:$$((base+4)),obligation=http://localhost:$$((base+5)),notification=http://localhost:$$((base+6))" \
 	  nohup $(UV) run --package compliancewatch-$$svc uvicorn $$pkg.main:app --host 127.0.0.1 --port $$port \
 	    > $(WEB_STACK_DIR)/$$svc.log 2>&1 & \
 	  echo $$! > "$$pidfile"; \
