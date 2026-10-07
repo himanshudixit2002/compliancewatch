@@ -547,8 +547,10 @@ detector reads it again; a person's decision stands) or extract (the rule extrac
 optionally read as a type a person gives (which reclassifies it and brings back a document set
 aside), with a reason. The form carries the Idempotency-Key minted when the page rendered
 (`pipeline.retry-document`), so sending the same request again (an answer that never came,
-Temporal not answering) replays its attempt and records nothing twice; reloading the page gives a
-new key. The answers are said plainly: an ingest already running (wait for it), a triage task
+Temporal not answering) replays its attempt and records nothing twice. After such an answer the
+page renders again with a new key, and the form keeps the first until an answer settles the
+request (a success, or a refusal the same request cannot mend): pressing Retry again then starts
+the attempt the pipeline recorded rather than a second one. Reloading the page gives a new key. The answers are said plainly: an ingest already running (wait for it), a triage task
 holding it or nothing left to extract, a type no rule is extracted from, the key reused with another
 retry, the key missing, and Temporal not answering ("send the same request again", with the button
 that sends exactly it).

@@ -11,13 +11,15 @@ import {
 import { Banner, Button, ErrorState } from "@compliancewatch/ui";
 import { t } from "@/shared/i18n";
 import { idleAction, type ActionState } from "@/shared/lib/action-state";
+import { IDEMPOTENCY_KEY_FIELD } from "@/shared/lib/idempotency";
 
 /**
  * A write sent from a client panel and what it came to, for the tools whose writes keep their
  * request (the pipeline's): the last answer, the request it answered, and a request whose answer
  * never arrived (a dropped connection, a server that did not respond), kept whole so "Try again"
- * sends exactly it, an Idempotency-Key included. Focus moves to the outcome once it is known,
- * since the dialog that sent the request has closed and the busy button lost the focus.
+ * sends exactly it, an Idempotency-Key included; a form's next request keeps the key of one still
+ * open (`idempotencyKeyFor`). Focus moves to the outcome once it is known, since the dialog that
+ * sent the request has closed and the busy button lost the focus.
  */
 export type WriteAction<T> = (state: ActionState<T>, formData: FormData) => Promise<ActionState<T>>;
 
@@ -55,6 +57,27 @@ export function useWriteAction<T>(action: WriteAction<T>) {
   }, [attempt]);
   const send = (formData: FormData) => startTransition(() => dispatch(formData));
   return { attempt, send, pending, outcomeRef };
+}
+
+/**
+ * The Idempotency-Key a form's next request carries. While the last request is open (no answer
+ * came, or the service recorded it and asks for the same request again, as `resendable` says),
+ * its own key: the page renders again after such an answer and mints a new key, and a request
+ * sent with that one would be a second request, leaving the first never finished. Once an answer
+ * settles it (a success, or a refusal the same request cannot mend), the key the latest render
+ * minted.
+ */
+export function idempotencyKeyFor<T>(
+  attempt: WriteAttempt<T>,
+  rendered: string,
+  resendable: (problemType: string) => boolean,
+): string {
+  const { last, lost, sent } = attempt;
+  const open =
+    lost !== null ||
+    (last.status === "error" && last.problem !== undefined && resendable(last.problem.type));
+  const key = sent?.get(IDEMPOTENCY_KEY_FIELD);
+  return open && typeof key === "string" && key !== "" ? key : rendered;
 }
 
 export interface WriteOutcomeProps<T> {

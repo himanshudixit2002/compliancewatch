@@ -989,19 +989,22 @@ off and nothing was read. A source's record comes from the list, since the pipel
 one source. A stored document has a page of its own (`admin.pipeline.document`) rather than a row
 that expands: the retry's Idempotency-Key is minted per render, and the source pages, the task list
 and the review work link to one document. The retry key replays for as long as the pipeline keeps
-the retry; a task's resolution takes no key, because the pipeline answers the same resolution again
-as it answered the first, and the page says that as done. Adding a source is the ready capability
-`admin.sources.add` (D-039), so the list went live without its form. The settings form posts the
-values it was rendered with as hidden fields, and the action sends only what the admin changed from
-them: compared with the source at save time instead, a form opened before another admin's pause
-sent the old switch back and undid it. A setting the admin changed that the pipeline now holds
-otherwise than the form showed is refused by name with its value now, with nothing sent, and the
-page renders again (`refresh()`), its form keyed on the settings it shows; the pipeline's `PATCH`
-takes no precondition, so a change in the moment between that read and the write still lands
-last. Consequences: once identity
-issues tokens, `pipeline-write.ts` sends the admin's token instead of the shared one and the
-pipeline names the person from it; a pipeline route that reports its flags would let the banner
-show the value itself.
+the retry, and the form keeps the key of a request Temporal did not start (a 503) or whose answer
+never came across the page's next render, which mints a new one, until an answer settles it:
+pressing Retry again after a 503 then starts the attempt the pipeline recorded instead of recording
+a second and leaving the first never started. A task's resolution takes no key, because the
+pipeline answers the same resolution again as it answered the first, and the page says that as
+done. Adding a source is the ready capability `admin.sources.add` (D-039), so the list went live
+without its form. The settings form posts the values it was rendered with as hidden fields, and
+the action sends only what the admin changed from them: compared with the source at save time
+instead, a form opened before another admin's pause sent the old switch back and undid it. A
+setting the admin changed that the pipeline now holds otherwise than the form showed is refused by
+name with its value now, with nothing sent, and the page renders again (`refresh()`), its form
+keyed on the settings it shows; the pipeline's `PATCH` takes no precondition, so a change in the
+moment between that read and the write still lands last. Consequences: once identity issues
+tokens, `pipeline-write.ts` sends the admin's token instead of the shared one and the pipeline
+names the person from it; a pipeline route that reports its flags would let the banner show the
+value itself.
 
 ## D-059: Stored bytes and uploads stream through route handlers the proxy does not see
 

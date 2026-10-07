@@ -3,7 +3,13 @@ import userEvent from "@testing-library/user-event";
 import { runAxe } from "@compliancewatch/ui/test/axe";
 import { describe, expect, it, vi } from "vitest";
 import type { ActionState } from "@/shared/lib/action-state";
-import { WriteOutcome, useWriteAction, type WriteAction } from "./write-outcome";
+import {
+  WriteOutcome,
+  idempotencyKeyFor,
+  useWriteAction,
+  type WriteAction,
+  type WriteAttempt,
+} from "./write-outcome";
 
 interface Result {
   message: string;
@@ -154,5 +160,57 @@ describe("useWriteAction and WriteOutcome", () => {
     await userEvent.setup().click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(screen.getByText("Example boundary")).toBeDefined());
     errors.mockRestore();
+  });
+});
+
+describe("idempotencyKeyFor", () => {
+  const RENDERED = "00000000-0000-4000-8000-0000000000b2";
+  const SENT = "00000000-0000-4000-8000-0000000000b1";
+  const unavailable = "urn:compliancewatch:problem:example-unavailable";
+  const resendable = (type: string) => type === unavailable;
+
+  function sentWith(key: string | null): FormData {
+    const formData = new FormData();
+    formData.set("reason", "Example reason");
+    if (key !== null) formData.set("idempotency_key", key);
+    return formData;
+  }
+
+  function attempt(
+    last: ActionState<Result>,
+    sent: FormData | null = sentWith(SENT),
+    lost: FormData | null = null,
+  ): WriteAttempt<Result> {
+    return { last, sent, lost, count: sent === null ? 0 : 1 };
+  }
+
+  it("keeps the key of a request the service recorded but asks to send again", () => {
+    const refused = attempt({
+      status: "error",
+      problem: { type: unavailable, title: "Example service did not answer" },
+    });
+    expect(idempotencyKeyFor(refused, RENDERED, resendable)).toBe(SENT);
+  });
+
+  it("keeps the key of a request whose answer never came", () => {
+    const lost = attempt({ status: "idle" }, sentWith(SENT), sentWith(SENT));
+    expect(idempotencyKeyFor(lost, RENDERED, resendable)).toBe(SENT);
+  });
+
+  it("takes the latest render's key once an answer settles the request, or before any", () => {
+    expect(idempotencyKeyFor(attempt({ status: "idle" }, null), RENDERED, resendable)).toBe(
+      RENDERED,
+    );
+    const done = attempt({ status: "ok", value: { message: "Example done." } });
+    expect(idempotencyKeyFor(done, RENDERED, resendable)).toBe(RENDERED);
+    const refused = attempt({
+      status: "error",
+      problem: { type: "urn:compliancewatch:problem:example-refused", title: "Example refusal" },
+    });
+    expect(idempotencyKeyFor(refused, RENDERED, resendable)).toBe(RENDERED);
+    const form = attempt({ status: "error", fieldErrors: { reason: ["Example message"] } });
+    expect(idempotencyKeyFor(form, RENDERED, resendable)).toBe(RENDERED);
+    const keyless = attempt({ status: "idle" }, sentWith(null), sentWith(null));
+    expect(idempotencyKeyFor(keyless, RENDERED, resendable)).toBe(RENDERED);
   });
 });

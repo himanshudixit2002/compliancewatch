@@ -15,7 +15,12 @@ import { t, type MessageKey } from "@/shared/i18n";
 import { fieldErrorOf } from "@/shared/lib/action-state";
 import { IDEMPOTENCY_KEY_FIELD } from "@/shared/lib/idempotency";
 import { DOCUMENT_TYPE_LABELS } from "@/shared/ui/pipeline";
-import { WriteOutcome, useWriteAction, type WriteAction } from "@/shared/ui/write-outcome";
+import {
+  WriteOutcome,
+  idempotencyKeyFor,
+  useWriteAction,
+  type WriteAction,
+} from "@/shared/ui/write-outcome";
 import {
   EXTRACTED_TYPES,
   REASON_MAX_LENGTH,
@@ -31,7 +36,11 @@ import {
 export interface RetryPanelProps {
   /** The retry action, bound to the document. */
   action: WriteAction<WriteResult>;
-  /** The Idempotency-Key minted for this render: the same request sent again carries it. */
+  /**
+   * The Idempotency-Key minted for this render. A request the pipeline recorded without starting
+   * (Temporal did not answer) or that got no answer keeps its own key until an answer settles it,
+   * though the page renders again with a new one meanwhile.
+   */
   idempotencyKey: string;
   /** "Example notice 1", for the dialog. */
   documentTitle: string;
@@ -52,9 +61,11 @@ const FIELD_NAMES = Object.values(RETRY_FIELDS);
  * An admin's retry of a stored document: the stage its ingest starts again from (no new fetch),
  * optionally the type a person reads it as (which reclassifies it, beats the detector and brings
  * back a document set aside or whose triage was dismissed), and the reason the pipeline keeps. The
- * request carries the Idempotency-Key this render minted, so sending the same request again (an
+ * request carries the Idempotency-Key the page minted, so sending the same request again (an
  * answer that never came, or Temporal not answering) is answered with its attempt and never
- * records a second one. A dialog says what follows before anything is sent.
+ * records a second one; the form's Retry keeps that key too until the attempt is settled, so
+ * pressing it again after such an answer is the same request, not a second attempt that would
+ * leave the first never started. A dialog says what follows before anything is sent.
  */
 export function RetryPanel({ action, idempotencyKey, documentTitle }: RetryPanelProps) {
   const id = useId();
@@ -64,6 +75,7 @@ export function RetryPanel({ action, idempotencyKey, documentTitle }: RetryPanel
   const [confirming, setConfirming] = useState(false);
   const { attempt, send, pending, outcomeRef } = useWriteAction(action);
   const state = attempt.last;
+  const key = idempotencyKeyFor(attempt, idempotencyKey, isResendable);
   const typeLabel = type === "" ? null : t(DOCUMENT_TYPE_LABELS[type as (typeof TYPES)[number]]);
   const extractRefused = stage === "extract" && type !== "" && !EXTRACTED_TYPES.includes(type);
 
@@ -72,7 +84,7 @@ export function RetryPanel({ action, idempotencyKey, documentTitle }: RetryPanel
     formData.set(RETRY_FIELDS.stage, stage);
     if (type !== "") formData.set(RETRY_FIELDS.docType, type);
     formData.set(RETRY_FIELDS.reason, reason.trim());
-    formData.set(IDEMPOTENCY_KEY_FIELD, idempotencyKey);
+    formData.set(IDEMPOTENCY_KEY_FIELD, key);
     setConfirming(false);
     send(formData);
   };

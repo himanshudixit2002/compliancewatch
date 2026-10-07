@@ -161,6 +161,74 @@ describe("DocumentView", () => {
     expect(first?.get("idempotency_key")).toBe(KEY);
   });
 
+  it("keeps the key of a retry Temporal did not start when the page renders again, until it is settled", async () => {
+    const answers = [
+      {
+        status: "error" as const,
+        problem: {
+          type: "urn:compliancewatch:problem:pipeline-ingest-unavailable",
+          title: "Temporal did not answer: send the same request again",
+        },
+      },
+      {
+        status: "ok" as const,
+        value: { message: "Attempt 1 from Parse replayed." },
+        message: "Attempt 1 from Parse replayed.",
+      },
+      {
+        status: "ok" as const,
+        value: { message: "Attempt 2 from Parse recorded." },
+        message: "Attempt 2 from Parse recorded.",
+      },
+    ];
+    const action = vi.fn<WriteAction<WriteResult>>(
+      async () => answers.shift() ?? { status: "idle" },
+    );
+    const page = (retryKey: string) => (
+      <DocumentView
+        title="Example notice 1"
+        crumbs={CRUMBS}
+        view={view()}
+        access={{ allowed: true }}
+        retryAction={action}
+        retryKey={retryKey}
+      />
+    );
+    const { container, rerender } = render(page(KEY));
+    const user = userEvent.setup();
+    const panel = container.querySelector("[data-slot='retry-panel']") as HTMLElement;
+    const retry = async () => {
+      await user.click(within(panel).getByRole("button", { name: "Retry the document" }));
+      await user.click(
+        within(screen.getByRole("dialog")).getByRole("button", { name: "Retry the document" }),
+      );
+    };
+    await user.type(within(panel).getByLabelText(/^Why/), "Example reason of enough length");
+    await retry();
+    await waitFor(() =>
+      expect(
+        screen.getByText("Temporal did not answer: send the same request again"),
+      ).toBeDefined(),
+    );
+    // The answer renders the page again, which mints a new key; the form's Retry keeps the first.
+    rerender(page("00000000-0000-4000-8000-0000000000a2"));
+    await retry();
+    await waitFor(() =>
+      expect(container.querySelector("[data-slot='write-done']")?.textContent).toBe(
+        "Attempt 1 from Parse replayed.",
+      ),
+    );
+    // Settled: the next retry is a new request, with the key of the render that followed.
+    rerender(page("00000000-0000-4000-8000-0000000000a3"));
+    await retry();
+    await waitFor(() => expect(action).toHaveBeenCalledTimes(3));
+    expect(action.mock.calls.map((call) => call[1].get("idempotency_key"))).toEqual([
+      KEY,
+      KEY,
+      "00000000-0000-4000-8000-0000000000a3",
+    ]);
+  });
+
   it("warns that no rule is extracted from a type kept for reference", async () => {
     const action = vi.fn<WriteAction<WriteResult>>(async () => ({ status: "idle" }));
     const { container } = render(

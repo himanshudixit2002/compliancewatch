@@ -205,6 +205,15 @@ test.describe("pipeline", () => {
     }) => {
       const staged = await stageUploadSource();
       const { documentId } = await stageUpload(staged.key, "Example statute retried from parse");
+      // The Idempotency-Key of each retry the page sends (the action's form data carries it).
+      const keys: string[] = [];
+      page.on("request", (request) => {
+        if (request.method() !== "POST" || request.headers()["next-action"] === undefined) return;
+        const key = /name="[^"]*idempotency_key"\r\n\r\n([0-9a-f-]{36})/.exec(
+          request.postData() ?? "",
+        )?.[1];
+        if (key !== undefined) keys.push(key);
+      });
       await signIn(ADMIN);
       await page.goto(`${PAGE}/documents/${documentId}`);
       const panel = page.locator("[data-slot='retry-panel']");
@@ -220,10 +229,19 @@ test.describe("pipeline", () => {
       await expect(outcome).toContainText("Temporal did not answer: send the same request again");
       await checkA11y();
       await outcome.getByRole("button", { name: "Send the same request again" }).click();
+      await expect.poll(() => keys.length).toBe(2);
       await expect(
         outcome.getByRole("button", { name: "Send the same request again" }),
       ).toBeEnabled();
       await expect(outcome).toContainText("Temporal did not answer: send the same request again");
+      // The page rendered again after each answer, with a new key; the form's own Retry still
+      // sends the first, so it is the same request and never a second attempt.
+      await panel.getByRole("button", { name: "Retry the document" }).click();
+      await dialog.getByRole("button", { name: "Retry the document" }).click();
+      await expect.poll(() => keys.length).toBe(3);
+      await expect(panel.getByRole("button", { name: "Retry the document" })).toBeEnabled();
+      await expect(outcome).toContainText("Temporal did not answer: send the same request again");
+      expect(new Set(keys).size, `one key for the three sends: ${keys.join(", ")}`).toBe(1);
     });
   });
 });
