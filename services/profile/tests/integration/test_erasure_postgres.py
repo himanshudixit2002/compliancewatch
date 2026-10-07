@@ -1,7 +1,8 @@
 """Profile's erasure on Postgres, as its own role cw_profile under forced row-level security:
-the tenant's rows go in the order of the foreign keys, another tenant's stay, and the answer and
-its audit entry commit with the erasure (the role inserts audit rows; it reads none). Needs
-Docker."""
+the tenant's rows go in the order of the foreign keys, another tenant's stay, and the answer, its
+audit entry and the erased marker commit with the erasure (the role inserts audit rows; it reads
+none). The catalog then shows that every table of the schema with a tenant column is erased or
+retained with a reason, and holds no row of the tenant unless retained. Needs Docker."""
 
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -25,7 +26,8 @@ from profile_service.infrastructure.repository import PostgresUnitOfWorkFactory
 from profile_service.testing import GSTIN_KARNATAKA
 from py_common.audit.testing import install_audit_table
 from py_common.db_roles import apply_roles, as_role
-from py_common.erasure import count_rows, erase_and_record
+from py_common.erasure import ConnectionErasedTenants, count_rows, erase_and_record
+from py_common.erasure_testing import assert_nothing_left
 
 SERVICE_DIR = Path(__file__).resolve().parents[2]
 IMAGE = "pgvector/pgvector:0.8.6-pg16"
@@ -113,3 +115,18 @@ def test_the_tenant_s_profile_goes_and_another_s_stays(engine: Engine, database_
             text("SELECT topic FROM outbox_event WHERE tenant_id = :t"), {"t": tenant.value}
         ).scalars()
         assert "tenant.data.erased" in list(topics)
+
+    owner = create_engine(database_url)
+    with owner.connect() as connection:
+        retained = assert_nothing_left(connection, SCHEMA, tenant, answer)
+    owner.dispose()
+    assert retained["erased_tenant.tenant_id"] == 1, "the marker"
+    assert retained["outbox_event.tenant_id"] >= 1, "the answer waits for the relay"
+    with engine.begin() as connection:
+        assert ConnectionErasedTenants(connection).is_erased(tenant)
+        assert not ConnectionErasedTenants(connection).is_erased(other)
+    with engine.begin() as connection:
+        again = erase_and_record(
+            "profile", PostgresProfileEraser(connection), request, clock=lambda: NOW
+        )
+    assert sum(again.tables.values()) == 0, "run again it finds nothing"

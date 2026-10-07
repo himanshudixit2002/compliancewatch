@@ -198,15 +198,24 @@ tables against the provider's sandbox (then `MAPPING_REVIEW_STATUS` becomes `rev
 
 ## Erasure
 
-The worker (`profile_service.worker`, `make worker SERVICE=profile`, or `cw-mvp worker`; it
-needs `CW_PROFILE_STORE=postgres`) hosts the consumer of tenant.deletion.requested in group
-`profile.erasure`. While the flag `identity.tenant_erasure` (`CW_TENANT_ERASURE_ENABLED`, per tenant with `CW_TENANT_ERASURE_TENANTS`; off by default) is off for the tenant, it only logs `erasure.off`. On, it deletes
-the tenant's `profile_version`, `profile_attribute`, `review_task` and `profile_node` rows (in
-that order, under the tenant's setting), its idempotency keys and its published events, and
-answers tenant.data.erased (service profile) with the row counts and a `tenant.erased` audit row,
-in the transaction that marks the event processed (`infrastructure.erasure`). Every profile table
-is the tenant's; nothing is kept but its pending events. The not-applicable answers appended to
-`CW_PROFILE_EVAL_CASES_PATH`, a local file, are not erased: the runbook has the operator remove
+The worker (`profile_service.worker`, `make worker SERVICE=profile`, or `cw-mvp worker`; it needs
+`CW_PROFILE_STORE=postgres`) hosts the consumer of tenant.deletion.requested in group
+`profile.erasure`. While the flag `identity.tenant_erasure` (`CW_TENANT_ERASURE_ENABLED`, per tenant
+with `CW_TENANT_ERASURE_TENANTS`; off by default) is off for the tenant, it only logs `erasure.off`.
+On, it first checks the event with identity (`GET /v1/identity/erasures/{tenant_id}` at
+`CW_IDENTITY_URL`, the service client with `erasure:verify`, 5 s): one identity did not send for the
+tenant's open deletion request, or one for the internal tenant, erases nothing and is refused (a
+`tenant.erasure_refused` audit row, dead-lettered at once); identity unreachable is retried, then
+dead-lettered. Otherwise it deletes the tenant's `profile_version`, `profile_attribute`,
+`review_task` and `profile_node` rows (in that order, under the tenant's setting), its idempotency
+keys and its published events, and answers tenant.data.erased (service profile) with the row counts,
+a `tenant.erased` audit row and its erased marker (`erased_tenant`, migration 0004), in the
+transaction that marks the event processed (`infrastructure.erasure`). From then on every route
+answers the tenant 410 `tenant-erased`, a token issued before the erasure included. Every profile
+table is the tenant's; nothing is kept but its pending events and the marker
+(`tests/integration/test_erasure_postgres.py` reads every table with a tenant column from the
+catalog and fails on one the eraser neither erases nor retains). The not-applicable answers appended
+to `CW_PROFILE_EVAL_CASES_PATH`, a local file, are not erased: the runbook has the operator remove
 the tenant's lines where it is set (docs/runbooks/data-requests.md).
 
 ## Layout
