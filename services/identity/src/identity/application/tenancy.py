@@ -32,7 +32,7 @@ from collections.abc import Callable, Iterable
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Final
+from typing import Final, Protocol
 
 from domain_kernel.access import REGULATORY_ROLES, TENANT_ADMIN_ROLES, Principal, Role
 from domain_kernel.audit import AuditActor, AuditEntry
@@ -69,6 +69,12 @@ SIGN_UP_KINDS = (TenantKind.BUSINESS, TenantKind.CA_FIRM)
 SIGNED_IN_GRANTS: Final = TENANT_ADMIN_ROLES | REGULATORY_ROLES
 """Roles only an admin a verified token names may grant: those that manage a tenant's users and
 those that curate the rulebook."""
+
+
+class SeatCheck(Protocol):
+    def __call__(self, uow: UnitOfWork, tenant_id: TenantId) -> None:
+        """Raise when the tenant has no seat left for one more user."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -267,10 +273,15 @@ class InviteUser:
         provider: IdentityProvider,
         *,
         clock: Callable[[], datetime] = utc_now,
+        seats: SeatCheck | None = None,
     ) -> None:
+        """``seats`` refuses a user past the tenant's plan (``SeatLimitReachedError``, 402); it
+        runs before the provider's account is made and again, with the tenant locked, before the
+        user is stored, so two invitations at once cannot both take the last seat."""
         self._unit_of_work = unit_of_work
         self._provider = provider
         self._clock = clock
+        self._seats = seats
 
     def run(
         self,
@@ -283,6 +294,8 @@ class InviteUser:
     ) -> User:
         with self._unit_of_work(tenant_id) as uow:
             tenant, _ = admin_context(uow, tenant_id, actor)
+            if self._seats is not None:
+                self._seats(uow, tenant_id)
         wanted = allowed_roles(tenant.kind, roles)
         check_grant(actor, wanted)
         subject = self._provider.provision(
@@ -307,7 +320,9 @@ class InviteUser:
         display_name: str,
     ) -> User:
         with self._unit_of_work(tenant.id) as uow:
-            tenant, admin = admin_context(uow, tenant.id, actor)
+            tenant, admin = admin_context(uow, tenant.id, actor, lock=self._seats is not None)
+            if self._seats is not None:
+                self._seats(uow, tenant.id)
             user = User.new(
                 tenant,
                 provider=self._provider.name,

@@ -3,6 +3,8 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Header, Path, Query, Request, Response, status
+from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 
 from domain_kernel.ids import UserId
 from identity.api.deps import ChannelAccess, Tenant, Wired
@@ -23,6 +25,7 @@ from identity.domain.billing import PLANS
 from identity.domain.channel_consent import ConsentChannel
 from identity.domain.errors import BillingDisabledError
 from py_common.auth.fastapi import CurrentPrincipal
+from py_common.idempotency.fastapi import IDEMPOTENCY_RESPONSES, IdempotencyKey, run_idempotent
 from py_common.problems import problem_responses
 
 router = APIRouter(prefix="/v1/identity", tags=["identity"])
@@ -123,15 +126,25 @@ def plans() -> list[PlanOut]:
     "/billing/subscriptions",
     summary="Start a subscription with the billing provider",
     status_code=status.HTTP_201_CREATED,
-    responses=problem_responses(401, 403, 422, 503),
+    response_model=SubscriptionOut,
+    responses={**problem_responses(401, 403, 422, 503), **IDEMPOTENCY_RESPONSES},
 )
-def start_subscription(body: SubscriptionIn, tenant: Tenant, wired: Wired) -> SubscriptionOut:
-    if wired.start_subscription is None:
+def start_subscription(
+    body: SubscriptionIn, tenant: Tenant, key: IdempotencyKey, wired: Wired
+) -> JSONResponse:
+    """A retry with the same Idempotency-Key and body gets the first answer back for 24 hours
+    and starts nothing at the provider; the same key with another body is a 422."""
+    start = wired.start_subscription
+    if start is None:
         raise BillingDisabledError()
-    subscription = wired.start_subscription.run(
-        tenant, body.plan_key, email=body.email, name=body.name
-    )
-    return SubscriptionOut.from_subscription(subscription)
+
+    def produce() -> SubscriptionOut:
+        subscription = start.run(
+            tenant, body.plan_key, email=body.email, name=body.name, quantity=body.quantity
+        )
+        return SubscriptionOut.from_subscription(subscription)
+
+    return run_idempotent(wired.idempotency, tenant, key, status.HTTP_201_CREATED, produce)
 
 
 @router.post(
@@ -144,12 +157,19 @@ async def billing_webhook(
     wired: Wired,
     x_razorpay_signature: Annotated[str, Header()] = "",
 ) -> WebhookOut:
-    if wired.receive_billing_webhook is None:
+    """A verified webhook that names no tenant in its notes is answered with ``ignored``; a body
+    the tenant received before with ``duplicate``. Either way the answer is 200, so the provider
+    stops redelivering it."""
+    receive = wired.receive_billing_webhook
+    if receive is None:
         raise BillingDisabledError()
     body = await request.body()
-    event = wired.receive_billing_webhook.run(body, x_razorpay_signature)
+    receipt = await run_in_threadpool(receive.run, body, x_razorpay_signature)
+    event = receipt.event
     return WebhookOut(
         kind=event.kind,
         provider_subscription_id=event.provider_subscription_id,
         status=None if event.status is None else event.status.value,
+        ignored=receipt.ignored,
+        duplicate=receipt.duplicate,
     )

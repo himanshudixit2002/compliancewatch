@@ -122,7 +122,7 @@ def read_membership(user_id: UUID, tenant: Tenant, wired: Wired) -> MembershipOu
     "/users",
     summary="Invite a user: their account at the identity provider, then the user (tenant admins)",
     status_code=status.HTTP_201_CREATED,
-    responses=problem_responses(401, 403, 404, 409, 422, 503),
+    responses=problem_responses(401, 402, 403, 404, 409, 422, 503),
     dependencies=[TenantAdmin],
 )
 def invite_user(

@@ -188,17 +188,41 @@ def test_a_consent_changed_on_the_web_settings_pages_keeps_its_source(client: Te
 def test_billing_with_the_memory_provider(client: TestClient) -> None:
     plans = client.get("/v1/identity/billing/plans").json()
     assert [p["key"] for p in plans] == ["owner_monthly", "ca_seat_monthly"]
+    assert set(plans[0]["limits"]) == {"registrations", "seats"}
+    request = {"plan_key": "owner_monthly", "email": "owner@example.com", "name": "Example"}
+    key = {"Idempotency-Key": str(uuid4())}
     started = client.post(
-        "/v1/identity/billing/subscriptions",
-        json={"plan_key": "owner_monthly", "email": "a@b.c", "name": "Acme"},
-        headers=TENANT,
+        "/v1/identity/billing/subscriptions", json=request, headers={**TENANT, **key}
     )
     assert started.status_code == 201, started.text
+    assert started.json()["quantity"] == 1
+    replayed = client.post(
+        "/v1/identity/billing/subscriptions", json=request, headers={**TENANT, **key}
+    )
+    assert replayed.status_code == 201
+    assert replayed.headers["Idempotent-Replayed"] == "true"
+    assert replayed.json() == started.json(), "a retry starts nothing at the provider"
+    reused = client.post(
+        "/v1/identity/billing/subscriptions",
+        json={**request, "quantity": 2},
+        headers={**TENANT, **key},
+    )
+    assert reused.status_code == 422
+    assert reused.json()["type"].endswith("idempotency-key-reused")
+    missing = client.post("/v1/identity/billing/subscriptions", json=request, headers=TENANT)
+    assert missing.status_code == 428
     subscription_id = started.json()["provider_subscription_id"]
     body = json.dumps(
         {
             "event": "subscription.activated",
-            "payload": {"subscription": {"entity": {"id": subscription_id}}},
+            "payload": {
+                "subscription": {
+                    "entity": {
+                        "id": subscription_id,
+                        "notes": {"tenant_id": TENANT["x-tenant-id"]},
+                    }
+                }
+            },
         }
     ).encode()
     signature = hmac.new(b"memory", body, hashlib.sha256).hexdigest()
@@ -210,15 +234,28 @@ def test_billing_with_the_memory_provider(client: TestClient) -> None:
         "kind": "subscription.activated",
         "provider_subscription_id": subscription_id,
         "status": "active",
+        "ignored": False,
+        "duplicate": False,
     }
+    again = client.post(
+        "/v1/identity/billing/webhook", content=body, headers={"x-razorpay-signature": signature}
+    )
+    assert (again.status_code, again.json()["duplicate"]) == (200, True)
+    no_tenant = b'{"event": "subscription.activated"}'
+    ignored = client.post(
+        "/v1/identity/billing/webhook",
+        content=no_tenant,
+        headers={"x-razorpay-signature": hmac.new(b"memory", no_tenant, "sha256").hexdigest()},
+    )
+    assert (ignored.status_code, ignored.json()["ignored"]) == (200, True)
     bad = client.post(
         "/v1/identity/billing/webhook", content=body, headers={"x-razorpay-signature": "nope"}
     )
     assert bad.status_code == 401
     unknown_plan = client.post(
         "/v1/identity/billing/subscriptions",
-        json={"plan_key": "gold", "email": "a@b.c", "name": "n"},
-        headers=TENANT,
+        json={"plan_key": "gold", "email": "owner@example.com", "name": "n"},
+        headers={**TENANT, "Idempotency-Key": str(uuid4())},
     )
     assert unknown_plan.status_code == 422
 
@@ -227,8 +264,8 @@ def test_billing_is_503_while_disabled() -> None:
     with TestClient(build_app(identity_settings(billing_provider="none"))) as client:
         response = client.post(
             "/v1/identity/billing/subscriptions",
-            json={"plan_key": "owner_monthly", "email": "a@b.c", "name": "n"},
-            headers=TENANT,
+            json={"plan_key": "owner_monthly", "email": "owner@example.com", "name": "n"},
+            headers={**TENANT, "Idempotency-Key": str(uuid4())},
         )
         assert response.status_code == 503
         assert client.post("/v1/identity/billing/webhook", content=b"{}").status_code == 503

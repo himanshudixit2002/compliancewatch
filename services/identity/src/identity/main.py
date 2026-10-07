@@ -5,8 +5,9 @@ The service owns tenants, users and roles, signs people in through the identity 
 (``CW_AUTH_PROVIDER``, ADR-014) and issues the access tokens every service verifies, with its own
 ES256 keys (``CW_IDENTITY_SIGNING_KEYS``). It verifies its own tokens in the process: the
 authenticator it hands to ``create_app`` holds the same keys. It also keeps consent records,
-channel consents for numbers no tenant owns yet, and billing behind ``CW_BILLING_PROVIDER``, and
-it reads the audit log every service writes (``GET /v1/identity/audit``).
+channel consents for numbers no tenant owns yet, and billing behind ``CW_BILLING_PROVIDER`` with
+the entitlements a tenant's plan gives (``GET /v1/identity/entitlements``), and it reads the
+audit log every service writes (``GET /v1/identity/audit``).
 
 In local and test, with ``CW_IDENTITY_DEV_CLIENT_SECRET`` set, the app makes the dev service
 clients exist when it starts.
@@ -25,13 +26,15 @@ from domain_kernel.errors import DomainError
 from identity import __version__
 from identity.api.audit import router as audit_router
 from identity.api.auth import router as auth_router
+from identity.api.entitlements import router as entitlements_router
 from identity.api.router import router
 from identity.api.tenancy import router as tenancy_router
 from identity.application.audit import ReadAuditTrail
-from identity.application.billing import BillingLedger, ReceiveBillingWebhook, StartSubscription
+from identity.application.billing import ReceiveBillingWebhook, StartSubscription
 from identity.application.bootstrap import EnsureDevServiceClients
 from identity.application.channel_consents import ChannelConsentStatus, RecordChannelConsent
 from identity.application.consents import ConsentStatus, RecordConsent
+from identity.application.entitlements import ReadEntitlements, SeatCheck
 from identity.application.sessions import ExchangeSession, IssueServiceToken
 from identity.application.tenancy import (
     ChangeRoles,
@@ -44,8 +47,9 @@ from identity.application.tenancy import (
 )
 from identity.composition import identity_provider
 from identity.domain.audit import AuditReader
-from identity.domain.billing import BillingProvider
+from identity.domain.billing import PLANS, BillingProvider
 from identity.domain.channel_consent import ChannelUnitOfWorkFactory
+from identity.domain.entitlements import Limits
 from identity.domain.errors import (
     BillingDisabledError,
     ChannelPurposeInvalidError,
@@ -62,6 +66,7 @@ from identity.domain.errors import (
     ProviderTokenInvalidError,
     ProviderUnavailableError,
     RoleNotAllowedError,
+    SeatLimitReachedError,
     ServiceClientInvalidError,
     SessionRevokedError,
     SubjectRegisteredError,
@@ -72,11 +77,13 @@ from identity.domain.errors import (
     UserNotFoundError,
     UserNotProvisionedError,
 )
+from identity.domain.flags import FeatureFlags
 from identity.domain.provider import DevIdentityProvider
 from identity.domain.repository import UnitOfWorkFactory
 from identity.infrastructure.audit_reader import PostgresAuditReader
 from identity.infrastructure.billing.memory import MemoryBillingProvider
 from identity.infrastructure.billing.razorpay import RazorpayBillingProvider
+from identity.infrastructure.flags import OpenFeatureFlags
 from identity.infrastructure.memory import MemoryAuditReader, MemoryChannelStore, MemoryStore
 from identity.infrastructure.minter import IssuerMinter
 from identity.infrastructure.providers.fake import FakeIdentityProvider
@@ -93,6 +100,9 @@ from py_common.auth import (
     load_signing_keys,
 )
 from py_common.auth.fastapi import Authenticator
+from py_common.flags import configure_flags
+from py_common.idempotency import IdempotencyStore, MemoryIdempotencyStore
+from py_common.idempotency.sqlalchemy import SqlAlchemyIdempotencyStore
 from py_common.logging import get_logger
 
 SERVICE_NAME = "identity"
@@ -121,6 +131,7 @@ PROBLEM_STATUS: dict[type[DomainError], int] = {
     DevSignInUnavailableError: 404,
     TenantNotFoundError: 404,
     InternalTenantExistsError: 409,
+    SeatLimitReachedError: 402,
 }
 
 log = get_logger(__name__)
@@ -172,27 +183,36 @@ def token_verifier(settings: IdentitySettings, keys: KeySet) -> TokenVerifier:
     )
 
 
-def wire(settings: IdentitySettings) -> Wiring:
+def wire(settings: IdentitySettings, *, flags: FeatureFlags | None = None) -> Wiring:
+    """The use cases on the store the settings name. Without ``flags`` the process-wide
+    OpenFeature provider is configured from the settings and answers them. Idempotency keys
+    live next to the identity tables (``idempotency_key``, migration 0008)."""
+    if flags is None:
+        configure_flags(settings)
+        flags = OpenFeatureFlags()
     unit_of_work: UnitOfWorkFactory
     channel_unit_of_work: ChannelUnitOfWorkFactory
     audit_reader: AuditReader
+    idempotency: IdempotencyStore
     ping: Callable[[], bool]
     if settings.identity_store == "memory":
         memory = MemoryStore()
         unit_of_work, ping = memory, memory.ping
         channel_unit_of_work = MemoryChannelStore()
         audit_reader = MemoryAuditReader(memory)
+        idempotency = MemoryIdempotencyStore()
     else:
         postgres = PostgresUnitOfWorkFactory.from_url(settings.database_url)
         unit_of_work, ping = postgres, postgres.ping
         channel_unit_of_work = postgres.channel_unit_of_work
         audit_reader = PostgresAuditReader(postgres.engine)
+        idempotency = SqlAlchemyIdempotencyStore(postgres.engine)
 
     async def store_ready() -> bool:
         return await run_in_threadpool(ping)
 
     billing = billing_provider(settings)
-    ledger = BillingLedger()
+    free = Limits(registrations=settings.plan_free_registrations, seats=settings.plan_free_seats)
     keys = signing_keys(settings)
     minter = IssuerMinter(
         TokenIssuer(keys, issuer=settings.auth_issuer, audience=settings.auth_audience)
@@ -212,13 +232,10 @@ def wire(settings: IdentitySettings) -> Wiring:
         record_channel_consent=RecordChannelConsent(channel_unit_of_work),
         channel_consent_status=ChannelConsentStatus(channel_unit_of_work),
         billing_enabled=billing is not None,
-        billing_ledger=ledger,
-        start_subscription=None
-        if billing is None
-        else StartSubscription(billing, ledger, unit_of_work),
+        start_subscription=None if billing is None else StartSubscription(billing, unit_of_work),
         receive_billing_webhook=None
         if billing is None
-        else ReceiveBillingWebhook(billing, ledger, unit_of_work),
+        else ReceiveBillingWebhook(billing, unit_of_work),
         keys=keys,
         provider=provider,
         dev_provider=dev_provider,
@@ -230,10 +247,12 @@ def wire(settings: IdentitySettings) -> Wiring:
         current_user=CurrentUser(unit_of_work),
         list_users=ListUsers(unit_of_work),
         read_membership=ReadMembership(unit_of_work),
-        invite_user=InviteUser(unit_of_work, provider),
+        invite_user=InviteUser(unit_of_work, provider, seats=SeatCheck(PLANS, free, flags)),
         change_roles=ChangeRoles(unit_of_work),
         disable_user=DisableUser(unit_of_work),
         read_audit_trail=ReadAuditTrail(audit_reader, unit_of_work),
+        read_entitlements=ReadEntitlements(unit_of_work, PLANS, free, flags),
+        idempotency=idempotency,
     )
 
 
@@ -254,9 +273,12 @@ def ensure_dev_clients(wiring: Wiring) -> None:
     log.info("identity_dev_clients_ensured", clients=[client.client_id for client in ensured])
 
 
-def build_app(settings: IdentitySettings | None = None) -> FastAPI:
+def build_app(
+    settings: IdentitySettings | None = None, *, flags: FeatureFlags | None = None
+) -> FastAPI:
+    """``flags`` replaces the OpenFeature flags (tests)."""
     settings = settings or IdentitySettings(service_name=SERVICE_NAME)
-    wiring = wire(settings)
+    wiring = wire(settings, flags=flags)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -266,7 +288,7 @@ def build_app(settings: IdentitySettings | None = None) -> FastAPI:
     app = create_app(
         service_name=SERVICE_NAME,
         version=__version__,
-        routers=[router, auth_router, tenancy_router, audit_router],
+        routers=[router, auth_router, tenancy_router, audit_router, entitlements_router],
         settings=settings,
         readiness_checks=[("store", wiring.store_ready)],
         lifespan=lifespan,

@@ -4,9 +4,10 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from identity.application.audit import ReadAuditTrail
-from identity.application.billing import BillingLedger, ReceiveBillingWebhook, StartSubscription
+from identity.application.billing import ReceiveBillingWebhook, StartSubscription
 from identity.application.channel_consents import ChannelConsentStatus, RecordChannelConsent
 from identity.application.consents import ConsentStatus, RecordConsent
+from identity.application.entitlements import ReadEntitlements
 from identity.application.sessions import ExchangeSession, IssueServiceToken
 from identity.application.tenancy import (
     ChangeRoles,
@@ -22,6 +23,7 @@ from identity.domain.provider import DevIdentityProvider, IdentityProvider
 from identity.domain.repository import UnitOfWorkFactory
 from identity.settings import IdentitySettings
 from py_common.auth import KeySet
+from py_common.idempotency import IdempotencyStore
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,7 +37,6 @@ class Wiring:
     record_channel_consent: RecordChannelConsent
     channel_consent_status: ChannelConsentStatus
     billing_enabled: bool
-    billing_ledger: BillingLedger
     start_subscription: StartSubscription | None
     receive_billing_webhook: ReceiveBillingWebhook | None
     keys: KeySet
@@ -52,3 +53,5 @@ class Wiring:
     change_roles: ChangeRoles
     disable_user: DisableUser
     read_audit_trail: ReadAuditTrail
+    read_entitlements: ReadEntitlements
+    idempotency: IdempotencyStore
