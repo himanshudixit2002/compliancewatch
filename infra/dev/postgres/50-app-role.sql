@@ -33,3 +33,8 @@ SELECT format('GRANT USAGE ON SCHEMA %I TO %I', nspname, :'app_user'),
 FROM pg_namespace
 WHERE nspname IN ('identity', 'profile', 'rulebook', 'applicability', 'obligation',
                   'notification', 'qa', 'llm_gateway', 'eval', 'pipeline', 'audit') \gexec
+
+-- The count of every tenant's open data requests (roles.sql, the identity directory), once
+-- identity's migrations and make db-roles have made it.
+SELECT format('GRANT EXECUTE ON FUNCTION identity.data_requests_open() TO %I', :'app_user')
+WHERE to_regprocedure('identity.data_requests_open()') IS NOT NULL \gexec

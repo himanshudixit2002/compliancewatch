@@ -11,7 +11,10 @@ roles.sql and dev-passwords.sql, before any migration. Every service then migrat
   second run), and it uses no other service's schema;
 - it may add rows to ``audit.event`` of its tenant or of none, under row-level security, and only
   ``cw_identity`` reads them: its tenant's, and the platform's under the regulatory scope;
-- running the file again changes no privilege, and a role made by hand with more is cut back.
+- running the file again changes no privilege, and a role made by hand with more is cut back;
+- the identity directory: the NOLOGIN role cw_identity_directory owns
+  identity.data_requests_open(), which only cw_identity (and cw_app) may run, and it counts every
+  tenant's open requests that row-level security hides from cw_identity itself.
 """
 
 from collections.abc import Iterator
@@ -154,7 +157,7 @@ def test_each_role_logs_in_with_its_dev_password_and_has_no_other_attribute(
                 text(
                     "SELECT rolname, rolcanlogin, rolsuper, rolbypassrls, rolcreatedb, "
                     "rolcreaterole, rolinherit, rolreplication FROM pg_roles "
-                    "WHERE rolname LIKE 'cw\\_%'"
+                    "WHERE rolname LIKE 'cw\\_%' AND rolcanlogin"
                 )
             )
         }
@@ -316,3 +319,43 @@ def test_running_the_file_again_changes_nothing_and_cuts_a_widened_role_back(
         ).one()
         assert tuple(row) == (False, False, False, False, True)
         assert _privileges(connection) == before
+
+
+DIRECTORY_ROLE = "cw_identity_directory"
+
+
+def test_the_identity_directory_counts_across_tenants_for_identity_only(
+    owner_url: str, owner: Engine, first_migration_writes: dict[str, bool]
+) -> None:
+    with owner.connect() as connection:
+        role = connection.execute(
+            text("SELECT rolcanlogin, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = :r"),
+            {"r": DIRECTORY_ROLE},
+        ).one()
+        assert tuple(role) == (False, False, False)
+    tenants = [TenantId(uuid4()), TenantId(uuid4())]
+    identity = create_engine(as_role(owner_url, "identity"))
+    count = "SELECT coalesce(sum(open), 0) FROM identity.data_requests_open()"
+    with identity.connect() as connection, connection.begin():
+        before = connection.execute(text(count)).scalar_one()
+        for tenant in tenants:
+            _as_tenant(connection, tenant)
+            connection.execute(
+                text(
+                    "INSERT INTO identity.data_request (id, tenant_id, kind, source, "
+                    "requested_at, deadline_at, status) VALUES (:id, :tenant, 'export', "
+                    "'self_service', now() - interval '40 days', now() - interval '10 days', "
+                    "'received')"
+                ),
+                {"id": uuid4(), "tenant": tenant.value},
+            )
+        assert connection.execute(text(count)).scalar_one() == before + 2
+        assert (
+            connection.execute(text("SELECT count(*) FROM identity.data_request")).scalar_one() == 1
+        ), "the role itself reads its current tenant's requests only"
+        connection.rollback()
+    identity.dispose()
+    profile = create_engine(as_role(owner_url, "profile"))
+    with profile.connect() as connection, connection.begin():
+        assert _refused(connection, count) == INSUFFICIENT_PRIVILEGE
+    profile.dispose()
