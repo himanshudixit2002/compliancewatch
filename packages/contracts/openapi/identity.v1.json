@@ -747,6 +747,93 @@
         "title": "JwksOut",
         "type": "object"
       },
+      "LimitProblem": {
+        "description": "A problem that a plan's limit refused (402): the ``limit`` and how many are ``used``,\nas extension members (RFC 9457 section 3.2). Nothing else about what was asked for.",
+        "properties": {
+          "correlation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Correlation Id"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Detail"
+          },
+          "errors": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ValidationIssue"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Errors"
+          },
+          "instance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Instance"
+          },
+          "limit": {
+            "description": "What the tenant's plan allows",
+            "title": "Limit",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          },
+          "used": {
+            "description": "How many the tenant holds already",
+            "title": "Used",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "limit",
+          "used"
+        ],
+        "title": "LimitProblem",
+        "type": "object"
+      },
       "LimitsOut": {
         "properties": {
           "registrations": {
@@ -1517,7 +1604,7 @@
           },
           "ignored": {
             "default": false,
-            "description": "The webhook names no tenant, so nothing was recorded",
+            "description": "Nothing changed: the webhook names no tenant, or a subscription the tenant does not hold and may not adopt, or it is older than the last event applied, or follows a cancellation",
             "title": "Ignored",
             "type": "boolean"
           },
@@ -1874,7 +1961,7 @@
     },
     "/v1/identity/billing/subscriptions": {
       "post": {
-        "description": "A retry with the same Idempotency-Key and body gets the first answer back for 24 hours\nand starts nothing at the provider; the same key with another body is a 422.",
+        "description": "A retry with the same Idempotency-Key and body gets the first answer back for 24 hours\nand starts nothing at the provider; the same key with another body is a 422. A key whose\nstart failed after the provider may have created the subscription is never sent to it\nagain: the retry gets 409 identity-subscription-start-pending.",
         "operationId": "start_subscription_v1_identity_billing_subscriptions_post",
         "parameters": [
           {
@@ -2016,7 +2103,7 @@
     },
     "/v1/identity/billing/webhook": {
       "post": {
-        "description": "A verified webhook that names no tenant in its notes is answered with ``ignored``; a body\nthe tenant received before with ``duplicate``. Either way the answer is 200, so the provider\nstops redelivering it.",
+        "description": "A verified webhook that changed nothing is answered with ``ignored``: it names no tenant,\na subscription the tenant does not hold and may not adopt, or it is older than the last\nevent applied or follows a cancellation. A body the tenant received before is answered with\n``duplicate``. Either way the answer is 200, so the provider stops redelivering it.",
         "operationId": "billing_webhook_v1_identity_billing_webhook_post",
         "parameters": [
           {
@@ -2026,6 +2113,17 @@
             "schema": {
               "default": "",
               "title": "X-Razorpay-Signature",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-razorpay-event-id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 128,
+              "title": "X-Razorpay-Event-Id",
               "type": "string"
             }
           }
@@ -3122,7 +3220,7 @@
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Problem"
+                  "$ref": "#/components/schemas/LimitProblem"
                 }
               }
             },

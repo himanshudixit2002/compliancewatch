@@ -103,7 +103,9 @@ export type paths = {
     /**
      * Start a subscription with the billing provider
      * @description A retry with the same Idempotency-Key and body gets the first answer back for 24 hours
-     *     and starts nothing at the provider; the same key with another body is a 422.
+     *     and starts nothing at the provider; the same key with another body is a 422. A key whose
+     *     start failed after the provider may have created the subscription is never sent to it
+     *     again: the retry gets 409 identity-subscription-start-pending.
      */
     post: operations["start_subscription_v1_identity_billing_subscriptions_post"];
     delete?: never;
@@ -123,9 +125,10 @@ export type paths = {
     put?: never;
     /**
      * Provider webhook: verified against the webhook secret before it is read
-     * @description A verified webhook that names no tenant in its notes is answered with ``ignored``; a body
-     *     the tenant received before with ``duplicate``. Either way the answer is 200, so the provider
-     *     stops redelivering it.
+     * @description A verified webhook that changed nothing is answered with ``ignored``: it names no tenant,
+     *     a subscription the tenant does not hold and may not adopt, or it is older than the last
+     *     event applied or follows a cancellation. A body the tenant received before is answered with
+     *     ``duplicate``. Either way the answer is 200, so the provider stops redelivering it.
      */
     post: operations["billing_webhook_v1_identity_billing_webhook_post"];
     delete?: never;
@@ -755,6 +758,49 @@ export type components = {
       /** Keys */
       keys: components["schemas"]["JwkOut"][];
     };
+    /**
+     * LimitProblem
+     * @description A problem that a plan's limit refused (402): the ``limit`` and how many are ``used``,
+     *     as extension members (RFC 9457 section 3.2). Nothing else about what was asked for.
+     */
+    LimitProblem: {
+      /**
+       * Correlation Id
+       * @default null
+       */
+      correlation_id?: string | null;
+      /**
+       * Detail
+       * @default null
+       */
+      detail?: string | null;
+      /**
+       * Errors
+       * @default null
+       */
+      errors?: components["schemas"]["ValidationIssue"][] | null;
+      /**
+       * Instance
+       * @default null
+       */
+      instance?: string | null;
+      /**
+       * Limit
+       * @description What the tenant's plan allows
+       */
+      limit: number;
+      /** Status */
+      status: number;
+      /** Title */
+      title: string;
+      /** Type */
+      type: string;
+      /**
+       * Used
+       * @description How many the tenant holds already
+       */
+      used: number;
+    };
     /** LimitsOut */
     LimitsOut: {
       /**
@@ -1149,7 +1195,7 @@ export type components = {
       duplicate?: boolean;
       /**
        * Ignored
-       * @description The webhook names no tenant, so nothing was recorded
+       * @description Nothing changed: the webhook names no tenant, or a subscription the tenant does not hold and may not adopt, or it is older than the last event applied, or follows a cancellation
        * @default false
        */
       ignored?: boolean;
@@ -1419,6 +1465,7 @@ export interface operations {
     parameters: {
       query?: never;
       header?: {
+        "x-razorpay-event-id"?: string;
         "x-razorpay-signature"?: string;
       };
       path?: never;
@@ -2211,7 +2258,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/problem+json": components["schemas"]["Problem"];
+          "application/problem+json": components["schemas"]["LimitProblem"];
         };
       };
       /** @description Forbidden */
