@@ -237,7 +237,7 @@ def _as_tenant(connection: Connection, tenant: TenantId) -> None:
     )
 
 
-def test_the_audit_log_takes_rows_from_every_role_and_shows_them_to_identity_only(
+def test_a_service_role_adds_audit_rows_that_only_identity_reads(
     owner_url: str, owner: Engine, first_migration_writes: dict[str, bool]
 ) -> None:
     tenant, other = TenantId(uuid4()), TenantId(uuid4())
