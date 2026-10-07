@@ -4,7 +4,9 @@ import { DEMO, NO_OBLIGATION } from "../lib.mts";
 
 /**
  * The owner's WhatsApp preference on the notification service (opted in from the web onboarding,
- * Hindi, reminders held during the quiet hours), read back; then one notification for the demo
+ * Hindi, reminders held during the quiet hours), read back: the service asks identity first
+ * whether the owner (`ownerId`, the consent subject) granted whatsapp_reminders, which the
+ * consents step recorded; then one notification for the demo
  * business, so the reminders pages have a real record to show: the opt-in confirmation sent to
  * that number through `POST /v1/notification/send`, the route that sends one notification now
  * (dedupe, consent, quiet hours, queue, deliver). Nothing else on the web stack creates a
@@ -36,6 +38,7 @@ export interface NotificationResult {
 export async function seedNotification(
   clients: SeedClients,
   businessId: string,
+  ownerId: string,
   log: (line: string) => void,
 ): Promise<NotificationResult> {
   const step = "notification";
@@ -51,6 +54,7 @@ export async function seedNotification(
         language: DEMO.whatsappLanguage,
         quiet_hours_start: DEMO.quietHours.start,
         quiet_hours_end: DEMO.quietHours.end,
+        subject: ownerId,
       },
     }),
   );

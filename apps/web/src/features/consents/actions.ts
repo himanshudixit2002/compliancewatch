@@ -92,6 +92,7 @@ export async function recordConsents(
     const preference = await gateway.setPreference("whatsapp", recipient, {
       optedIn: true,
       source: "web_onboarding",
+      subject: session.userId,
     });
     if (!preference.ok) {
       const state = toActionState<undefined>(preference);
@@ -199,6 +200,7 @@ export async function changeConsent(
     const optOut = await gateway.setPreference("whatsapp", recipient, {
       optedIn: false,
       source: "web_settings",
+      subject: session.userId,
     });
     if (!optOut.ok) return changeFailed(optOut, t("consentSettings.error.optOutFailed"));
     await rememberRecipient(session.userId, "whatsapp", recipient);
@@ -227,6 +229,7 @@ export async function changeConsent(
     const optIn = await gateway.setPreference("whatsapp", recipient, {
       optedIn: true,
       source: "web_settings",
+      subject: session.userId,
     });
     if (!optIn.ok) return changeFailed(optIn, t("consentSettings.error.optInFailed"));
     await rememberRecipient(session.userId, "whatsapp", recipient);

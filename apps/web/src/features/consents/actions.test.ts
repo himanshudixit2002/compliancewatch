@@ -264,7 +264,7 @@ describe("recordConsents", () => {
     const put = fake.requests.find((request) => request.method === "PUT");
     // Keyed as WhatsApp reports the number: the digits without the plus.
     expect(put?.pathname).toBe("/v1/notification/preferences/whatsapp/919800000000");
-    expect(put?.body).toEqual({ opted_in: true, source: "web_onboarding" });
+    expect(put?.body).toEqual({ opted_in: true, source: "web_onboarding", subject: OWNER_ID });
     expect(revalidatePath).toHaveBeenCalledWith("/onboarding");
     // The settings pages find the number again on this device.
     expect(await readRememberedRecipients(OWNER_ID)).toEqual({ whatsapp: "919800000000" });
@@ -450,7 +450,11 @@ describe("changeConsent", () => {
       "PUT /v1/notification/preferences/whatsapp/919800000000",
       "POST /v1/identity/consents",
     ]);
-    expect(fake.requests[1]?.body).toEqual({ opted_in: false, source: "web_settings" });
+    expect(fake.requests[1]?.body).toEqual({
+      opted_in: false,
+      source: "web_settings",
+      subject: OWNER_ID,
+    });
     expect(fake.requests[2]?.body).toEqual({
       subject: OWNER_ID,
       purpose: "whatsapp_reminders",
@@ -516,7 +520,11 @@ describe("changeConsent", () => {
     );
     expect(fake.requests.map((request) => request.method)).toEqual(["GET", "POST", "PUT"]);
     expect(fake.requests[1]?.body).toMatchObject({ granted: true, notice_version: WHATSAPP });
-    expect(fake.requests[2]?.body).toEqual({ opted_in: true, source: "web_settings" });
+    expect(fake.requests[2]?.body).toEqual({
+      opted_in: true,
+      source: "web_settings",
+      subject: OWNER_ID,
+    });
     expect(state.status === "ok" && state.message).toBe(
       `Given: WhatsApp reminders, recorded 1 Jan 2000, 5:30 am IST. ${NUMBER} is opted in.`,
     );

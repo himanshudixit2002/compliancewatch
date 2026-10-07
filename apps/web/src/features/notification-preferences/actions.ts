@@ -125,6 +125,7 @@ export async function savePreference(
     language: choice.language,
     quietHoursStart: choice.quietHoursStart,
     quietHoursEnd: choice.quietHoursEnd,
+    subject: session.userId,
   });
   if (!saved.ok) return toActionState(saved);
   await track(session, {

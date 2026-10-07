@@ -34,6 +34,11 @@ export interface PreferenceChange {
   language?: string;
   quietHoursStart?: string;
   quietHoursEnd?: string;
+  /**
+   * The user whose consent covers a web opt-in (their identity consent subject); the service asks
+   * identity for it before it records an opt-in from the web, and refuses one without it.
+   */
+  subject?: string;
 }
 
 /**

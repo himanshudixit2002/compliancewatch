@@ -19,7 +19,7 @@ describe("SettingsIndex", () => {
       "/settings/consents",
     );
     const dataRights = container.querySelector("[data-screen='owner.settings.data-rights']");
-    expect(dataRights?.textContent).toContain("Waiting");
+    expect(dataRights?.textContent).toContain("Ready to build");
     expect(
       await runAxe(container.querySelector("#settings-pages")?.parentElement as Element),
     ).toHaveNoViolations();

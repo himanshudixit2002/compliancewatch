@@ -72,7 +72,12 @@ async function main(argv: readonly string[]): Promise<number> {
   try {
     report.consents = await seedConsents(clients, options.ownerId, log);
     report.profile = await seedProfile(clients, options.ownerId, log);
-    report.notification = await seedNotification(clients, report.profile.entityNodeId, log);
+    report.notification = await seedNotification(
+      clients,
+      report.profile.entityNodeId,
+      options.ownerId,
+      log,
+    );
     if (!options.skipRulebook) {
       report.rulebook = await seedRulebook(clients, log);
       if (report.rulebook.optionalFailure !== null) {

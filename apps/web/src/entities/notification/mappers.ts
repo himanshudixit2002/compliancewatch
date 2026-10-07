@@ -83,6 +83,7 @@ export function preferenceChangeToDto(change: PreferenceChange): PreferenceInDto
   if (change.language !== undefined) dto.language = change.language;
   if (change.quietHoursStart !== undefined) dto.quiet_hours_start = change.quietHoursStart;
   if (change.quietHoursEnd !== undefined) dto.quiet_hours_end = change.quietHoursEnd;
+  if (change.subject !== undefined) dto.subject = change.subject;
   return dto;
 }
 
