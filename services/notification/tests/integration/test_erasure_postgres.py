@@ -1,7 +1,9 @@
 """Notification's erasure on Postgres, as its own role cw_notification under forced row-level
 security on the tenant tables: the tenant's notifications, work, recipients and directory rows
-go, the preferences of addresses no other tenant holds go, a shared one stays without the
-tenant's reference, and another tenant's rows stay. Needs Docker."""
+go, the opt-ins of addresses no other tenant holds go, the opt-outs and a shared one stay without
+the tenant's reference, a preference another tenant's user set stays that tenant's, and another
+tenant's rows stay. The catalog shows every table of the schema with a tenant column erased or
+retained with a reason. Needs Docker."""
 
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -31,6 +33,7 @@ from notification.infrastructure.repository import PostgresUnitOfWorkFactory
 from py_common.audit.testing import install_audit_table
 from py_common.db_roles import apply_roles, as_role
 from py_common.erasure import count_rows, erase_and_record
+from py_common.erasure_testing import assert_nothing_left
 
 SERVICE_DIR = Path(__file__).resolve().parents[2]
 IMAGE = "pgvector/pgvector:0.8.6-pg16"
@@ -106,7 +109,7 @@ def scenario(factory: UnitOfWorkFactory) -> tuple[TenantId, TenantId]:
 
 
 @pytest.fixture(scope="module")
-def engine() -> Iterator[Engine]:
+def database_url() -> Iterator[str]:
     with PostgresContainer(IMAGE, driver="psycopg") as postgres:
         base_url = postgres.get_connection_url()
         admin = create_engine(base_url, isolation_level="AUTOCOMMIT")
@@ -120,9 +123,14 @@ def engine() -> Iterator[Engine]:
             env.setenv("CW_DB_SCHEMA", SCHEMA)
             command.upgrade(Config(str(SERVICE_DIR / "alembic.ini")), "head")
         apply_roles(database_url)
-        engine = create_engine(as_role(database_url, SCHEMA))
-        yield engine
-        engine.dispose()
+        yield database_url
+
+
+@pytest.fixture(scope="module")
+def engine(database_url: str) -> Iterator[Engine]:
+    engine = create_engine(as_role(database_url, SCHEMA))
+    yield engine
+    engine.dispose()
 
 
 def counts(engine: Engine, tenant: TenantId) -> dict[str, int]:
@@ -131,15 +139,27 @@ def counts(engine: Engine, tenant: TenantId) -> dict[str, int]:
         return {table: count_rows(connection, table, tenant) for table in TABLES}
 
 
-def preferences(engine: Engine) -> dict[str, object]:
+def preferences(engine: Engine) -> dict[str, tuple[bool, object]]:
     with engine.connect() as connection:
         rows = connection.execute(
-            text("SELECT address, set_for_tenant_id FROM channel_preference")
+            text("SELECT address, opted_in, set_for_tenant_id FROM channel_preference")
         ).all()
-    return {row.address: row.set_for_tenant_id for row in rows}
+    return {row.address: (row.opted_in, row.set_for_tenant_id) for row in rows}
 
 
-def test_the_tenant_s_notifications_go_and_a_shared_preference_stays(engine: Engine) -> None:
+def request_for(tenant: TenantId) -> DeletionRequest:
+    return DeletionRequest(
+        event_id=EventId.new(),
+        tenant_id=tenant,
+        correlation_id=CorrelationId.new(),
+        requested_at=WHEN,
+        deadline_at=WHEN + timedelta(days=30),
+    )
+
+
+def test_the_tenant_s_notifications_go_and_kept_preferences_stay(
+    engine: Engine, database_url: str
+) -> None:
     factory = PostgresUnitOfWorkFactory(engine)
     tenant, other = scenario(factory)
     before, theirs = counts(engine, tenant), counts(engine, other)
@@ -156,7 +176,40 @@ def test_the_tenant_s_notifications_go_and_a_shared_preference_stays(engine: Eng
             "notification", PostgresNotificationEraser(connection), request, clock=lambda: WHEN
         )
     assert {table: answer.tables[table] for table in TABLES} == before
-    assert answer.tables["channel_preference"] == 2
+    assert answer.tables["channel_preference"] == 3, "one deleted, two without the tenant"
     assert counts(engine, tenant) == dict.fromkeys(TABLES, 0)
     assert counts(engine, other) == theirs, "another tenant's rows stay"
-    assert preferences(engine) == {SHARED_PHONE: None}, "only the shared number's consent stays"
+    assert preferences(engine) == {
+        SHARED_PHONE: (True, None),
+        OWN_MAIL: (False, None),
+    }, "the shared number's consent and the opt-out stay, without the tenant"
+    owner = create_engine(database_url)
+    with owner.connect() as connection:
+        retained = assert_nothing_left(connection, SCHEMA, tenant, answer)
+    owner.dispose()
+    assert retained["erased_tenant.tenant_id"] == 1
+
+
+def test_a_preference_another_tenant_s_user_set_stays_theirs(engine: Engine) -> None:
+    """The review's case: B's user opts in on the web for a number only A holds in the
+    directory; A's erasure keeps B's preference, and B's reference."""
+    factory = PostgresUnitOfWorkFactory(engine)
+    first, second = TenantId.new(), TenantId.new()
+    number = "+919876543249"
+    register(factory, first, [(Channel.WHATSAPP, number)])
+    SetOptIn(factory, clock=lambda: WHEN).run(
+        Channel.WHATSAPP,
+        number,
+        opted_in=True,
+        source=ConsentSource.WEB_ONBOARDING,
+        set_for_tenant=second,
+    )
+    with engine.begin() as connection:
+        answer = erase_and_record(
+            "notification",
+            PostgresNotificationEraser(connection),
+            request_for(first),
+            clock=lambda: WHEN,
+        )
+    assert answer.tables["channel_preference"] == 0
+    assert preferences(engine)[number] == (True, second.value), "B's preference stays B's"

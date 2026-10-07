@@ -5,6 +5,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 
 from domain_kernel.channels import Channel
+from domain_kernel.erasure import ErasedTenants
 from notification.application.bulk import BulkNotify
 from notification.application.dispatch import DispatchDue
 from notification.application.email_feedback import ReceiveEmailFeedback
@@ -57,3 +58,5 @@ class Wiring:
     reconcile: ReconcileReceipts
     email_feedback: ReceiveEmailFeedback
     store_ready: Callable[[], Awaitable[bool]]
+    erased_tenants: ErasedTenants
+    """The tenants the notification service has erased: its routes answer them 410."""
