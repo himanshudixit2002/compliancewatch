@@ -63,3 +63,10 @@ replication_factor = 3
 "rule.superseded.obligation.rules.dlq" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
 "rule.withdrawn.applicability-engine.rules.dlq" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
 "rule.withdrawn.obligation.rules.dlq" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
+"tenant.data.erased.identity.erasure-records.dlq" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
+"tenant.deletion.requested.applicability-engine.erasure.dlq" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
+"tenant.deletion.requested.identity.erasure.dlq" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
+"tenant.deletion.requested.notification.erasure.dlq" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
+"tenant.deletion.requested.obligation.erasure.dlq" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
+"tenant.deletion.requested.profile.erasure.dlq" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }
+"tenant.deletion.requested.rulebook.erasure.dlq" = { partitions = 1, retention_days = 30, cleanup_policy = "delete" }

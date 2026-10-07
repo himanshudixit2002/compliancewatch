@@ -86,11 +86,18 @@ async def test_relays_start_only_for_schemas_with_an_outbox() -> None:
     relaying = {entry.service for entry in hosted.hosted if entry.components.relays}
     assert relaying == OUTBOX_SCHEMAS
     assert hosted.consumer_groups() == (
+        "identity.erasure",
+        "identity.erasure-records",
+        "profile.erasure",
+        "rulebook.erasure",
         PROFILES_GROUP,
         RULES_GROUP,
+        "applicability-engine.erasure",
         DECISIONS_GROUP,
         OBLIGATION_RULES_GROUP,
+        "obligation.erasure",
         "notification.obligations",
+        "notification.erasure",
     )
     assert "profile/outbox-relay" in hosted.loops()
     assert hosted.task_queues() == ()
@@ -413,9 +420,11 @@ def test_the_health_app_answers_on_its_own_thread(health_server: HealthServer) -
 def test_every_service_with_background_work_is_hosted_by_the_worker() -> None:
     assert {entry.name for entry in REGISTRY if entry.components is not None} == {
         "applicability-engine",
+        "identity",
         "notification",
         "obligation",
         "pipeline",
+        "profile",
         "rulebook",
     }
 
