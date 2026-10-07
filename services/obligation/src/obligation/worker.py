@@ -25,6 +25,13 @@ process that hosts several services adds to its own:
   ``CW_OBLIGATION_RULE_EVENTS_ENABLED`` (flag ``obligation.rule_events``) off it still consumes,
   so its offsets keep up, and changes nothing. What it cannot handle goes to
   ``<topic>.obligation.rules.dlq``.
+- a consumer in group ``obligation.erasure`` of ``tenant.deletion.requested``
+  (``py_common.erasure``): while the flag ``identity.tenant_erasure`` is off for the tenant it
+  only logs ``erasure.off``; on, it deletes the tenant's obligations with their changes,
+  comments and reminders, its applied decisions, its directory entry, idempotency keys and
+  published events (``infrastructure.erasure.PostgresObligationEraser``), keeps the rule-level
+  cache of rule versions, and writes ``tenant.data.erased`` (service obligation) and its
+  ``tenant.erased`` audit entry with the ``processed_event`` row.
 - with ``CW_OBLIGATION_SWEEP_ENABLED`` on (off by default), the reminder sweep,
   ``SendDueReminders.run``, every ``CW_OBLIGATION_SWEEP_INTERVAL_SECONDS`` (an hour), and the
   rolling window, ``RollWindow.run``, daily at 02:30 IST, both one tenant at a time through the
@@ -67,6 +74,7 @@ from obligation.application.window import RollWindow
 from obligation.domain.events import RescheduleReason
 from obligation.domain.ports import RuleVersionReader
 from obligation.domain.repository import RuleVersionRefs, TenantDirectory, UnitOfWorkFactory
+from obligation.infrastructure.erasure import PostgresObligationEraser
 from obligation.infrastructure.metrics import GuardMetrics
 from obligation.infrastructure.repository import (
     ConnectionTenantDirectory,
@@ -77,6 +85,7 @@ from obligation.infrastructure.repository import (
 from obligation.infrastructure.rulebook_client import HttpRuleVersionReader
 from obligation.settings import ObligationSettings
 from py_common.auth import service_auth_from
+from py_common.erasure import Enabled, ErasureSwitch, erasure_component
 from py_common.events import EventMessage
 from py_common.logging import get_logger
 from py_common.outbox import read_first_store, read_then_write
@@ -104,6 +113,7 @@ WINDOW_JOB: Final = "obligation-window"
 WINDOW_AT: Final = time(2, 30, tzinfo=IST)
 """02:30 IST: the day's periods are in the window before anyone looks at them."""
 SERVICE_NAME: Final = "obligation-worker"
+ERASURE_SERVICE: Final = "obligation"
 DECISION_SOURCE: Final = "decision"
 WINDOW_SOURCE: Final = "window"
 
@@ -338,10 +348,14 @@ def reader_of(settings: ObligationSettings) -> HttpRuleVersionReader:
 
 
 def components(
-    settings: ObligationSettings, *, rules: RuleVersionReader | None = None
+    settings: ObligationSettings,
+    *,
+    rules: RuleVersionReader | None = None,
+    erasure: Enabled | None = None,
 ) -> WorkerComponents:
-    """The two consumers and, when ``CW_OBLIGATION_SWEEP_ENABLED`` is on, the reminder sweep and
-    the rolling window; ``rules`` replaces the rulebook reader."""
+    """The three consumers and, when ``CW_OBLIGATION_SWEEP_ENABLED`` is on, the reminder sweep
+    and the rolling window; ``rules`` replaces the rulebook reader and ``erasure`` the flag of
+    the erasure consumer."""
     if settings.obligation_store != "postgres":
         raise ValueError("the obligation worker needs CW_OBLIGATION_STORE=postgres")
     reader = rules or reader_of(settings)
@@ -375,6 +389,11 @@ def components(
                 topics=RULE_TOPICS,
                 handler=rules_handler(events),
                 store_factory=read_first_store,
+            ),
+            erasure_component(
+                ERASURE_SERVICE,
+                PostgresObligationEraser,
+                enabled=erasure or ErasureSwitch(settings),
             ),
         ),
         periodic=periodic,

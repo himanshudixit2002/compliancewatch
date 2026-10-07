@@ -330,6 +330,11 @@ class MemoryStore:
     def ping(self) -> bool:
         return True
 
+    @property
+    def lock(self) -> threading.Lock:
+        """What a unit of work holds from open to commit; an eraser holds it too."""
+        return self._lock
+
     def __call__(self, tenant_id: TenantId) -> AbstractContextManager[UnitOfWork]:
         return self._unit(tenant_id)
 

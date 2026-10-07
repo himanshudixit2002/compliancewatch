@@ -431,11 +431,15 @@ async def test_a_withdrawal_neither_cached_nor_readable_is_retried(inbox: Engine
     assert setup.store.rule_versions[RULE_VERSION].status is RuleVersionStatus.WITHDRAWN
 
 
-def test_the_components_are_two_consumers_and_the_jobs_when_enabled() -> None:
+def test_the_components_are_three_consumers_and_the_jobs_when_enabled() -> None:
     rules = FakeRuleVersionReader()
     settings = obligation_settings(obligation_store="postgres")
     components = worker.components(settings, rules=rules)
-    decisions, rule_events = components.consumers
+    decisions, rule_events, erasure = components.consumers
+    assert (erasure.group_id, erasure.topics) == (
+        "obligation.erasure",
+        ("tenant.deletion.requested",),
+    )
     assert (decisions.group_id, decisions.topics) == (
         "obligation.decisions",
         ("applicability.decided",),
