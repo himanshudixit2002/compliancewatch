@@ -60,6 +60,7 @@ COPY_NOTE = "Generated from packages/flags/registry.json by make flags; do not e
 SWITCH_FIELDS: frozenset[str] = frozenset(
     {
         "profile_gstin_lookup",  # the GSTIN lookup provider; http arrives behind it
+        "llm_residency",  # the gateway's residency policy until ADR-020 is decided
     }
 )
 

@@ -13,6 +13,7 @@ from llm_gateway.application.usage import Usage
 from llm_gateway.domain.embeddings import EmbeddingProvider
 from llm_gateway.domain.ledger import CostLedger
 from llm_gateway.domain.prompts import PromptRegistry
+from llm_gateway.domain.residency import ResidencyPolicy
 from llm_gateway.domain.routing import RoutingTable
 from llm_gateway.settings import GatewaySettings
 
@@ -20,6 +21,7 @@ from llm_gateway.settings import GatewaySettings
 @dataclass(frozen=True, slots=True)
 class GatewayWiring:
     settings: GatewaySettings
+    residency: ResidencyPolicy
     providers: Mapping[str, LLMProvider]
     embedders: Mapping[str, EmbeddingProvider]
     ledger: CostLedger

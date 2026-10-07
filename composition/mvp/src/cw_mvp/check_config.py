@@ -19,9 +19,10 @@ In staging and production (``CW_ENV`` staging or prod) it then refuses what no c
 there:
 
 - ``header`` mode in staging (staging runs ``dual``, then ``token``, before production);
-- fake providers: the gateway's ``fake`` model, identity's ``fake`` sign-in in staging
-  (production's is identity's own rule), the profile's ``static`` demo GSTIN table and identity's
-  ``memory`` billing;
+- fake providers: the gateway's ``fake`` model (under ``CW_LLM_RESIDENCY=india_only`` too, which
+  refuses every real model call and is the maintainer's choice, not a problem), identity's
+  ``fake`` sign-in in staging (production's is identity's own rule), the profile's ``static`` demo
+  GSTIN table and identity's ``memory`` billing;
 - memory stores: any ``CW_<SERVICE>_STORE=memory`` and the gateway's ``CW_LLM_LEDGER=memory``;
 - synthetic approvals: a rulebook that would accept them (``synthetic_approvals_allowed``);
 - placeholder secrets: ``local-write-token``, ``local-review-token`` or a ``dev-only`` value in

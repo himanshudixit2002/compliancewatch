@@ -58,6 +58,27 @@ class ProviderUnavailableError(DomainError):
         return {"Retry-After": str(max(1, math.ceil(self.retry_after_seconds)))}
 
 
+class ResidencyUnavailableError(DomainError):
+    """The residency policy refuses the call: ``CW_LLM_RESIDENCY=india_only`` keeps text in India,
+    and the model runs outside it, as every routed real model does today.
+
+    Not a ``ProviderUnavailableError``: no fallback model is tried and no breaker counts it, since
+    every other real model is refused alike. No ``Retry-After``: the call is refused until the
+    policy or the routing changes.
+    """
+
+    type_slug = "llm-residency-unavailable"
+    title = "LLM unavailable under the residency policy"
+
+    def __init__(self, *, model: str, provider: str) -> None:
+        self.model = model
+        self.provider = provider
+        super().__init__(
+            f"CW_LLM_RESIDENCY=india_only keeps text in India, and {model!r} on {provider!r} runs "
+            "outside it: no routed model runs inference in India"
+        )
+
+
 class ProviderResponseError(DomainError):
     """The provider answered, but not with something the gateway can use."""
 

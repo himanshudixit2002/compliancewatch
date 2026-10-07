@@ -297,8 +297,9 @@ lookup, Unleash, Kafka over SASL, a Temporal certificate) has them. A class stop
 refusal, so fixing one can bring the next to light. In staging and production it also refuses:
 
 - `CW_AUTH_MODE=header` in staging, which runs `dual` and then `token` before production;
-- fake providers: `CW_LLM_PROVIDER=fake`, `CW_AUTH_PROVIDER=fake` in staging,
-  `CW_PROFILE_GSTIN_LOOKUP=static` (the demo table) and `CW_BILLING_PROVIDER=memory`;
+- fake providers: `CW_LLM_PROVIDER=fake` (with `CW_LLM_RESIDENCY=india_only` too, which refuses
+  every real model call and is accepted as the maintainer's choice), `CW_AUTH_PROVIDER=fake` in
+  staging, `CW_PROFILE_GSTIN_LOOKUP=static` (the demo table) and `CW_BILLING_PROVIDER=memory`;
 - memory stores: every `CW_<SERVICE>_STORE=memory` and `CW_LLM_LEDGER=memory`;
 - a rulebook that would accept synthetic approvals;
 - placeholder secrets: `local-write-token`, `local-review-token`, or a `dev-only` value in any

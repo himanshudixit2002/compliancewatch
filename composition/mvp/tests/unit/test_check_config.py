@@ -165,6 +165,17 @@ def test_the_fake_model_is_refused(monkeypatch: pytest.MonkeyPatch, base: dict[s
     assert only(found).message.startswith("CW_LLM_PROVIDER=fake answers from a fake model")
 
 
+@pytest.mark.parametrize("base", [STAGING, PRODUCTION], ids=["staging", "prod"])
+def test_india_only_is_accepted_and_still_refuses_the_fake_model(
+    monkeypatch: pytest.MonkeyPatch, base: dict[str, str]
+) -> None:
+    """india_only refuses every real model call (ADR-020): the maintainer's choice, not a problem,
+    and no reason to answer from the fake model instead."""
+    assert report(monkeypatch, base, llm_residency="india_only").ok
+    found = report(monkeypatch, base, llm_provider="fake", ai_gateway_api_key=None)
+    assert only(found).message.startswith("CW_LLM_PROVIDER=fake answers from a fake model")
+
+
 def test_staging_refuses_the_fake_sign_in(monkeypatch: pytest.MonkeyPatch) -> None:
     found = report(monkeypatch, STAGING, auth_provider="fake")
     assert only(found) == Problem(

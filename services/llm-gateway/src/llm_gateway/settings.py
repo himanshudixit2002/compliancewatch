@@ -11,6 +11,7 @@ from py_common.settings import Settings
 
 Provider = Literal["fake", "vercel"]
 Ledger = Literal["memory", "postgres"]
+Residency = Literal["global", "india_only"]
 
 
 def default_registry_path() -> Path:
@@ -23,7 +24,7 @@ def default_registry_path() -> Path:
 
 
 class GatewaySettings(Settings):
-    """Provider, ledger, budgets, cache, breaker, prompt registry and tracing settings.
+    """Provider, residency, ledger, budgets, cache, breaker, prompt registry and tracing settings.
 
     Route overrides come from ``CW_LLM_ROUTES__<FEATURE>=primary[,fallback]``, one variable per
     feature: shell-safe in ``.env`` (the Makefile sources it), one line per concern in compose
@@ -34,6 +35,10 @@ class GatewaySettings(Settings):
 
     llm_provider: Provider = "fake"
     llm_ledger: Ledger = "memory"
+    # Where a call may send text (llm_gateway.domain.residency, ADR-020): global lets the masked
+    # text reach models outside India; india_only refuses every call to a real model, since no
+    # routed model runs inference in India. fake/... models answer in process under both.
+    llm_residency: Residency = "global"
 
     ai_gateway_api_key: SecretStr | None = None
     ai_gateway_base_url: str = "https://ai-gateway.vercel.sh/v1"

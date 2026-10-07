@@ -43,7 +43,8 @@ one app of two process groups on this image, with `cw-mvp release` as its releas
    API until an API gateway exists), `hooks.<domain>` to the bot; point the Meta webhook at
    `https://hooks.<domain>/webhook`.
 5. Wire the flags once the accounts exist: `CW_WHATSAPP_ENABLED`, `WHATSAPP_SEND_ENABLED`,
-   `CW_BILLING_PROVIDER=razorpay`, `CW_PROFILE_GSTIN_LOOKUP`, `CW_LLM_PROVIDER=vercel`.
+   `CW_BILLING_PROVIDER=razorpay`, `CW_PROFILE_GSTIN_LOOKUP`, `CW_LLM_PROVIDER=vercel`, and
+   `CW_LLM_RESIDENCY` as ADR-020 decides (`global` until the maintainer decides with counsel).
 6. Identity and access tokens, per environment: the Supabase project and its keys, identity's
    signing key, a service client for each caller and the internal tenant, as listed in
    `services/identity/README.md` ("Supabase: manual steps"). Deploy identity before the services
@@ -71,6 +72,7 @@ Values: `secret` (set with `fly secrets set`, never in the toml), `env` (in the 
 | `CW_ACCESS_TOKEN_TTL_SECONDS`, `CW_SERVICE_TOKEN_TTL_SECONDS` | env (default 600: the longest a revoked session keeps working in the other services) | - | - | - | - | - | - | - | - |
 | `CW_IDENTITY_FAKE_PROVIDER_SECRET`, `CW_IDENTITY_DEV_CLIENT_SECRET`, `CW_IDENTITY_DEV_CLIENTS` | never set (local and test only; the dev client secret is refused elsewhere) | - | - | - | - | - | - | - | - |
 | `CW_AI_GATEWAY_API_KEY`, `CW_LLM_PROVIDER` | - | - | - | - | - | secret / env | - | - | - |
+| `CW_LLM_RESIDENCY` | - | - | - | - | - | env (flag `llm_gateway.residency`, default `global`; owner ai-platform; `india_only` refuses every call to a real model with 503 `llm-residency-unavailable`, since no routed model runs inference in India; set it only once ADR-020 is decided with counsel; removed then, or kept as fixed configuration under option B) | - | - | - |
 | `CW_LANGFUSE_*` | - | - | - | - | - | secret | - | - | - |
 | `CW_LLM_ROUTES__<FEATURE>` (for example `CW_LLM_ROUTES__RETRIEVAL`), `CW_LLM_EMBEDDING_DIMENSIONS_PARAM` | - | - | - | - | - | env (only to override the routing table; the second defaults to `true`) | - | - | - |
 | `CW_WHATSAPP_ENABLED`, `CW_WHATSAPP_PHONE_NUMBER_ID`, `CW_WHATSAPP_ACCESS_TOKEN` | - | - | - | - | env / secret / secret | - | - | - | - |

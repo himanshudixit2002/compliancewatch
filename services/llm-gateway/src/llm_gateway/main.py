@@ -28,9 +28,11 @@ from llm_gateway.domain.errors import (
     FeatureMismatchError,
     ProviderResponseError,
     ProviderUnavailableError,
+    ResidencyUnavailableError,
     UnknownFeatureError,
     UnknownPromptError,
 )
+from llm_gateway.domain.residency import ResidencyPolicy
 from llm_gateway.domain.routing import RoutingTable
 from llm_gateway.domain.tracing import Tracer
 from llm_gateway.infrastructure.cache.memory import MemoryCache
@@ -39,6 +41,7 @@ from llm_gateway.infrastructure.ledger.memory import MemoryLedger
 from llm_gateway.infrastructure.ledger.sqlalchemy import SqlAlchemyLedger
 from llm_gateway.infrastructure.prompts.toml import TomlPromptRegistry
 from llm_gateway.infrastructure.providers.fake import FakeProvider
+from llm_gateway.infrastructure.providers.residency import ResidencyBlockedProvider
 from llm_gateway.infrastructure.providers.vercel import VercelGatewayProvider
 from llm_gateway.infrastructure.tracing.composite import CompositeTracer
 from llm_gateway.infrastructure.tracing.langfuse import LangfuseTracer
@@ -55,6 +58,7 @@ VERCEL_CLIENT_TIMEOUT_SECONDS = 60.0
 PROBLEM_STATUS: Mapping[type[DomainError], int] = {
     BudgetExceededError: 429,
     ProviderUnavailableError: 503,
+    ResidencyUnavailableError: 503,
     ProviderResponseError: 502,
     UnknownPromptError: 422,
     UnknownFeatureError: 422,
@@ -68,9 +72,14 @@ def wire(
 ) -> GatewayWiring:
     """Build every adapter and use case from settings. Fails fast on a bad route override.
 
+    Under ``CW_LLM_RESIDENCY=india_only`` every real provider is wired behind
+    ``ResidencyBlockedProvider``, which refuses each call before it is made; the fake provider,
+    which answers in process, never is.
+
     ``completion_provider``, when given, serves every completion route in place of the
     configured providers; embeddings stay on the configured embedder. It is the seam the eval
-    harness uses to put scripted answers through the real completion path.
+    harness uses to put scripted answers through the real completion path, and it is the
+    caller's own in-process provider, so it is not wrapped.
     """
     routing = RoutingTable.default().with_overrides(settings.llm_routes)
     registry = TomlPromptRegistry.load(settings.llm_prompt_registry_path)
@@ -85,6 +94,7 @@ def wire(
         allow_unregistered_prompts=settings.llm_allow_unregistered_prompts,
     )
 
+    residency = ResidencyPolicy(settings.llm_residency)
     fake = FakeProvider()
     providers: dict[str, LLMProvider] = {"fake": fake}
     embedders: dict[str, EmbeddingProvider] = {"fake": fake}
@@ -105,8 +115,9 @@ def wire(
             zero_data_retention=settings.ai_gateway_zero_data_retention,
             embedding_dimensions_param=settings.llm_embedding_dimensions_param,
         )
-        providers["vercel"] = vercel
-        embedders["vercel"] = vercel
+        real = _within(residency, vercel, name="vercel")
+        providers["vercel"] = real
+        embedders["vercel"] = real
     if completion_provider is not None:
         providers = dict.fromkeys(providers, completion_provider)
 
@@ -165,6 +176,7 @@ def wire(
 
     return GatewayWiring(
         settings=settings,
+        residency=residency,
         providers=providers,
         embedders=embedders,
         ledger=ledger,
@@ -215,6 +227,7 @@ def build_app(
     log.info(
         "gateway_wired",
         provider=settings.llm_provider,
+        residency=wiring.residency.value,
         ledger=settings.llm_ledger,
         cache=settings.llm_cache_ttl_seconds > 0,
         langfuse=_langfuse_keys(settings) is not None,
@@ -223,6 +236,16 @@ def build_app(
         providers=len(wiring.providers),
     )
     return app
+
+
+def _within(
+    residency: ResidencyPolicy, provider: VercelGatewayProvider, *, name: str
+) -> VercelGatewayProvider | ResidencyBlockedProvider:
+    """``provider`` itself when real models are allowed; otherwise a stand-in that refuses every
+    call, since the provider runs inference outside India."""
+    if residency.real_models_allowed:
+        return provider
+    return ResidencyBlockedProvider(provider, name=name)
 
 
 def _langfuse_keys(settings: GatewaySettings) -> tuple[str, str, str] | None:

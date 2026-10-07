@@ -24,6 +24,7 @@ def test_defaults() -> None:
     assert settings.service_name == "llm-gateway"
     assert settings.llm_provider == "fake"
     assert settings.llm_ledger == "memory"
+    assert settings.llm_residency == "global"
     assert settings.ai_gateway_api_key is None
     assert settings.ai_gateway_base_url == "https://ai-gateway.vercel.sh/v1"
     assert settings.ai_gateway_zero_data_retention is True
@@ -123,6 +124,14 @@ def test_bad_route_strings_are_refused(text: str) -> None:
 def test_vercel_requires_the_gateway_key() -> None:
     with pytest.raises(ValidationError, match="CW_AI_GATEWAY_API_KEY"):
         GatewaySettings(llm_provider="vercel")
+
+
+def test_the_residency_policy_comes_from_its_variable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CW_LLM_RESIDENCY", "india_only")
+    assert GatewaySettings().llm_residency == "india_only"
+    monkeypatch.setenv("CW_LLM_RESIDENCY", "eu_only")
+    with pytest.raises(ValidationError, match="llm_residency"):
+        GatewaySettings()
 
 
 def test_vercel_with_a_key_is_accepted_and_the_key_is_hidden() -> None:
