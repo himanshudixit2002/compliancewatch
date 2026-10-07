@@ -82,6 +82,12 @@ service as its own `cw_<schema>` role instead needs a database URL per service i
    `services/identity/README.md` ("Supabase: manual steps"). Deploy identity before the services
    that verify its tokens. Run staging with `CW_AUTH_MODE=dual`, then `token`; production refuses
    any other mode and the fake provider.
+8. Audit log archive (no account yet): a bucket in Mumbai with object lock in compliance mode and
+   a default retention of seven years, writable by the operator who exports and by nobody else.
+   Each month, export the closed month with `identity-admin audit-export` and upload the NDJSON
+   file and its `manifest.json` under `audit/<YYYY-MM>/`, as
+   [docs/runbooks/audit-export.md](../../docs/runbooks/audit-export.md) describes. Nothing in
+   this repository creates the bucket or uploads to it.
 
 ## Environment matrix
 
