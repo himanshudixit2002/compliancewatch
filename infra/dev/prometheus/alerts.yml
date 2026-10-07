@@ -218,3 +218,21 @@ groups:
         annotations:
           summary: "The oldest triage task has waited more than 24 hours for an analyst's decision"
           runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/pipeline-triage.md
+
+  - name: privacy
+    rules:
+      # identity_data_requests_overdue counts every tenant's data requests (exports today,
+      # deletions once the erasure cascade lands) past their 30-day deadline and not completed,
+      # read through identity.data_requests_open() at most once a minute while telemetry is on.
+      # Every replica reports the same count, so the max is taken. A request past its deadline is
+      # a breach of what the data map promises the tenant; the hour rules out one completed just
+      # after it passed.
+      - alert: DataRequestOverdue
+        expr: max(identity_data_requests_overdue) > 0
+        for: 1h
+        labels:
+          severity: page
+          team: identity-partner
+        annotations:
+          summary: "A tenant's data request is past its 30-day deadline and not completed"
+          runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/data-requests.md

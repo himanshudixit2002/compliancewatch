@@ -63,6 +63,14 @@ service as its own `cw_<schema>` role instead needs a database URL per service i
      only grants. It sets no password and refuses to leave a role with SUPERUSER or BYPASSRLS.
    - Set each role's password from the secret store; never run `dev-passwords.sql`, which holds
      the dev stack's placeholders.
+   - The same file makes `cw_identity_directory`, a NOLOGIN role nobody logs in as, and once
+     identity's migration 0010 has made `identity.data_request` its read policy and
+     `identity.data_requests_open()`, a SECURITY DEFINER function it owns that counts every
+     tenant's open and overdue data requests (the DataRequestOverdue alert's gauges). An owner that
+     is not a superuser is made a member of the role WITH INHERIT FALSE, SET TRUE, so it may make
+     the function as the role but never reads through its policy. Only `cw_identity` and the
+     image's role (`cw_app`, which `make product-role` grants it too) may EXECUTE it. Run the file
+     after the release that adds migration 0010, or the gauges report nothing.
    - Point each service's `CW_DATABASE_URL` at its own role wherever the migrations run with
      another URL. The combined image does: `cw-mvp release` reads the owner's URL from
      `CW_MIGRATION_DATABASE_URL`. The per-service Fly apps do not yet: their release command,
@@ -125,6 +133,7 @@ Values: `secret` (set with `fly secrets set`, never in the toml), `env` (in the 
 | `CW_EMAIL_ENABLED`, `CW_SMTP_HOST`, `CW_SMTP_PORT`, `CW_SMTP_USERNAME`, `CW_SMTP_PASSWORD`, `CW_EMAIL_FROM` | - | - | - | - | env / env / env / secret / secret / env (flag default `false`; owner core-product; on once the in-region SES or SMTP sending domain is verified with SPF, DKIM and DMARC; removed after email has run in production for 30 days, when the channel is wired whenever `CW_SMTP_HOST` is set) | - | - | - | - |
 | `CW_NOTIFICATION_EMAIL_FEEDBACK_TOKEN`, `CW_NOTIFICATION_SES_TOPIC_ARN` | - | - | - | - | secret / env (the password of the SNS subscription's basic credentials, and the SES feedback topic it must come from; unset token, the email receipt route answers 503) | - | - | - | - |
 | `CW_BILLING_PROVIDER`, `CW_RAZORPAY_*` | env / secret | - | - | - | - | - | - | - | - |
+| `CW_IDENTITY_EXPORT_SOURCES`, `CW_IDENTITY_EXPORT_TIMEOUT_SECONDS` | env (the services a tenant's export reads, `service=url` pairs: `profile=...,applicability-engine=...,obligation=...,notification=...` at each app's private address; the dev ports by default; the combined image points them at its internal listener by itself; 30 seconds per service) | - | - | - | - | - | - | - | - |
 | `CW_PLAN_LIMITS_ENFORCED`, `CW_PLAN_LIMITS_TENANTS` | env (flag `identity.plan_limits`, default `false`, every tenant when the list is empty; owner identity-partner; on only once the maintainer has decided the plan limits and pricing, a few tenants first; refuses invitations past the plan's seats with 402; removed once enforced for every tenant for 30 days) | env (the same values: refuses a new GSTIN registration past the plan with 402, reading identity's entitlements with the `profile` service client, scope `entitlements:read`) | - | - | - | - | - | - | - |
 | `CW_PLAN_FREE_REGISTRATIONS`, `CW_PLAN_FREE_SEATS` | env (default 1 each: what a tenant without a paid subscription is entitled to; placeholders the maintainer decides) | - | - | - | - | - | - | - | - |
 | `CW_PLAN_PAST_DUE_GRACE_DAYS` | env (default 14: how long a past-due or halted subscription keeps its plan before the free allowance applies; a placeholder the maintainer decides) | - | - | - | - | - | - | - | - |
