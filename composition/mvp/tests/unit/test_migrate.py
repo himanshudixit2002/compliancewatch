@@ -1,5 +1,9 @@
-"""``cw-mvp migrate``: the owner's URL only, every schema in order, and what ran."""
+"""``cw-mvp migrate``: the owner's URL only, every schema in order, and what ran; and each
+service's ``migrations/env.py`` refuses to run outside its schema."""
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -258,3 +262,33 @@ def test_a_failing_alembic_reports_the_end_of_its_output(monkeypatch: pytest.Mon
     assert "permission denied for schema rulebook" in message
     assert "line 21" in message
     assert "line 20\n" not in message
+
+
+GUARD = "CW_DB_SCHEMA is not set: the migrations run in the service's own schema"
+
+
+@pytest.mark.parametrize("entry", REGISTRY, ids=lambda entry: entry.name)
+def test_every_env_py_needs_its_schema_and_puts_it_first(entry: Any) -> None:
+    text = (alembic_ini(entry).parent / "migrations" / "env.py").read_text(encoding="utf-8")
+    assert GUARD in text
+    assert "with_search_path(settings.database_url, schema)" in text
+    assert text.count("version_table_schema=schema") == 2
+
+
+def test_a_migration_without_its_schema_stops_before_it_connects(tmp_path: Path) -> None:
+    """Without CW_DB_SCHEMA its tables and its alembic_version would land in public, of whatever
+    database the URL names; env.py stops first. The URL here names nothing that listens, and no
+    .env is read from the empty working directory."""
+    environment = {key: value for key, value in os.environ.items() if not key.startswith("CW_")}
+    environment["CW_DATABASE_URL"] = "postgresql+psycopg://nobody:nothing@127.0.0.1:1/none"
+    ini = alembic_ini(next(entry for entry in REGISTRY if entry.name == "qa"))
+    finished = subprocess.run(
+        [sys.executable, "-m", "alembic", "-c", str(ini), "current"],
+        env=environment,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert finished.returncode != 0
+    assert GUARD in finished.stderr
