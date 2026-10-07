@@ -89,7 +89,8 @@ const schema = z
     CW_WEB_PIPELINE_UPLOAD_MAX_BYTES: positiveInt.max(100_000_000).default(25_000_000),
     CW_WEB_ADMIN_IP_ALLOWLIST: cidrList,
     // Trust the reverse proxy's forwarded headers: the client IP (x-real-ip, x-forwarded-for)
-    // and, for the sign-out origin check, the host (x-forwarded-host).
+    // and, for the origin checks of the sign-out handler and of the upload handler (the
+    // /api-bff/ handlers' gate, server/bff/gate.ts), the host (x-forwarded-host).
     CW_WEB_TRUST_FORWARDED_IP: envBoolean.default(false),
     CW_WEB_SEED_STATE_PATH: z.string().min(1).default("../../var/seed/last.json"),
     CW_WEB_BUILD_SHA: z.string().min(1).optional(),

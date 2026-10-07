@@ -199,8 +199,9 @@ JavaScript: the cookie is httpOnly and the server passes only the `SessionDto`.
   second factor.
 - `CW_WEB_ADMIN_IP_ALLOWLIST` and `CW_WEB_TRUST_FORWARDED_IP` are parsed and validated by
   `server/env.ts`, but the proxy does not check an allow-list yet; `/admin` is guarded by the
-  session gates alone. `CW_WEB_TRUST_FORWARDED_IP` is read today only by the sign-out origin
-  check, for `X-Forwarded-Host`.
+  session gates alone. `CW_WEB_TRUST_FORWARDED_IP` is read today only by the origin checks of
+  the sign-out handler and of the upload handler (the `/api-bff/` handlers' gate,
+  `server/bff/gate.ts`), for `X-Forwarded-Host`.
 - The services trust `x-tenant-id` from their caller (ADR-014 names that a dev-stage
   limitation); the web server sends the session's tenant, and no screen lets a user choose
   another.

@@ -343,7 +343,8 @@ page refers to.
   app's `CW_WEB_*_URL` values name the same ports (their defaults are the 8000 base).
 - `next.config.ts`: `reactStrictMode`, `poweredByHeader: false`, `transpilePackages` for the UI
   kit (consumed from source), `typedRoutes` (registry hrefs go through `hrefFor()` so typed links
-  accept them), and the four static security headers (`vercel.json` carries the same set).
+  accept them), and the four static security headers (`vercel.json` carries all but
+  `Permissions-Policy`); no Content-Security-Policy for the pages, and no nonce.
 - `tsconfig.json`: `@/*` for `src`, ES2022 (bigint literals in the money helpers),
   `allowImportingTsExtensions`; `scripts/` and `e2e/` are checked by `tsconfig.scripts.json`
   (NodeNext, `erasableSyntaxOnly`) because plain Node runs them. `pnpm --filter web typecheck`
