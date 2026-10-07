@@ -25,6 +25,12 @@ import { defineConfig, devices } from "@playwright/test";
  *                every route of every service on one port) after `make product-seed`: set
  *                CW_E2E_PRODUCT_URL to that listener (http://127.0.0.1:8080) and every service URL
  *                of the app defaults to it (`make product-e2e`, and the CI dev-stack job, do so)
+ *
+ * The chromium and product projects drive Playwright's own Chromium (`make web-e2e-install`
+ * downloads it once per machine; CI installs it) unless CW_E2E_BROWSER_CHANNEL names an installed
+ * browser's channel to drive instead, such as chrome for Google Chrome (ComplianceWatch Control
+ * sets it when Playwright's Chromium is missing and Chrome is installed). Unset or empty, nothing
+ * changes. The stack-guard project starts no browser.
  */
 const PORT = Number(process.env.PORT ?? 3000);
 const BASE_URL = `http://localhost:${PORT}`;
@@ -33,6 +39,15 @@ const E2E_SESSION_SECRET = Buffer.alloc(32, "e2e").toString("base64");
 
 /** The product's internal listener, when the product project is the one being run. */
 const PRODUCT_URL = process.env.CW_E2E_PRODUCT_URL?.trim().replace(/\/+$/, "") || undefined;
+
+/** An installed browser's channel to drive instead of Playwright's own Chromium. */
+const CHANNEL = process.env.CW_E2E_BROWSER_CHANNEL?.trim() || undefined;
+
+/** The browser of the chromium and product projects. */
+const BROWSER = {
+  ...devices["Desktop Chrome"],
+  ...(CHANNEL === undefined ? {} : { channel: CHANNEL }),
+};
 
 /** The Makefile's SERVICES, as the app names their URL variables. */
 const SERVICES = [
@@ -72,9 +87,9 @@ export default defineConfig({
       name: "chromium",
       testIgnore: "**/e2e/product/**",
       dependencies: ["stack-guard"],
-      use: { ...devices["Desktop Chrome"] },
+      use: BROWSER,
     },
-    { name: "product", testDir: "e2e/product", use: { ...devices["Desktop Chrome"] } },
+    { name: "product", testDir: "e2e/product", use: BROWSER },
   ],
   webServer: {
     command: "pnpm start",

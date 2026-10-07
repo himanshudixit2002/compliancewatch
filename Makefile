@@ -488,17 +488,22 @@ web-dev: check-pnpm ## next dev on WEB_PORT from .env; /admin lists the internal
 # resolution is stored and answers that its ingest did not start, rather than queueing a workflow
 # on a developer's Temporal for some other worker to run against another store; the engine's API
 # only signals fan-outs, and a lost signal costs a run one poll of 30 seconds) with the
-# pipeline's raw files in memory on the memory store, the inter-service URLs
-# on the same base, and the rulebook's two tokens from .env or the placeholders local-write-token
-# and local-review-token (not secrets), as make product passes them. The rulebook publishes
-# (CW_RULEBOOK_PUBLISH_ENABLED=true) and, on the memory store, starts with the seed calendar's
-# drafts (CW_RULEBOOK_SEED_ON_START, local and test only), so the web app's rule versions and
-# publish workflow have versions to show; every draft still needs review, and only an analyst's
-# steps through the web app move one. Memory stores lose their rows when the stack stops;
-# STORE=postgres runs every store on the compose Postgres instead (make dev, make migrate and
-# make seed SERVICE=rulebook first), with the schema search path make run uses. The store and the
-# port base are recorded in $(WEB_STACK_DIR)/store (store=unknown when services this command did
-# not start were running already), which make web-e2e reads; make web-stack-down removes it.
+# pipeline's raw files in memory on the memory store, every address one service has of another
+# on the same base whatever .env says (CW_IDENTITY_URL and CW_AUTH_JWKS_URL at identity,
+# CW_PROFILE_URL, CW_RULEBOOK_URL, CW_OBLIGATION_URL, and CW_LLM_GATEWAY_URL and
+# CW_EVAL_GATEWAY_URL at the gateway: every localhost URL the services' settings default to, so a
+# stack on another base never calls one on 8001-8010), the notification service's links at
+# CW_WEB_BASE_URL (the web app on WEB_PORT unless set), and the rulebook's two tokens from .env or
+# the placeholders local-write-token and local-review-token (not secrets), as make product passes
+# them. The rulebook publishes (CW_RULEBOOK_PUBLISH_ENABLED=true) and, on the memory store, starts
+# with the seed calendar's drafts (CW_RULEBOOK_SEED_ON_START, local and test only), so the web
+# app's rule versions and publish workflow have versions to show; every draft still needs review,
+# and only an analyst's steps through the web app move one. Memory stores lose their rows when the
+# stack stops; STORE=postgres runs every store on the compose Postgres instead (make dev, make
+# migrate and make seed SERVICE=rulebook first), with the schema search path make run uses. The
+# store and the port base are recorded in $(WEB_STACK_DIR)/store (store=unknown when services this
+# command did not start were running already), which make web-e2e reads; make web-stack-down
+# removes it.
 WEB_STACK_DIR := var/web-stack
 WEB_STACK_WAIT_SECONDS ?= 60
 STORE ?= memory
@@ -528,8 +533,10 @@ web-stack: check-uv ## UI-only stack, no worker: every service on SERVICE_PORT_B
 	  CW_IDENTITY_STORE=$(STORE) CW_PROFILE_STORE=$(STORE) CW_RULEBOOK_STORE=$(STORE) CW_OBLIGATION_STORE=$(STORE) CW_NOTIFICATION_STORE=$(STORE) CW_EVAL_STORE=$(STORE) CW_APPLICABILITY_ENGINE_STORE=$(STORE) CW_PIPELINE_STORE=$(STORE) CW_LLM_LEDGER=$(STORE) \
 	  CW_PROFILE_GSTIN_LOOKUP=static CW_BILLING_PROVIDER=$(BILLING) CW_RULEBOOK_PUBLISH_ENABLED=true CW_QA_KAG_ENABLED=false CW_PIPELINE_CRAWL_ENABLED=false \
 	  CW_RULEBOOK_SEED_ON_START=$$seed CW_RULEBOOK_WRITE_TOKEN="$$token" CW_RULEBOOK_REVIEW_TOKEN="$$review" \
+	  CW_IDENTITY_URL="http://localhost:$$((base+1))" CW_AUTH_JWKS_URL="http://localhost:$$((base+1))/v1/identity/.well-known/jwks.json" \
 	  CW_PROFILE_URL="http://localhost:$$((base+2))" CW_RULEBOOK_URL="http://localhost:$$((base+3))" \
 	  CW_OBLIGATION_URL="http://localhost:$$((base+5))" CW_LLM_GATEWAY_URL="http://localhost:$$((base+8))" \
+	  CW_EVAL_GATEWAY_URL="http://localhost:$$((base+8))" CW_WEB_BASE_URL="$${CW_WEB_BASE_URL:-http://localhost:$${WEB_PORT:-3000}}" \
 	  nohup $(UV) run --package compliancewatch-$$svc uvicorn $$pkg.main:app --host 127.0.0.1 --port $$port \
 	    > $(WEB_STACK_DIR)/$$svc.log 2>&1 & \
 	  echo $$! > "$$pidfile"; \
@@ -612,7 +619,10 @@ web-e2e-install: check-pnpm ## Download Chromium for Playwright, once per machin
 # the build the guard (apps/web/scripts/stack-guard) refuses services that answer and are not the
 # memory stack $(WEB_STACK_DIR)/store records, a stack recorded as postgres or unknown included,
 # unless E2E_ALLOW_POSTGRES=1; Playwright's chromium project runs the same guard first, with the
-# directory and the allowance this passes on (CW_E2E_WEB_STACK_DIR, E2E_ALLOW_POSTGRES).
+# directory and the allowance this passes on (CW_E2E_WEB_STACK_DIR, E2E_ALLOW_POSTGRES). The
+# specs drive Playwright's own Chromium (make web-e2e-install downloads it once per machine)
+# unless CW_E2E_BROWSER_CHANNEL names an installed browser's channel, such as chrome for Google
+# Chrome (apps/web/playwright.config.ts): CW_E2E_BROWSER_CHANNEL=chrome make web-e2e.
 E2E_ALLOW_POSTGRES ?=
 web-e2e: check-pnpm ## Build the web app and run Playwright with axe against next start on WEB_PORT and the web-stack services (after make web-stack-wait and make web-seed)
 	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
