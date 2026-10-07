@@ -808,11 +808,39 @@ _FAILURES: Final = (
         None,
     ),
     (
-        re.compile(r"address already in use|port is already allocated|eaddrinuse", re.I),
+        re.compile(
+            r"address already in use|port is already allocated|eaddrinuse|^error: port \d+ is in "
+            r"use\b",
+            re.I,
+        ),
         "port-in-use",
         "A port it needs is already in use",
         "Stop what is using the port (see Processes), then try again.",
         None,
+    ),
+    (
+        re.compile(
+            r"^error: (?:browser tests are|the web check is) already running in this checkout\b"
+        ),
+        "busy",
+        "Browser tests are already running in this checkout",
+        "Wait for them to finish, then try again.",
+        None,
+    ),
+    (
+        re.compile(r"^error: there is no browser for the tests\b"),
+        "no-browser",
+        "There is no browser for the browser tests",
+        "Download the test browser (about 150 MB; it asks first), or install Google Chrome, then "
+        "try again.",
+        "make:web-e2e-install",
+    ),
+    (
+        re.compile(r"^error: the web app's Playwright is not installed\b"),
+        "missing-tool",
+        "The web app's packages are not installed",
+        "Install the JavaScript packages (it asks first), then try again.",
+        "make:ts-install",
     ),
     (
         re.compile(r"is not a target of this checkout's makefile|no rule to make target", re.I),
@@ -886,6 +914,8 @@ class Run:
     finished_at: float | None = None
     current_step: int | None = None
     error: dict[str, Any] | None = None
+    cleanup: list[str] = field(default_factory=list)
+    """The labels of its clean-up steps, which run after a failure or a cancel too."""
     lines: collections.deque[dict[str, Any]] = field(
         default_factory=lambda: collections.deque(maxlen=RUN_LINES)
     )
@@ -907,6 +937,7 @@ class Run:
             "seconds": self.seconds(now),
             "current_step": self.current_step,
             "steps": [dict(step) for step in self.steps],
+            "cleanup": list(self.cleanup),
             "error": self.error,
         }
 
@@ -1004,6 +1035,7 @@ class RunManager:
                 params=dict(params),
                 started_at=self.wall(),
                 steps=[{"label": s.label, "state": "queued", "seconds": 0} for s in plan.steps],
+                cleanup=[step.label for step in plan.steps if step.always],
             )
             self._runs[run.run_id] = run
             while len(self._runs) > RUN_HISTORY:
@@ -1129,6 +1161,7 @@ class RunManager:
                         "title": run.title,
                         "kind": run.kind,
                         "steps": [step["label"] for step in run.steps],
+                        "cleanup": list(run.cleanup),
                         "started_at": run.started_at,
                         "params": run.params,
                     },

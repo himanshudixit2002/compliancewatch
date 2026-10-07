@@ -183,3 +183,65 @@ def test_expired_tokens_and_prefs(served: Served) -> None:
     late = served.post("/api/actions/databases-stop/run", {"params": {}, "confirm_token": token})
     assert late.status == 428
     assert served.get("/api/prefs").json["tour_done"] is True
+
+
+CHECK_STEPS = [
+    "check that the test copy can start",
+    "start a separate test copy of the services",
+    "wait until the test copy answers",
+    "add made-up demo data to the test copy",
+    "build the web app and click through it in a robot browser",
+    "stop the test copy",
+]
+
+
+def test_the_web_check_plays_on_its_test_copy_and_stops_it(served: Served) -> None:
+    stream = served.events()
+    stream.until("hello")
+    run_id = served.start("gate:web-e2e")  # safe: no question
+    started = stream.until("run.started")
+    assert started.data["steps"] == CHECK_STEPS
+    assert started.data["cleanup"] == ["stop the test copy"]
+    run = served.finished(run_id)
+    assert run["state"] == "ok"
+    assert [step["state"] for step in run["steps"]] == ["ok"] * 6
+    assert run["cleanup"] == ["stop the test copy"]
+    texts = [line["text"] for line in run["lines"]]
+    assert "ports 9401 to 9410 and 3410 are free" in texts
+    assert (
+        "Playwright's own Chromium is not downloaded here, so the browser tests use your "
+        "installed Google Chrome"
+    ) in texts
+    assert "  identity healthy on http://localhost:9401" in texts
+    assert "state         ../../var/web-stack-check/seed.json" in texts
+    assert "  pipeline stopped (pid 47210)" in texts
+
+
+def test_the_web_check_stops_its_test_copy_after_a_cancel(served: Served) -> None:
+    served.demo({"speed": 0.1})
+    run_id = served.start("gate:web-e2e")
+    wait_for(lambda: served.get(f"/api/runs/{run_id}").json["current_step"] == 1)
+    assert served.post(f"/api/runs/{run_id}/cancel").json == {"ok": True}
+    run = served.finished(run_id)
+    assert run["state"] == "cancelled"
+    states = [step["state"] for step in run["steps"]]
+    assert states == ["ok", "cancelled", "cancelled", "cancelled", "cancelled", "ok"]
+    texts = [line["text"] for line in run["lines"]]
+    assert texts.index("▸ stop the test copy") < texts.index("  identity stopped (pid 47201)")
+    assert texts[-1] == "■ click through the web app cancelled"
+
+
+def test_the_web_check_stops_its_test_copy_after_a_failure(served: Served) -> None:
+    served.demo(
+        {
+            "fail_next": {
+                "action": "gate:web-e2e",
+                "step": 4,
+                "lines": ["  1 failed", "    [chromium] e2e/home.spec.ts: the home page"],
+            }
+        }
+    )
+    run = served.finished(served.start("gate:web-e2e"))
+    assert run["state"] == "failed"
+    assert [step["state"] for step in run["steps"]] == ["ok"] * 4 + ["failed", "ok"]
+    assert "  identity stopped (pid 47201)" in [line["text"] for line in run["lines"]]
