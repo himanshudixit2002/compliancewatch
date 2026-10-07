@@ -10,7 +10,12 @@ from starlette.types import Receive, Scope, Send
 
 from domain_kernel.errors import DomainError, InvariantViolationError, UnknownAttributeError
 from py_common.app import create_app
-from py_common.problems import PROBLEM_MEDIA_TYPE, problem_response, problem_responses
+from py_common.problems import (
+    PROBLEM_MEDIA_TYPE,
+    limit_problem_responses,
+    problem_response,
+    problem_responses,
+)
 from py_common.request_context import REQUEST_ID_HEADER, RequestContextMiddleware
 
 PREFIX = "urn:compliancewatch:problem:"
@@ -50,7 +55,7 @@ def _app() -> FastAPI:
     async def mapped() -> None:
         raise TenantRateLimitedError("slow down")
 
-    @router.get("/quota")
+    @router.get("/quota", responses=limit_problem_responses())
     async def quota() -> None:
         raise QuotaReachedError()
 
@@ -174,6 +179,16 @@ def test_openapi_publishes_the_problem_schema() -> None:
     assert "ValidationIssue" in spec["components"]["schemas"]
     content = spec["paths"]["/t/items/{item_id}"]["get"]["responses"]["422"]["content"]
     assert list(content) == [PROBLEM_MEDIA_TYPE]
+
+
+def test_openapi_publishes_the_limit_problem_only_where_a_route_answers_it() -> None:
+    spec = _app().openapi()
+    limited = spec["components"]["schemas"]["LimitProblem"]
+    assert {"limit", "used", "type", "title", "status"} <= set(limited["required"])
+    content = spec["paths"]["/t/quota"]["get"]["responses"]["402"]["content"]
+    assert content[PROBLEM_MEDIA_TYPE]["schema"]["$ref"].endswith("/LimitProblem")
+    bare = create_app(service_name="p", version="0", routers=[APIRouter()])
+    assert "LimitProblem" not in bare.openapi()["components"]["schemas"]
 
 
 def test_openapi_documents_problems_for_undecodable_bodies_and_validation() -> None:

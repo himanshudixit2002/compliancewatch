@@ -22,7 +22,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException
 
 from domain_kernel.errors import (
@@ -95,6 +95,27 @@ class Problem(BaseModel):
     instance: str | None = None
     correlation_id: str | None = None
     errors: list[ValidationIssue] | None = None
+
+
+class LimitProblem(Problem):
+    """A problem that a plan's limit refused (402): the ``limit`` and how many are ``used``,
+    as extension members (RFC 9457 section 3.2). Nothing else about what was asked for."""
+
+    limit: int = Field(description="What the tenant's plan allows")
+    used: int = Field(description="How many the tenant holds already")
+
+
+LIMIT_PROBLEM_SCHEMA_REF = "#/components/schemas/LimitProblem"
+
+
+def limit_problem_responses() -> dict[int | str, dict[str, Any]]:
+    """The OpenAPI ``responses`` entry of a 402 whose body is a ``LimitProblem``."""
+    return {
+        402: {
+            "description": _phrase(402),
+            "content": {PROBLEM_MEDIA_TYPE: {"schema": {"$ref": LIMIT_PROBLEM_SCHEMA_REF}}},
+        }
+    }
 
 
 def problem_responses(*statuses: int) -> dict[int | str, dict[str, Any]]:
@@ -262,6 +283,12 @@ def _publish_problem_schema(app: FastAPI) -> None:
             problem = Problem.model_json_schema(ref_template="#/components/schemas/{model}")
             components.update(problem.pop("$defs", {}))
             components["Problem"] = problem
+            if f'"{LIMIT_PROBLEM_SCHEMA_REF}"' in json.dumps(schema.get("paths", {})):
+                limited = LimitProblem.model_json_schema(
+                    ref_template="#/components/schemas/{model}"
+                )
+                limited.pop("$defs", None)
+                components["LimitProblem"] = limited
             _document_problems(schema)
         return schema
 
