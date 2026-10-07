@@ -11,6 +11,7 @@
     "test": "vitest run --coverage",
     "test:watch": "vitest",
     "e2e": "playwright test",
+    "e2e:guard": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/stack-guard/main.mts",
     "e2e:install": "playwright install --with-deps chromium",
     "screens:gen": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/screens-doc.mts",
     "screens:check": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/screens-doc.mts --check",

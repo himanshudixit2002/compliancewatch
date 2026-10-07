@@ -1056,21 +1056,39 @@ proxy in front of the app must allow bodies of the upload limit on `/api-bff/`, 
 limits bound an upload as Node's do (`next start` keeps Node's 300 seconds for receiving a whole
 request); a page that wants to show a stored PDF inside itself needs a framing decision first.
 
-## D-060: The web stack's pipeline has no Temporal, and the specs stage their own sources
+## D-060: The web stack's pipeline has no Temporal, and the specs stage their own sources, never in Postgres
 
 2026-10-07. `make web-stack` gives the pipeline a Temporal address nothing listens on
 (`127.0.0.1:1`) and, on the memory store, its raw files in memory. With the developer's Temporal
 from `make dev`, an upload or a retry from the web stack would queue an ingest that the product's
 worker runs against another store, which holds no such document; without one, the pipeline stores
 the document and answers 503, which the pages say as "stored, but its ingest did not start" and
-"Temporal did not answer: send the same request again", the same on CI, which runs no Temporal. The
-specs stage what they act on through the pipeline's routes with the write token (as `stageReview`
-does for the rulebook): an upload-only source of their own per test (`example_<nine digits>`) and
-synthetic PDF and HTML bytes, so they run again on the same stack and never touch a built-in
-source. A spec fetches a built-in source only after asking whether crawling is off (a fetch of a
-key no source has answers `pipeline-crawl-disabled`, as `cw-product check` asks), so nothing reads
-a regulator's site. Tasks open only inside the ingest and outbox rows die only in the relay, and no
-route creates either, so on this stack the specs check the task and dead-row views and their empty
-states against the pipeline's answers, and the unit tests cover resolving, dismissing and
-requeueing against the spec's shapes. Consequences: resolving a task end to end needs a staging
-route in the pipeline for local and test, or a spec on the product stack, which runs the worker.
+"Temporal did not answer: send the same request again", the same on CI, which runs no Temporal.
+The specs stage what they act on through the pipeline's routes with the write token (as
+`stageReview` does for the rulebook): an upload-only source of their own per test
+(`example_<nine digits>`) and synthetic PDF and HTML bytes, so they run again on the same stack and
+never touch a built-in source; a spec that lists every source counts the built-in ones exactly and
+leaves the ones other tests stage meanwhile out of the count. A spec fetches a built-in source only
+after asking whether crawling is off (a fetch of a key no source has answers
+`pipeline-crawl-disabled`, as `cw-product check` asks), so nothing reads a regulator's site. Tasks
+open only inside the ingest and outbox rows die only in the relay, and no route creates either, so
+on this stack the specs check the task and dead-row views and their empty states against the
+pipeline's answers, and the unit tests cover resolving, dismissing and requeueing against the
+spec's shapes.
+
+What the specs stage stays wherever the services keep it, and on `make web-stack STORE=postgres`
+(the shared development database, which a developer's control app starts) a stored document cannot
+even be deleted. So `make web-stack` records its store and port base in `$(WEB_STACK_DIR)/store`
+(`store=unknown` when it found services running that it had not started; `make web-stack-down`
+removes the record), and a guard (`apps/web/scripts/stack-guard`) refuses the run, in plain words,
+when a service the run would use answers and is not that recorded memory stack's: a record saying
+`postgres` or `unknown`, no record (a running stack whose store is unknown counts as Postgres),
+another port base, or a port that no live process of the stack's pid files was started on.
+`make web-e2e` runs it before its build, with `CW_E2E_WEB_STACK_DIR` naming its `WEB_STACK_DIR`,
+and the chromium project depends on a setup project that runs it again, so Playwright run directly
+is guarded too; `E2E_ALLOW_POSTGRES=1` lets a run go on and says so. The product project
+(`e2e/product`, `make product-e2e` and the CI dev-stack job) holds none of the staging specs and
+depends on no guard, and the CI web-e2e job's memory stack passes it. Consequences: resolving a
+task end to end needs a staging route in the pipeline for local and test, or a spec on the product
+stack, which runs the worker; a stack started some other way than `make web-stack` has no record,
+so the suite refuses it until it is restarted that way or allowed.

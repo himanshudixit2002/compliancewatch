@@ -93,10 +93,11 @@ outside `src` and outside the floor.
 `apps/web/playwright.config.ts` runs the specs in `apps/web/e2e` against `next start` on `PORT`
 (3000 unless set) with `CW_WEB_ENV=test`, `CW_WEB_AUTH_PROVIDER=fake` and a fixed session
 secret (32 bytes of `e2e`; it keys the cookies of one run and is not a secret), chromium only,
-and waits for `/api/health` before the first test. It has two projects: `chromium`, every spec but
-`e2e/product`, against the memory stack (`make web-e2e` and the `web-e2e` job run it with
-`--project=chromium`), and `product`, the real-data journeys against `make product` (below). The
-config turns `web.publish_actions`, `web.admin_rulebook_writes` and `web.qa_enabled` on for the
+and waits for `/api/health` before the first test. It has three projects: `chromium`, every spec
+but `e2e/product`, against the memory stack (`make web-e2e` and the `web-e2e` job run it with
+`--project=chromium`); `stack-guard`, which `chromium` depends on and so runs first (below,
+"Never against the shared database"); and `product`, the real-data journeys against `make product`
+(below), which depends on nothing. The config turns `web.publish_actions`, `web.admin_rulebook_writes` and `web.qa_enabled` on for the
 run. Outside CI it reuses a
 server already listening on that port. On CI it retries once and writes the HTML report.
 `e2e/fixtures.ts` extends `test` with `checkA11y(selector?)`, which runs `AxeBuilder` on the page
@@ -239,8 +240,8 @@ pnpm --filter web exec playwright test --ui                    # the Playwright 
 pnpm --filter web exec playwright show-report                  # the last HTML report
 ```
 
-`make web-e2e` sources `.env` for `WEB_PORT`, builds the app and runs the suite with
-`CW_WEB_ENV=test`. Running `playwright test` directly needs a build first (`pnpm --filter web
+`make web-e2e` sources `.env` for `WEB_PORT`, checks the services it would use (below), builds
+the app and runs the suite with `CW_WEB_ENV=test`. Running `playwright test` directly needs a build first (`pnpm --filter web
 build`) and, if a dev server is on the port, that server is reused. Reports land in
 `apps/web/playwright-report/` and `apps/web/test-results/`, both git-ignored. Typed links are
 checked against `.next/types`, which `next build`, `next dev` and `next typegen` write; after
@@ -259,6 +260,26 @@ No page on `main` calls a service yet, so the suite passes without the stack apa
 seeded-tenant test, which is skipped; with `make web-stack && make web-stack-wait && make
 web-seed` first, `make web-e2e` runs everything, as the CI job does. A spec for a page that
 reads a service later relies on the same order.
+
+**Never against the shared database.** The chromium specs stage synthetic data through the
+services: the review items of the entity and relation specs (`stageReview`), and the sources,
+uploads, retries and requeues of the source and pipeline specs. On a memory stack all of it goes
+when the stack stops; on a stack started with `STORE=postgres` (the shared development database)
+it would stay for good, and a stored document cannot be deleted. So `make web-stack` records its
+store and port base in `$(WEB_STACK_DIR)/store` (`store=unknown` when it found services running
+that it had not started), `make web-stack-down` removes the record, and the guard in
+`apps/web/scripts/stack-guard` refuses the run, with a plain message saying why and what to do,
+when a service the run would use answers and is not that recorded memory stack's: a record saying
+`postgres` or `unknown`, no record at all (a running stack whose store is unknown counts as
+Postgres), another port base, or a port no live process of the stack's pid files was started on.
+A service that does not answer passes, since nothing can be staged there. `make web-e2e` runs the
+guard before its build, with `CW_E2E_WEB_STACK_DIR` naming its `WEB_STACK_DIR`; the chromium
+project's `stack-guard` setup runs it again, so `playwright test` run directly is guarded too
+(the directory defaults to `var/web-stack`). `E2E_ALLOW_POSTGRES=1` lets a run go on against such
+services, and says so. CI is unaffected: its `make web-stack` is a memory stack in `var/web-stack`
+on the default ports. The product project stages none of this: its specs (`e2e/product`) are the
+journeys against `make product`, and they depend on no guard. The guard's decision is tested in
+the unit suite (`scripts/stack-guard/lib.test.mts`).
 
 `make web-seed` is the seed for that stack (`apps/web/scripts/seed`, run by Node's type
 stripping on the openapi-fetch clients typed from the contracts): real HTTP calls only, no mock

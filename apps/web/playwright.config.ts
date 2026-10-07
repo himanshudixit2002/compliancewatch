@@ -11,16 +11,20 @@ import { defineConfig, devices } from "@playwright/test";
  * return drafts, the review specs can decide entity groups and relation candidates, and the ask
  * specs can ask.
  *
- * Two projects:
- *   chromium  every spec but e2e/product, against the services `make web-stack` starts (`make
- *             web-e2e` points the app at their ports); the specs that need the services and the
- *             seeded tenant run once `make web-stack`, `make web-stack-wait` and `make web-seed`
- *             have written var/seed/last.json (the CI job runs them first and fails such a spec
- *             without that file; elsewhere it is skipped)
- *   product   e2e/product, the real-data journey against `make product` (its internal listener,
- *             every route of every service on one port) after `make product-seed`: set
- *             CW_E2E_PRODUCT_URL to that listener (http://127.0.0.1:8080) and every service URL of
- *             the app defaults to it (`make product-e2e`, and the CI dev-stack job, do so)
+ * Three projects:
+ *   chromium     every spec but e2e/product, against the services `make web-stack` starts (`make
+ *                web-e2e` points the app at their ports); the specs that need the services and
+ *                the seeded tenant run once `make web-stack`, `make web-stack-wait` and `make
+ *                web-seed` have written var/seed/last.json (the CI job runs them first and fails
+ *                such a spec without that file; elsewhere it is skipped)
+ *   stack-guard  what chromium depends on, so it runs first: the specs stage synthetic data
+ *                through the services, so the run stops unless they are a memory stack `make
+ *                web-stack` recorded (its directory in CW_E2E_WEB_STACK_DIR, var/web-stack by
+ *                default) or E2E_ALLOW_POSTGRES=1 allows a Postgres one (scripts/stack-guard)
+ *   product      e2e/product, the real-data journey against `make product` (its internal listener,
+ *                every route of every service on one port) after `make product-seed`: set
+ *                CW_E2E_PRODUCT_URL to that listener (http://127.0.0.1:8080) and every service URL
+ *                of the app defaults to it (`make product-e2e`, and the CI dev-stack job, do so)
  */
 const PORT = Number(process.env.PORT ?? 3000);
 const BASE_URL = `http://localhost:${PORT}`;
@@ -63,7 +67,13 @@ export default defineConfig({
   reporter: CI ? [["list"], ["html", { open: "never" }]] : "list",
   use: { baseURL: BASE_URL, trace: "on-first-retry" },
   projects: [
-    { name: "chromium", testIgnore: "**/e2e/product/**", use: { ...devices["Desktop Chrome"] } },
+    { name: "stack-guard", testMatch: /stack-guard\.setup\.ts$/ },
+    {
+      name: "chromium",
+      testIgnore: "**/e2e/product/**",
+      dependencies: ["stack-guard"],
+      use: { ...devices["Desktop Chrome"] },
+    },
     { name: "product", testDir: "e2e/product", use: { ...devices["Desktop Chrome"] } },
   ],
   webServer: {
