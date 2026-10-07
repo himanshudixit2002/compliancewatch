@@ -1,4 +1,5 @@
 import json
+from contextlib import AbstractContextManager
 from datetime import UTC, datetime
 
 import httpx2
@@ -8,6 +9,7 @@ from domain_kernel.ids import TenantId
 from identity.application.billing import BillingLedger, ReceiveBillingWebhook, StartSubscription
 from identity.domain.billing import PLANS, BillingPeriod, Plan, SubscriptionStatus
 from identity.domain.errors import InvalidWebhookSignatureError
+from identity.domain.repository import UnitOfWork
 from identity.infrastructure.billing.memory import MemoryBillingProvider, parse_subscription_event
 from identity.infrastructure.billing.razorpay import (
     RazorpayBillingProvider,
@@ -77,6 +79,21 @@ def test_start_subscription_reuses_the_customer_and_webhooks_move_the_status() -
         "subscription.activated",
     )
     assert (changed.before, changed.after) == ({"status": "created"}, {"status": "active"})
+
+
+def test_a_failed_audit_write_still_leaves_the_subscription_in_the_ledger() -> None:
+    provider = MemoryBillingProvider(clock=lambda: NOW)
+    ledger = BillingLedger()
+
+    def database_down(tenant_id: TenantId | None) -> AbstractContextManager[UnitOfWork]:
+        raise RuntimeError("the database is down")
+
+    start = StartSubscription(provider, ledger, database_down, clock=lambda: NOW)
+    with pytest.raises(RuntimeError, match="database is down"):
+        start.run(TENANT, "owner_monthly", email="owner@example.com", name="Example Traders")
+    assert list(ledger.subscriptions) == [
+        subscription.provider_subscription_id for subscription in provider.subscriptions
+    ], "the provider created it, so the ledger knows it and its webhooks are audited"
 
 
 def test_parse_event_tolerates_missing_fields() -> None:

@@ -1,9 +1,10 @@
 """Start a subscription and take in a provider webhook, through the ``BillingProvider``.
 
 Both write an audit entry of the subscription's tenant: ``subscription.started`` by the caller
-when the provider has created it, and ``subscription.status_changed`` by
-``system:billing-webhook`` when a verified webhook moves a subscription this service knows to
-another status. The ledger itself stays in memory until its table lands.
+when the provider has created it and the ledger has recorded it, and
+``subscription.status_changed`` by ``system:billing-webhook`` when a verified webhook moves a
+subscription this service knows to another status. The ledger itself stays in memory until its
+table lands; then the ledger row and ``subscription.started`` belong in one transaction.
 """
 
 from collections.abc import Callable
@@ -55,6 +56,10 @@ class StartSubscription:
             customer = self._provider.create_customer(tenant_id, email=email, name=name)
             self._ledger.customers[tenant_id] = customer
         subscription = self._provider.create_subscription(customer, plan)
+        # The provider holds the subscription now, so the ledger learns of it before anything
+        # else can fail: a failed audit write must not leave a subscription the ledger never saw
+        # (a retry would start a second one, and its webhooks would go unaudited).
+        self._ledger.subscriptions[subscription.provider_subscription_id] = subscription
         with self._unit_of_work(tenant_id) as uow:
             uow.audit.write(
                 audit_entry(
@@ -66,7 +71,6 @@ class StartSubscription:
                     after={"plan_key": subscription.plan_key, "status": subscription.status.value},
                 )
             )
-        self._ledger.subscriptions[subscription.provider_subscription_id] = subscription
         return subscription
 
 
