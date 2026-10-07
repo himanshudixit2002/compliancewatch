@@ -16,6 +16,9 @@ entry names:
   listener while they serve a request. The app runs at most ``CW_MVP_LOOPBACK_LIMIT`` of them at
   once, and the routes they call make no such calls themselves (one level deep), so the calls
   they make always find a free thread;
+- ``flagged_loopback_routes``, loopback routes that call another service only while a flag is
+  on, as ``(flag, routes)`` pairs: they count against ``CW_MVP_LOOPBACK_LIMIT`` only when the
+  flag can be on in this process (``loopback_routes_for``);
 - ``called_routes``, for a service with loopback routes of its own that another service's
   loopback routes call: the routes those calls reach, none of them a loopback route;
 - ``takes_authenticator`` and ``takes_token_source``, whether ``build`` accepts identity's
@@ -84,6 +87,7 @@ class ServiceEntry[S: Settings]:
     components: Callable[[S], WorkerComponents] | None = None
     url_fields: tuple[str, ...] = ()
     loopback_routes: tuple[str, ...] = ()
+    flagged_loopback_routes: tuple[tuple[str, tuple[str, ...]], ...] = ()
     called_routes: tuple[str, ...] = ()
     takes_authenticator: bool = True
     takes_token_source: bool = False
@@ -93,6 +97,16 @@ class ServiceEntry[S: Settings]:
         for field in self.url_fields:
             if not field.endswith(URL_SUFFIX) or field not in self.settings_type.model_fields:
                 raise ValueError(f"{self.name}: {field!r} is not a URL field of its settings")
+
+    def loopback_routes_for(self, flag_may_be_on: Callable[[str], bool]) -> tuple[str, ...]:
+        """Its loopback routes, with the flagged ones whose flag ``flag_may_be_on``."""
+        flagged = tuple(
+            route
+            for flag, routes in self.flagged_loopback_routes
+            if flag_may_be_on(flag)
+            for route in routes
+        )
+        return self.loopback_routes + flagged
 
     @property
     def prefix(self) -> str:
@@ -114,6 +128,8 @@ class ServiceEntry[S: Settings]:
         return field if field in self.settings_type.model_fields else None
 
 
+PLAN_LIMITS_FLAG: Final = "identity.plan_limits"
+
 REGISTRY: Final[tuple[ServiceEntry[Any], ...]] = (
     ServiceEntry(
         "identity", "identity", IdentitySettings, build_identity, takes_authenticator=False
@@ -124,11 +140,16 @@ REGISTRY: Final[tuple[ServiceEntry[Any], ...]] = (
         ProfileSettings,
         build_profile,
         # A new GSTIN registration reads the tenant's entitlements at identity while the flag
-        # identity.plan_limits is on for it.
-        loopback_routes=(
-            "POST /v1/profile/registrations",
-            "POST /v1/businesses",
-            "POST /v1/businesses/{business_id}/registrations",
+        # identity.plan_limits is on for it; with the flag off they call nothing.
+        flagged_loopback_routes=(
+            (
+                PLAN_LIMITS_FLAG,
+                (
+                    "POST /v1/profile/registrations",
+                    "POST /v1/businesses",
+                    "POST /v1/businesses/{business_id}/registrations",
+                ),
+            ),
         ),
         # The engine, obligation and qa read a node, its snapshot and a business, which call
         # nothing.

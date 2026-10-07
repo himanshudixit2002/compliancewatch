@@ -38,8 +38,10 @@ Anything else on the public listener, and any path no service owns, is a 404
   runs at most `CW_MVP_LOOPBACK_LIMIT` (32) of the routes that make such calls at once: qa's
   `POST /v1/qa/ask` and the public `POST /v1/qa`, the engine's evaluation and its dry run,
   obligation's detail and assignee routes and the public list of a business's obligations,
-  notification's bulk change card, and profile's three routes that may add a GSTIN registration
-  (they read the tenant's entitlements at identity while `identity.plan_limits` is on). The
+  notification's bulk change card, and, only when `identity.plan_limits` can be on in the process
+  (`CW_PLAN_LIMITS_ENFORCED` true, or the Unleash provider), profile's three routes that may add
+  a GSTIN registration (they read the tenant's entitlements at identity while the flag is on;
+  with it off they call nothing and are not counted). The
   routes they call make none themselves: qa and notification read obligation's list, which calls
   nothing, and the engine, obligation and qa read profile's node, snapshot and business, which
   call nothing either (`called_routes` in the registry); every service may call identity.

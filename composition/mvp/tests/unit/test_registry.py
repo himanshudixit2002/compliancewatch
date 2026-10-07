@@ -15,9 +15,11 @@ from applicability_engine.infrastructure.profile_client import (
 from applicability_engine.infrastructure.profile_client import (
     SNAPSHOT_PATH as ENGINE_SNAPSHOT_PATH,
 )
+from cw_mvp.app import build_app
 from cw_mvp.exposure import EXPOSURE
 from cw_mvp.registry import (
     JWKS_PATH,
+    PLAN_LIMITS_FLAG,
     RAW_STORE_SUFFIX,
     REGISTRY,
     ServiceEntry,
@@ -101,8 +103,13 @@ def test_every_url_of_another_service_is_a_registered_url_field(entry: ServiceEn
     assert all(called in BY_NAME for called in entry.calls)
 
 
+def all_flags(_: str) -> bool:
+    return True
+
+
 def test_routes_that_call_other_services_go_one_level_deep() -> None:
-    callers = [entry for entry in REGISTRY if entry.loopback_routes]
+    """With every flag on, as the deepest the calls can go."""
+    callers = [entry for entry in REGISTRY if entry.loopback_routes_for(all_flags)]
     assert [entry.name for entry in callers] == [
         "profile",
         "applicability-engine",
@@ -111,20 +118,40 @@ def test_routes_that_call_other_services_go_one_level_deep() -> None:
         "qa",
     ]
     for entry in callers:
-        assert set(entry.loopback_routes) <= set(EXPOSURE[entry.name])
+        assert set(entry.loopback_routes_for(all_flags)) <= set(EXPOSURE[entry.name])
         assert entry.calls, f"{entry.name} lists loopback routes but calls no service"
         for called in entry.calls:
             target = BY_NAME[called]
-            if not target.loopback_routes:
+            if not target.loopback_routes_for(all_flags):
                 continue
             assert target.called_routes, (
                 f"{called} is called by {entry.name} and makes calls of its own: list the "
                 "routes the calls reach as its called_routes"
             )
-            assert not set(target.called_routes) & set(target.loopback_routes), (
+            assert not set(target.called_routes) & set(target.loopback_routes_for(all_flags)), (
                 f"{entry.name} calls a route of {called} that makes calls of its own"
             )
-    assert not BY_NAME["identity"].loopback_routes, "every service may call identity"
+    assert not BY_NAME["identity"].loopback_routes_for(all_flags), "every service may call identity"
+
+
+def test_profile_registrations_count_against_the_loopback_limit_only_with_the_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """m9: with identity.plan_limits off, profile's registration routes call nothing and stay
+    outside CW_MVP_LOOPBACK_LIMIT."""
+    profile = BY_NAME["profile"]
+    assert profile.loopback_routes_for(lambda _: False) == ()
+    assert set(profile.loopback_routes_for(lambda flag: flag == PLAN_LIMITS_FLAG)) == {
+        "POST /v1/profile/registrations",
+        "POST /v1/businesses",
+        "POST /v1/businesses/{business_id}/registrations",
+    }
+    for value, loopback in (("false", False), ("true", True)):
+        monkeypatch.setenv("CW_PLAN_LIMITS_ENFORCED", value)
+        app = build_app(mvp_settings(log_level="WARNING"), service_overrides=MEMORY_SERVICES)
+        route = app.dispatcher.table.route("profile", "POST", "/v1/businesses")
+        assert route is not None
+        assert route.loopback is loopback
 
 
 def test_the_routes_a_caller_reaches_are_the_ones_listed() -> None:
