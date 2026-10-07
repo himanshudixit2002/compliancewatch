@@ -7,7 +7,9 @@ foreign keys it deletes the changes and the comments (both RESTRICT on their obl
 reminders, the obligations, the applied decisions, the tenant's entry in the ``obligation_tenant``
 directory (a routing directory: any session reads the ids, a write needs the tenant's own
 setting, so this is the tenant's one row), its idempotency keys and its published or dead
-events in ``outbox_event``.
+events in ``outbox_event``, and writes the erased marker with its answer (``erased_tenant``):
+from then on its routes answer the tenant 410 and its consumer of applicability.decided writes
+nothing for it, so the sweep and the window, which visit the directory, never see it again.
 
 It keeps ``rule_version_ref``, the cache of the rule versions obligations come from: rule-level
 data, the same for every tenant and holding no tenant reference.
@@ -24,12 +26,14 @@ from domain_kernel.ids import TenantId
 from obligation.infrastructure.memory import MemoryStore
 from py_common.audit import MemoryAuditSink
 from py_common.erasure import (
+    ERASED_RETAINED,
     OUTBOX_RETAINED,
     PostgresTenantEraser,
     begin_erasure,
     delete_rows,
     prune_outbox,
 )
+from py_common.idempotency import MemoryIdempotencyStore
 
 TABLES: Final = (
     "obligation_change",
@@ -49,6 +53,7 @@ RETAINED: Final = (
             "tenant, with no tenant reference",
         ),
     ),
+    ERASED_RETAINED,
     OUTBOX_RETAINED,
 )
 
@@ -65,8 +70,11 @@ class MemoryObligationEraser:
     """The eraser on a memory store, under its lock. The memory store keeps no directory and no
     idempotency keys of its own: it lists the tenants from the obligations."""
 
-    def __init__(self, store: MemoryStore) -> None:
+    def __init__(
+        self, store: MemoryStore, *, idempotency: MemoryIdempotencyStore | None = None
+    ) -> None:
         self._store = store
+        self._idempotency = idempotency
 
     def erase(self, tenant_id: TenantId) -> Erased:
         store = self._store
@@ -94,7 +102,7 @@ class MemoryObligationEraser:
                 "obligation": len(mine),
                 "obligation_decision": len(decisions),
                 "obligation_tenant": int(bool(mine)),
-                "idempotency_key": 0,
+                "idempotency_key": _forget(self._idempotency, tenant_id),
                 "outbox_event": 0,
             },
             RETAINED,
@@ -104,6 +112,21 @@ class MemoryObligationEraser:
         store = self._store
         with store.lock:
             store.events.append(event)
-            sink = MemoryAuditSink(store.audit, tenant_id=event.tenant_id)
-            sink.write(entry)
-            sink.commit()
+            store.erased.mark(event)
+            _audit(store, entry)
+
+    def write_audit(self, entry: AuditEntry) -> None:
+        with self._store.lock:
+            _audit(self._store, entry)
+
+
+def _audit(store: MemoryStore, entry: AuditEntry) -> None:
+    sink = MemoryAuditSink(store.audit, tenant_id=entry.tenant_id)
+    sink.write(entry)
+    sink.commit()
+
+
+def _forget(idempotency: MemoryIdempotencyStore | None, tenant_id: TenantId) -> int:
+    """The tenant's idempotency keys dropped from the service's memory store of them, when the
+    eraser was given it."""
+    return 0 if idempotency is None else idempotency.forget(tenant_id)

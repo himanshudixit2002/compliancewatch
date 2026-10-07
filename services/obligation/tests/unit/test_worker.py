@@ -23,7 +23,8 @@ from sqlalchemy import Connection, Engine, create_engine
 from sqlalchemy.pool import NullPool
 from structlog.testing import capture_logs
 
-from domain_kernel.ids import BusinessId, DecisionId, RuleVersionId, TenantId
+from domain_kernel.erasure import TenantDataErased
+from domain_kernel.ids import BusinessId, DecisionId, EventId, RuleVersionId, TenantId
 from domain_kernel.status import ClosureReason, RuleVersionStatus
 from obligation import worker
 from obligation.application.decisions import ApplyDecision
@@ -99,6 +100,7 @@ class Setup:
         handler = worker.decision_handler(
             ApplyDecision(self.rules, clock=lambda: NOW),
             units_on=self.units_on,
+            erased_on=lambda _: self.store.erased,
             metrics=GuardMetrics(counter),
         )
         self.consumer = consumer_of(inbox, worker.GROUP_ID, handler, self.producer)
@@ -169,6 +171,25 @@ async def test_an_applying_decision_materialises_once(inbox: Engine) -> None:
     assert {o.profile_version for o in made} == {PROFILE_VERSION}, "the decision's profile"
     (applied,) = setup.store.decisions.values()
     assert applied.profile_version == PROFILE_VERSION
+
+
+async def test_a_late_decision_of_an_erased_tenant_writes_nothing(inbox: Engine) -> None:
+    setup = Setup(inbox)
+    setup.store.erased.mark(
+        TenantDataErased(
+            tenant_id=TENANT,
+            service="obligation",
+            deletion_event_id=EventId.new(),
+            erased_at=NOW,
+        )
+    )
+    applies = record("applies-after-rule-published")
+    assert await setup.consumer.process(applies) is Outcome.PROCESSED, "marked processed"
+    assert await setup.consumer.process(applies) is Outcome.SKIPPED
+    assert setup.created() == []
+    assert setup.store.obligations == {}
+    assert setup.store.decisions == {}
+    assert TENANT not in setup.store.tenants(), "the sweep never visits it again"
 
 
 async def test_a_flip_to_not_applicable_closes_and_review_changes_nothing(inbox: Engine) -> None:

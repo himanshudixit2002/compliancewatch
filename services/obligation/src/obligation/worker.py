@@ -4,7 +4,7 @@
 ``components(settings)`` is what it runs (``py_common.runtime.WorkerComponents``), and what a
 process that hosts several services adds to its own:
 
-- a consumer in group ``obligation.decisions`` of applicability.decided, in two phases
+- a consumer in group ``obligation.decisions`` of applicability.decided, in two steps
   (``py_common.outbox.read_then_write``): ``ApplyDecision.plan`` reads the rule version of a
   decision that applies, with no transaction open, and ``ApplyDecision.apply`` writes on units of
   work that join the consumer's own transaction (``PostgresUnitOfWorkFactory.on_connection``), so
@@ -16,9 +16,11 @@ process that hosts several services adds to its own:
   ``obligation.decision_guarded`` and counted in ``obligation_guard_refusals_total``);
   ``not_applicable`` closes the open ones with ``profile_changed``; a decision that needs review is
   only marked processed. A message the handler cannot read, or whose rule version the rulebook
-  cannot give, goes to ``applicability.decided.obligation.decisions.dlq`` after the retries.
+  cannot give, goes to ``applicability.decided.obligation.decisions.dlq`` after the retries. A
+  decision of a tenant the service has erased writes nothing and is only marked processed
+  (``py_common.erasure.skip_erased_write``, outcome ``erased_tenant``).
 - a consumer in group ``obligation.rules`` of rule.published, rule.superseded, rule.withdrawn and
-  rule.deadline_changed (``application.rule_events``), with the same two phases: a fresh read of
+  rule.deadline_changed (``application.rule_events``), with the same two steps: a fresh read of
   the version, then the cache and one unit of work per tenant of the ``obligation_tenant``
   directory, every one on the consumer's connection, each setting its own tenant so row-level
   security holds, all committing with the ``processed_event`` row. With
@@ -27,11 +29,12 @@ process that hosts several services adds to its own:
   ``<topic>.obligation.rules.dlq``.
 - a consumer in group ``obligation.erasure`` of ``tenant.deletion.requested``
   (``py_common.erasure``): while the flag ``identity.tenant_erasure`` is off for the tenant it
-  only logs ``erasure.off``; on, it deletes the tenant's obligations with their changes,
+  only logs ``erasure.off``; on, it checks the event with identity (one identity did not send is
+  refused, audited and dead-lettered), then deletes the tenant's obligations with their changes,
   comments and reminders, its applied decisions, its directory entry, idempotency keys and
   published events (``infrastructure.erasure.PostgresObligationEraser``), keeps the rule-level
-  cache of rule versions, and writes ``tenant.data.erased`` (service obligation) and its
-  ``tenant.erased`` audit entry with the ``processed_event`` row.
+  cache of rule versions, and writes ``tenant.data.erased`` (service obligation), its
+  ``tenant.erased`` audit entry and the erased marker with the ``processed_event`` row.
 - with ``CW_OBLIGATION_SWEEP_ENABLED`` on (off by default), the reminder sweep,
   ``SendDueReminders.run``, every ``CW_OBLIGATION_SWEEP_INTERVAL_SECONDS`` (an hour), and the
   rolling window, ``RollWindow.run``, daily at 02:30 IST, both one tenant at a time through the
@@ -85,7 +88,16 @@ from obligation.infrastructure.repository import (
 from obligation.infrastructure.rulebook_client import HttpRuleVersionReader
 from obligation.settings import ObligationSettings
 from py_common.auth import service_auth_from
-from py_common.erasure import Enabled, ErasureSwitch, erasure_component
+from py_common.erasure import (
+    Enabled,
+    ErasedOn,
+    ErasureVerifier,
+    erased_on_connection,
+    erasure_component,
+    erasure_switch,
+    skip_erased_write,
+    verifier_from,
+)
 from py_common.events import EventMessage
 from py_common.logging import get_logger
 from py_common.outbox import read_first_store, read_then_write
@@ -153,10 +165,12 @@ def decision_handler(
     apply: ApplyDecision,
     *,
     units_on: UnitsOnConnection = PostgresUnitOfWorkFactory.on_connection,
+    erased_on: ErasedOn = erased_on_connection,
     metrics: GuardMetrics | None = None,
 ) -> Handler:
     """The handler of applicability.decided: read with no transaction open, then write on the
-    consumer's connection. ``units_on`` makes the units there; tests pass the memory store's."""
+    consumer's connection, unless the decision's tenant is erased here. ``units_on`` and
+    ``erased_on`` make the units and the erased markers there; tests pass the memory store's."""
     counter = metrics or GuardMetrics()
 
     def read(message: EventMessage) -> DecisionPlan | None:
@@ -173,7 +187,7 @@ def decision_handler(
         applied = apply.apply(plan, units_on(connection))
         _log_decision(message, plan.decision, applied, counter)
 
-    return read_then_write(read, write)
+    return read_then_write(read, skip_erased_write(ERASURE_SERVICE, write, erased_on=erased_on))
 
 
 def _log_decision(
@@ -352,10 +366,11 @@ def components(
     *,
     rules: RuleVersionReader | None = None,
     erasure: Enabled | None = None,
+    verifier: ErasureVerifier | None = None,
 ) -> WorkerComponents:
     """The three consumers and, when ``CW_OBLIGATION_SWEEP_ENABLED`` is on, the reminder sweep
-    and the rolling window; ``rules`` replaces the rulebook reader and ``erasure`` the flag of
-    the erasure consumer."""
+    and the rolling window; ``rules`` replaces the rulebook reader, ``erasure`` the flag of the
+    erasure consumer and ``verifier`` identity's check."""
     if settings.obligation_store != "postgres":
         raise ValueError("the obligation worker needs CW_OBLIGATION_STORE=postgres")
     reader = rules or reader_of(settings)
@@ -393,7 +408,8 @@ def components(
             erasure_component(
                 ERASURE_SERVICE,
                 PostgresObligationEraser,
-                enabled=erasure or ErasureSwitch(settings),
+                enabled=erasure or erasure_switch(settings),
+                verifier=verifier or verifier_from(settings),
             ),
         ),
         periodic=periodic,

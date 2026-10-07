@@ -26,6 +26,7 @@ from obligation.domain.reminders import Reminder
 from obligation.domain.repository import ExportAfter, ListingAfter, UnitOfWork
 from obligation.domain.rule_versions import AppliedDecision, RuleVersionRef
 from py_common.audit import MemoryAuditSink
+from py_common.erasure import MemoryErasedTenants
 
 DecisionKey = tuple[BusinessId, RuleVersionId]
 
@@ -325,6 +326,7 @@ class MemoryStore:
         self.rule_versions: dict[RuleVersionId, RuleVersionRef] = {}
         self.decisions: dict[DecisionKey, AppliedDecision] = {}
         self.audit: list[AuditEntry] = []
+        self.erased = MemoryErasedTenants()
         self._lock = threading.Lock()
 
     def ping(self) -> bool:

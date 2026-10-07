@@ -21,6 +21,7 @@ from collections.abc import Callable
 from fastapi import FastAPI
 from starlette.concurrency import run_in_threadpool
 
+from domain_kernel.erasure import ErasedTenants
 from domain_kernel.errors import DomainError, InvalidTransitionError
 from obligation import __version__
 from obligation.api.router import business_router, public_router, router
@@ -57,6 +58,7 @@ from obligation.wiring import Wiring
 from py_common.app import create_app, module_app
 from py_common.auth import TokenSource, service_auth_from
 from py_common.auth.fastapi import Authenticator
+from py_common.erasure import PostgresErasedTenants
 from py_common.idempotency import IdempotencyStore, MemoryIdempotencyStore
 from py_common.idempotency.sqlalchemy import SqlAlchemyIdempotencyStore
 
@@ -89,13 +91,16 @@ def wire(
     unit_of_work: UnitOfWorkFactory
     ping: Callable[[], bool]
     idempotency: IdempotencyStore
+    erased: ErasedTenants
     if settings.obligation_store == "memory":
         memory = MemoryStore()
         unit_of_work, ping, idempotency = memory, memory.ping, MemoryIdempotencyStore()
+        erased = memory.erased
     else:
         postgres = PostgresUnitOfWorkFactory.from_url(settings.database_url)
         unit_of_work, ping = postgres, postgres.ping
         idempotency = SqlAlchemyIdempotencyStore(postgres.engine)
+        erased = PostgresErasedTenants(postgres.engine)
     if rules is None or members is None or profiles is None:
         auth = service_auth_from(settings, token_source=token_source)
         rules = rules or HttpRuleVersionReader(settings.rulebook_url, auth=auth)
@@ -121,6 +126,7 @@ def wire(
         assign=AssignObligation(unit_of_work, members),
         add_comment=AddComment(unit_of_work),
         export_tenant_data=ExportTenantData(unit_of_work),
+        erased_tenants=erased,
     )
 
 
@@ -148,6 +154,7 @@ def build_app(
         readiness_checks=[("store", wiring.store_ready)],
         problem_status=PROBLEM_STATUS,
         authenticator=authenticator,
+        erased_tenants=wiring.erased_tenants,
     )
     app.state.wiring = wiring
     return app
