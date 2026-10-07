@@ -71,8 +71,12 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      # Runs once, on an empty volume only. Changed the file? `make dev-reset`.
+      # Runs once, on an empty volume only. Changed the file? `make dev-reset`. The service roles
+      # (cw_<schema>) and their dev passwords come next; make db-roles refreshes them on an
+      # existing volume, and make dev and make migrate run it.
       - ./infra/dev/postgres/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
+      - ./infra/dev/postgres/roles.sql:/docker-entrypoint-initdb.d/20-roles.sql:ro
+      - ./infra/dev/postgres/dev-passwords.sql:/docker-entrypoint-initdb.d/30-dev-passwords.sql:ro
       - ./infra/dev/postgres/40-unleash.sql:/docker-entrypoint-initdb.d/40-unleash.sql:ro
     healthcheck:
       # -h forces TCP. The entrypoint's temporary init-time server listens on the unix socket

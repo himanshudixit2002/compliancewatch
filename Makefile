@@ -75,10 +75,11 @@ doctor: ## Print which required tools are present
 	done
 
 # ---- Local stack (guide section 17) ---------------------------------------------------------
-.PHONY: dev dev-observability dev-llm dev-urls dev-down dev-reset dev-logs dev-ps dev-psql compose-config
-dev: check-docker ## Start Postgres, Redis, Redpanda, Temporal (+UI); waits for health, prints endpoints
+.PHONY: dev dev-observability dev-llm dev-urls dev-down dev-reset dev-logs dev-ps dev-psql compose-config db-roles
+dev: check-docker ## Start Postgres, Redis, Redpanda, Temporal (+UI); waits for health, refreshes the service roles (db-roles), prints endpoints
 	@[ -f .env ] || { cp .env.example .env && echo "created .env from .env.example"; }
 	$(COMPOSE) up -d --wait --wait-timeout 180
+	@$(MAKE) --no-print-directory db-roles
 	@$(MAKE) --no-print-directory dev-urls
 
 dev-observability: check-docker ## Same as dev plus Langfuse, OTel collector, Prometheus, Tempo, Grafana (compose profile: observability)
@@ -86,7 +87,30 @@ dev-observability: check-docker ## Same as dev plus Langfuse, OTel collector, Pr
 	$(COMPOSE) --profile observability up -d --wait --wait-timeout 240
 	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
 	curl -sf "http://localhost:$${OTEL_HEALTH_PORT:-13133}/" >/dev/null && echo "otel-collector healthy" || { echo "error: otel-collector health check failed"; exit 1; }
+	@$(MAKE) --no-print-directory db-roles
 	@$(MAKE) --no-print-directory dev-urls
+
+# The services' own database roles (infra/dev/postgres/roles.sql): one login per service schema,
+# cw_<schema>, neither a superuser nor bypassing row-level security, with its own schema, public
+# and INSERT on the audit log (cw_identity also reads it). make run, make worker, make relay,
+# make seed and make web-stack STORE=postgres connect as the service's role, so the tenant
+# policies apply as in a deployment; its dev password is its name (dev-passwords.sql, a
+# placeholder). DB_ROLE=owner connects them as $POSTGRES_USER, the schemas' owner, instead; make
+# migrate always does. db-roles creates or refreshes the roles on the running Postgres as the
+# owner; make dev and make migrate run it, and a fresh volume gets them from the compose mounts.
+DB_ROLE ?=
+# Recipe shell: db_user and db_password for the schema in $schema, as DB_ROLE says.
+DB_LOGIN = case "$(DB_ROLE)" in \
+    "") db_user="cw_$$schema"; db_password="cw_$$schema" ;; \
+    owner) db_user="$${POSTGRES_USER:-cw}"; db_password="$${POSTGRES_PASSWORD:-cw}" ;; \
+    *) echo "error: DB_ROLE=$(DB_ROLE): leave it unset for the service's role cw_<schema>, or set DB_ROLE=owner"; exit 1 ;; \
+  esac
+DB_URL = postgresql+psycopg://$$db_user:$$db_password@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}?options=-csearch_path%3D$$schema%2Cpublic
+
+db-roles: check-docker ## Create or refresh each service's database role cw_<schema> and its dev password on the running Postgres (infra/dev/postgres/roles.sql); safe to repeat
+	@cat infra/dev/postgres/roles.sql infra/dev/postgres/dev-passwords.sql | \
+	  $(COMPOSE) exec -T postgres sh -c 'psql -q -1 -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"'
+	@echo "roles cw_<schema> of the ten service schemas: their own schema and INSERT on audit; row-level security applies to them (dev passwords: the role names)"
 
 dev-llm: check-docker ## Build and start the fake LLM gateway container (compose profile: llm)
 	@[ -f .env ] || { cp .env.example .env && echo "created .env from .env.example"; }
@@ -97,7 +121,7 @@ dev-llm: check-docker ## Build and start the fake LLM gateway container (compose
 dev-urls:
 	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
 	echo ""; echo "ComplianceWatch dev stack"; \
-	echo "  Postgres         localhost:$${POSTGRES_PORT:-5432}   db=$${POSTGRES_DB:-compliancewatch} user=$${POSTGRES_USER:-cw}"; \
+	echo "  Postgres         localhost:$${POSTGRES_PORT:-5432}   db=$${POSTGRES_DB:-compliancewatch} user=$${POSTGRES_USER:-cw} (owner; the services connect as cw_<schema>)"; \
 	echo "  Redis            localhost:$${REDIS_PORT:-6379}"; \
 	echo "  Kafka (Redpanda) localhost:$${REDPANDA_KAFKA_PORT:-19092}   schema registry http://localhost:$${REDPANDA_SCHEMA_REGISTRY_PORT:-18081}"; \
 	echo "  Temporal         localhost:$${TEMPORAL_PORT:-7233}   UI http://localhost:$${TEMPORAL_UI_PORT:-8233}"; \
@@ -234,7 +258,10 @@ demo: check-uv ## The demo tenant end to end in one process (consent, profile, r
 label: check-uv ## Labelling tool: make label ARGS="check" | "index --source cbic_notifications --since 2024-01-01 --out evals/golden/extraction/cbic_notifications/index.yaml" | "prepare --index ..."
 	$(UV) run --package compliancewatch-pipeline pipeline-label $(ARGS)
 
-migrate: check-uv ## alembic upgrade head for every service, or one: make migrate SERVICE=identity
+# migrate connects as the schemas' owner, $POSTGRES_USER. It ends with db-roles: a schema's first
+# migration makes its alembic_version, which the roles' default privileges reach, and db-roles
+# takes the writes on it back (and grants a schema that is new).
+migrate: check-uv ## alembic upgrade head for every service, or one, as the schemas' owner, then make db-roles: make migrate SERVICE=identity
 	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
 	for svc in $(if $(SERVICE),$(SERVICE),$(SERVICES)); do \
 	  case "$$svc" in \
@@ -247,23 +274,24 @@ migrate: check-uv ## alembic upgrade head for every service, or one: make migrat
 	  CW_DATABASE_URL="$$url" CW_DB_SCHEMA="$$schema" \
 	    $(UV) run --package compliancewatch-$$svc alembic -c services/$$svc/alembic.ini upgrade head || exit 1; \
 	done
+	@$(MAKE) --no-print-directory db-roles
 
 # run and worker name the process's service client after the service (CW_SERVICE_CLIENT_ID) unless
 # .env or the environment sets it, so a worker is its service's client; elsewhere an empty id stands
 # for the process's service name. No token is sent until CW_SERVICE_CLIENT_SECRET is set too.
-run: check-uv ## Run one service with reload: make run SERVICE=identity [PORT=8001]
+run: check-uv ## Run one service with reload, as its database role cw_<schema>: make run SERVICE=identity [PORT=8001] [DB_ROLE=owner]
 	@[ -n "$(SERVICE)" ] || { echo "usage: make run SERVICE=<identity|profile|...> [PORT=8000]"; exit 1; }
 	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
-	url="postgresql+psycopg://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}?options=-csearch_path%3D$(SCHEMA)%2Cpublic"; \
+	schema=$(SCHEMA); $(DB_LOGIN); url="$(DB_URL)"; \
 	CW_DATABASE_URL="$$url" CW_DB_SCHEMA="$(SCHEMA)" CW_SERVICE_CLIENT_ID="$${CW_SERVICE_CLIENT_ID:-$(SERVICE)}" \
 	  $(UV) run --package compliancewatch-$(SERVICE) uvicorn $(PKG).main:app --reload --port $(PORT) \
 	    --reload-dir services/$(SERVICE)/src --reload-dir packages/py-common/src \
 	    --reload-dir packages/domain-kernel/src --reload-dir packages/ontology/src
 
-seed: check-uv ## Load the rulebook seed calendar as draft rule versions: make seed SERVICE=rulebook [ARGS=--check]
+seed: check-uv ## Load the rulebook seed calendar as draft rule versions, as cw_rulebook: make seed SERVICE=rulebook [ARGS=--check] [DB_ROLE=owner]
 	@[ -n "$(SERVICE)" ] || { echo "usage: make seed SERVICE=rulebook [ARGS=--check]"; exit 1; }
 	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
-	url="postgresql+psycopg://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}?options=-csearch_path%3D$(SCHEMA)%2Cpublic"; \
+	schema=$(SCHEMA); $(DB_LOGIN); url="$(DB_URL)"; \
 	CW_DATABASE_URL="$$url" CW_DB_SCHEMA="$(SCHEMA)" \
 	  $(UV) run --package compliancewatch-$(SERVICE) $(SERVICE)-seed $(ARGS)
 
@@ -309,17 +337,17 @@ extract-backlog: check-uv ## The classified backlog per source, and a sweep that
 	CW_DATABASE_URL="$$url" CW_DB_SCHEMA=pipeline CW_PIPELINE_STORE=postgres CW_LOG_LEVEL=WARNING \
 	  $(UV) run --package compliancewatch-pipeline pipeline-extract-backlog $(ARGS)
 
-worker: check-uv ## Run a service's worker process, python -m <pkg>.worker (consumers, relay, periodic jobs, Temporal): make worker SERVICE=pipeline
+worker: check-uv ## Run a service's worker process, python -m <pkg>.worker (consumers, relay, periodic jobs, Temporal), as its database role: make worker SERVICE=pipeline [DB_ROLE=owner]
 	@[ -n "$(SERVICE)" ] || { echo "usage: make worker SERVICE=<pipeline|notification|...>"; exit 1; }
 	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
-	url="postgresql+psycopg://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}?options=-csearch_path%3D$(SCHEMA)%2Cpublic"; \
+	schema=$(SCHEMA); $(DB_LOGIN); url="$(DB_URL)"; \
 	CW_DATABASE_URL="$$url" CW_DB_SCHEMA="$(SCHEMA)" CW_SERVICE_CLIENT_ID="$${CW_SERVICE_CLIENT_ID:-$(SERVICE)}" \
 	  $(UV) run --package compliancewatch-$(SERVICE) python -m $(PKG).worker
 
-relay: check-uv ## Run the outbox relay for one service's schema: make relay SERVICE=obligation
+relay: check-uv ## Run the outbox relay for one service's schema, as its database role: make relay SERVICE=obligation [DB_ROLE=owner]
 	@[ -n "$(SERVICE)" ] || { echo "usage: make relay SERVICE=<identity|profile|...>"; exit 1; }
 	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
-	url="postgresql+psycopg://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}?options=-csearch_path%3D$(SCHEMA)%2Cpublic"; \
+	schema=$(SCHEMA); $(DB_LOGIN); url="$(DB_URL)"; \
 	CW_DATABASE_URL="$$url" CW_DB_SCHEMA="$(SCHEMA)" \
 	  $(UV) run --package compliancewatch-$(SERVICE) python -m py_common.outbox
 
@@ -500,23 +528,27 @@ web-dev: check-pnpm ## next dev on WEB_PORT from .env; /admin lists the internal
 # app's rule versions and publish workflow have versions to show; every draft still needs review,
 # and only an analyst's steps through the web app move one. Memory stores lose their rows when the
 # stack stops; STORE=postgres runs every store on the compose Postgres instead (make dev, make
-# migrate and make seed SERVICE=rulebook first), with the schema search path make run uses. The
-# store and the port base are recorded in $(WEB_STACK_DIR)/store (store=unknown when services this
-# command did not start were running already), which make web-e2e reads; make web-stack-down
-# removes it.
+# migrate and make seed SERVICE=rulebook first), each service as its database role cw_<schema>
+# with the schema search path make run uses, so row-level security applies (DB_ROLE=owner
+# connects them as the owner, which bypasses it). The store and the port base are recorded in
+# $(WEB_STACK_DIR)/store (store=unknown when services this command did not start were running
+# already), which make web-e2e reads; make web-stack-down removes it.
 WEB_STACK_DIR := var/web-stack
 WEB_STACK_WAIT_SECONDS ?= 60
 STORE ?= memory
 BILLING ?= none
 
-web-stack: check-uv ## UI-only stack, no worker: every service on SERVICE_PORT_BASE+1..10 with memory stores (pids and logs in var/web-stack): make web-stack [STORE=postgres] [BILLING=memory]
+web-stack: check-uv ## UI-only stack, no worker: every service on SERVICE_PORT_BASE+1..10 with memory stores (pids and logs in var/web-stack): make web-stack [STORE=postgres] [BILLING=memory] [DB_ROLE=owner]
 	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
 	[ "$(STORE)" = "memory" ] || [ "$(STORE)" = "postgres" ] || { echo "usage: make web-stack [STORE=memory|postgres]"; exit 1; }; \
 	[ "$(BILLING)" = "none" ] || [ "$(BILLING)" = "memory" ] || { echo "usage: make web-stack [BILLING=none|memory]"; exit 1; }; \
 	mkdir -p $(WEB_STACK_DIR); base=$${SERVICE_PORT_BASE:-8000}; i=0; \
 	token="$${CW_RULEBOOK_WRITE_TOKEN:-local-write-token}"; review="$${CW_RULEBOOK_REVIEW_TOKEN:-local-review-token}"; \
 	seed=false; raw=local; if [ "$(STORE)" = "memory" ]; then seed=true; raw=memory; fi; \
-	echo "web stack: services on $$((base+1))-$$((base+10)), $(STORE) stores, billing provider $(BILLING), rulebook publishing on"; \
+	as=""; if [ "$(STORE)" = "postgres" ]; then \
+	  case "$(DB_ROLE)" in "") as=", each as its database role cw_<schema>" ;; owner) as=", as the owner $${POSTGRES_USER:-cw}" ;; \
+	    *) echo "error: DB_ROLE=$(DB_ROLE): leave it unset for the services' roles, or set DB_ROLE=owner"; exit 1 ;; esac; fi; \
+	echo "web stack: services on $$((base+1))-$$((base+10)), $(STORE) stores$$as, billing provider $(BILLING), rulebook publishing on"; \
 	kept=0; \
 	for svc in $(SERVICES); do \
 	  i=$$((i+1)); port=$$((base+i)); pidfile=$(WEB_STACK_DIR)/$$svc.pid; \
@@ -526,7 +558,7 @@ web-stack: check-uv ## UI-only stack, no worker: every service on SERVICE_PORT_B
 	  case "$$svc" in applicability-engine) schema=applicability ;; llm-gateway) schema=llm_gateway ;; *) schema=$$svc ;; esac; \
 	  url="$${CW_DATABASE_URL:-}"; \
 	  if [ "$(STORE)" = "postgres" ]; then \
-	    url="postgresql+psycopg://$${POSTGRES_USER:-cw}:$${POSTGRES_PASSWORD:-cw}@localhost:$${POSTGRES_PORT:-5432}/$${POSTGRES_DB:-compliancewatch}?options=-csearch_path%3D$${schema}%2Cpublic"; \
+	    $(DB_LOGIN); url="$(DB_URL)"; \
 	  fi; \
 	  temporal="$${CW_TEMPORAL_ADDRESS:-localhost:7233}"; case "$$svc" in pipeline|applicability-engine) temporal=127.0.0.1:1 ;; esac; \
 	  CW_DATABASE_URL="$$url" CW_DB_SCHEMA="$$schema" CW_TEMPORAL_ADDRESS="$$temporal" CW_PIPELINE_RAW_STORE=$$raw \
@@ -664,7 +696,9 @@ openapi-ts-check: check-pnpm ## The generated OpenAPI types match the committed 
 # The services connect as PRODUCT_DB_USER (cw_app), a role that owns nothing and is not a
 # superuser, so row-level security keeps the tenants apart as it does in a deployment; make
 # product-role creates it on the running Postgres (infra/dev/postgres/50-app-role.sql), safe to
-# repeat. make migrate, make run and make web-stack still connect as the superuser.
+# repeat. One process hosts every service, so it is one role with every service schema; the
+# separate processes of make run and make web-stack STORE=postgres each connect as their own
+# service's role (make db-roles), and make migrate as the owner.
 #
 # The product's own settings are passed here and nowhere else, never as a registry or settings
 # default: header auth; both listeners on 127.0.0.1; the worker's health on PRODUCT_WORKER_PORT

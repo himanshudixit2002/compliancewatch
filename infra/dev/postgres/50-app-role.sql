@@ -1,7 +1,9 @@
 -- The role the local product's services connect as (make product): it owns nothing and is not a
--- superuser, so row-level security applies to it as it does in a deployment. make migrate, make
--- run and make web-stack connect as $POSTGRES_USER, the image's superuser, which bypasses every
--- policy (docs/onboarding/local-dev.md, "Row-level security in the dev stack").
+-- superuser, so row-level security applies to it as it does in a deployment. The product hosts
+-- every service in one process, so this one role has every service schema; the separate
+-- processes of make run and make web-stack STORE=postgres connect as each service's own role
+-- (roles.sql), and make migrate as $POSTGRES_USER, the schemas' owner
+-- (docs/onboarding/local-dev.md, "Database roles and row-level security").
 --
 -- make product runs this through psql on the running stack with the variables app_user and
 -- app_password, after make migrate; it is safe to repeat. It creates the role when missing, and
