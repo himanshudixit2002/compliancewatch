@@ -20,7 +20,7 @@ test.describe("settings index", () => {
       "Available",
     );
     await expect(pages.locator("[data-screen='owner.settings.data-rights']")).toContainText(
-      "Waiting for a backend",
+      "Ready to build",
     );
     await expect(pages.locator("[data-screen='owner.settings.billing']")).toBeVisible();
     await expect(page.locator("[data-screen='account.home']")).toBeVisible();
