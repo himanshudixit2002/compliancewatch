@@ -16,6 +16,7 @@ describe("permissions", () => {
     expect(rolesFor("admin.notifications.resend")).toEqual(["admin"]);
     expect(rolesFor("admin.tenants.read")).toEqual(["admin"]);
     expect(rolesFor("admin.review")).toEqual(["analyst", "reviewer", "admin"]);
+    expect(rolesFor("admin.review.approve")).toEqual(["reviewer", "admin"]);
     expect(rolesFor("admin.decisions.resolve")).toEqual(["reviewer", "admin"]);
     expect(rolesFor("admin.impact")).toEqual(["admin"]);
     expect(rolesFor("admin.fan_outs.control")).toEqual(["admin"]);

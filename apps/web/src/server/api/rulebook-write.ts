@@ -22,15 +22,30 @@ import {
   actorToDto,
   citationReportFromDto,
   citationsToDto,
+  claimToDto,
+  decideToDto,
+  draftEditToDto,
+  draftFromCandidateToDto,
   lifecycleFromDto,
   publicationFromDto,
+  reviewTaskDetailFromDto,
+  reviewTaskFromDto,
+  seedTasksFromDto,
   submitToDto,
+  taskDecisionFromDto,
   versionApprovalToDto,
 } from "@/entities/rule-version/mappers";
 import type {
   CitationInput,
   CitationReport,
+  DraftEdit,
+  DraftFromCandidate,
   Publication,
+  ReviewTask,
+  ReviewTaskDetail,
+  SeedTasksOpened,
+  TaskDecision,
+  TaskDecisionInput,
   VersionLifecycle,
 } from "@/entities/rule-version/types";
 import { isProblemOf } from "@/entities/problem/mappers";
@@ -53,7 +68,9 @@ import type { ClientContext } from "./services";
  *
  *   rulebookWriteClient(ctx)    x-cw-write-token, after a regulatory-role check
  *   rulebookReviewClient(ctx)   x-cw-review-token, after a regulatory-role check
- *   rulebookWrites(ctx)         the decisions an admin tool makes, behind the role, the flag
+ *   rulebookWrites(ctx)         the decisions an admin tool makes (entity groups, relation
+ *                               candidates, and a review task's claim, draft, edit and decision,
+ *                               and opening the seed tasks), behind the role, the flag
  *                               web.admin_rulebook_writes and the review token; a refusal is a
  *                               port whose every method answers the refusal without a request
  *   rulebookWriteAccess(ctx)    whether a form may offer those decisions, and why not
@@ -183,6 +200,16 @@ export interface RulebookWritePort {
     candidateId: string,
     rejection: CandidateRejection,
   ): Promise<Result<RelationCandidate>>;
+  /** A review task claimed by the session's user; claiming it again changes nothing. */
+  claimTask(taskId: string): Promise<Result<ReviewTask>>;
+  /** A review task for every seed draft that has none waiting. */
+  openSeedTasks(): Promise<Result<SeedTasksOpened>>;
+  /** A version drafted from a claimed candidate task's candidate. */
+  draftFromCandidate(taskId: string, draft: DraftFromCandidate): Promise<Result<ReviewTaskDetail>>;
+  /** An edit of a claimed task's draft. */
+  editDraft(taskId: string, edit: DraftEdit): Promise<Result<ReviewTaskDetail>>;
+  /** Approve, return or reject a review task. */
+  decideTask(taskId: string, input: TaskDecisionInput): Promise<Result<TaskDecision>>;
 }
 
 function explained<T>(result: Result<T>): Result<T> {
@@ -233,6 +260,58 @@ export class RulebookWriteGateway implements RulebookWritePort {
     );
     return explained(mapBody(result, relationCandidateFromDto));
   }
+
+  private task(taskId: string) {
+    return { params: { path: { task_id: taskId } } };
+  }
+
+  async claimTask(taskId: string): Promise<Result<ReviewTask>> {
+    const result = await call(
+      this.client.POST("/v1/rulebook/review/tasks/{task_id}/claim", {
+        ...this.task(taskId),
+        body: claimToDto(this.decidedBy),
+      }),
+    );
+    return explained(mapBody(result, reviewTaskFromDto));
+  }
+
+  async openSeedTasks(): Promise<Result<SeedTasksOpened>> {
+    const result = await call(this.client.POST("/v1/rulebook/review/tasks/seed", {}));
+    return explained(mapBody(result, seedTasksFromDto));
+  }
+
+  async draftFromCandidate(
+    taskId: string,
+    draft: DraftFromCandidate,
+  ): Promise<Result<ReviewTaskDetail>> {
+    const result = await call(
+      this.client.POST("/v1/rulebook/review/tasks/{task_id}/draft", {
+        ...this.task(taskId),
+        body: draftFromCandidateToDto(draft, this.decidedBy),
+      }),
+    );
+    return explained(mapBody(result, reviewTaskDetailFromDto));
+  }
+
+  async editDraft(taskId: string, edit: DraftEdit): Promise<Result<ReviewTaskDetail>> {
+    const result = await call(
+      this.client.PATCH("/v1/rulebook/review/tasks/{task_id}/draft", {
+        ...this.task(taskId),
+        body: draftEditToDto(edit, this.decidedBy),
+      }),
+    );
+    return explained(mapBody(result, reviewTaskDetailFromDto));
+  }
+
+  async decideTask(taskId: string, input: TaskDecisionInput): Promise<Result<TaskDecision>> {
+    const result = await call(
+      this.client.POST("/v1/rulebook/review/tasks/{task_id}/decide", {
+        ...this.task(taskId),
+        body: decideToDto(input, this.decidedBy),
+      }),
+    );
+    return explained(mapBody(result, taskDecisionFromDto));
+  }
 }
 
 /** A port that refuses every decision with the same error and sends nothing. */
@@ -252,6 +331,26 @@ export class RefusedWriteGateway implements RulebookWritePort {
   }
 
   async rejectCandidate(): Promise<Result<RelationCandidate>> {
+    return err(this.error);
+  }
+
+  async claimTask(): Promise<Result<ReviewTask>> {
+    return err(this.error);
+  }
+
+  async openSeedTasks(): Promise<Result<SeedTasksOpened>> {
+    return err(this.error);
+  }
+
+  async draftFromCandidate(): Promise<Result<ReviewTaskDetail>> {
+    return err(this.error);
+  }
+
+  async editDraft(): Promise<Result<ReviewTaskDetail>> {
+    return err(this.error);
+  }
+
+  async decideTask(): Promise<Result<TaskDecision>> {
     return err(this.error);
   }
 }

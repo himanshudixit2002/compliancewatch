@@ -1,4 +1,5 @@
 import type { rulebook } from "@compliancewatch/contracts/openapi";
+import { membersOf } from "@/shared/lib/union";
 
 /**
  * Rules and their versions as the rulebook service keeps them (ADR-006): a rule (`rule_key`) has
@@ -235,3 +236,329 @@ export interface Publication extends VersionLifecycle {
 
 /** The steps an analyst takes on a version, one route each. */
 export type WorkflowStep = "submit" | "return" | "approve" | "publish" | "withdraw";
+
+// ---- Review tasks (the rulebook's review queue: GET /v1/rulebook/review/tasks*) -----------------
+
+/*
+ * A review task asks for one decision on a rule version: approve it, return it for rework, or
+ * reject it. A task of kind `seed` reviews a draft the seed calendar wrote; one of kind
+ * `candidate` reviews a rule candidate the pipeline extracted, and has no version until its
+ * claimant drafts one from the candidate. A task is opened, claimed by the analyst who works on
+ * it, and decided once; the first of the two approvals a high-impact version needs leaves it open
+ * again for a second, different reviewer. The wire shapes are the rulebook spec's.
+ */
+export type ReviewTaskKind = Schemas["ReviewTaskKind"];
+export type ReviewTaskStatus = Schemas["ReviewTaskStatus"];
+export type ReviewDecision = Schemas["ReviewDecision"];
+export type RuleRejectReason = Schemas["RuleRejectReason"];
+export type CandidateOutcome = Schemas["CandidateOutcome"];
+export type RuleCandidateStatus = Schemas["RuleCandidateStatus"];
+export type DecisionAction = Schemas["DecisionAction"];
+
+export type ReviewTaskDto = Schemas["ReviewTaskOut"];
+export type QueuedTaskDto = Schemas["QueuedTaskOut"];
+export type QueuedCandidateDto = Schemas["QueuedCandidateOut"];
+export type TaskPageDto = Schemas["Page_QueuedTaskOut_"];
+export type ReviewTaskDetailDto = Schemas["ReviewTaskDetailOut"];
+export type RuleCandidateDto = Schemas["CandidateOut"];
+export type ProposedDraftDto = Schemas["ProposedDraftOut"];
+export type TaskDocumentDto = Schemas["TaskDocumentOut"];
+export type AuditEntryDto = Schemas["AuditEntryOut"];
+export type TaskDecisionDto = Schemas["TaskDecisionOut"];
+export type SeedTasksDto = Schemas["SeedTasksOut"];
+export type ReviewStatsDto = Schemas["ReviewStatsOut"];
+export type ClaimInDto = Schemas["ClaimIn"];
+export type DraftFieldsInDto = Schemas["DraftFieldsIn"];
+export type DraftEditInDto = Schemas["DraftEditIn"];
+export type DraftFromCandidateInDto = Schemas["DraftFromCandidateIn"];
+export type DecideInDto = Schemas["DecideIn"];
+
+export const REVIEW_TASK_KINDS = membersOf<ReviewTaskKind>({ seed: true, candidate: true });
+
+export const REVIEW_TASK_STATUSES = membersOf<ReviewTaskStatus>({
+  open: true,
+  claimed: true,
+  decided: true,
+});
+
+export const REVIEW_DECISIONS = membersOf<ReviewDecision>({
+  approve: true,
+  return: true,
+  reject: true,
+});
+
+export const RULE_REJECT_REASONS = membersOf<RuleRejectReason>({
+  not_a_rule: true,
+  wrong_extraction: true,
+  duplicate: true,
+  out_of_scope: true,
+  unparseable: true,
+});
+
+export const DECISION_ACTIONS = membersOf<DecisionAction>({
+  submitted: true,
+  returned: true,
+  approved: true,
+  published: true,
+  withdrawn: true,
+  superseded: true,
+  edited: true,
+});
+
+/** The rulebook's limit on a decision's note, a draft's title, its summary and its questions. */
+export const REVIEW_NOTE_MAX = 2000;
+export const DRAFT_TITLE_MAX = 300;
+export const DRAFT_SUMMARY_MAX = 4000;
+export const DRAFT_TODO_MAX = 20;
+export const DRAFT_QUESTION_MAX = 500;
+/** The kernel's frequencies of a recurring duty (domain_kernel.recurrence.Frequency). */
+export const FREQUENCIES = ["monthly", "quarterly", "half_yearly", "annual"] as const;
+
+export interface ReviewTask {
+  taskId: string;
+  /** The version the task reviews; null for a candidate task not drafted yet. */
+  ruleVersionId: string | null;
+  kind: ReviewTaskKind;
+  candidateId: string | null;
+  /** Higher comes first within a regulator. */
+  priority: number;
+  regulator: string;
+  status: ReviewTaskStatus;
+  openedAt: string;
+  claimedBy: string | null;
+  claimedAt: string | null;
+  decision: ReviewDecision | null;
+  decidedBy: string | null;
+  decidedAt: string | null;
+  /** The decision's note. */
+  note: string;
+}
+
+/** What the queue shows of a candidate task's candidate. */
+export interface QueuedCandidate {
+  candidateId: string;
+  documentId: string;
+  status: RuleCandidateStatus;
+  /** extracted, or unparseable: no candidate, so an analyst drafts by hand. */
+  outcome: CandidateOutcome;
+  confidence: number;
+  needsReview: boolean;
+  issueCount: number;
+  suggestedRuleKey: string | null;
+  highImpactSuggested: boolean;
+}
+
+/** A row of the queue: the task with its version's rule, number, title and status. */
+export interface QueuedTask extends ReviewTask {
+  /** The version's rule; before drafting, the key suggested for the candidate. */
+  ruleKey: string | null;
+  /** Null before drafting. */
+  version: number | null;
+  /** The version's title, or the candidate's before drafting. */
+  title: string;
+  versionStatus: RuleVersionStatus | null;
+  /** Before drafting, what the candidate suggests. */
+  highImpact: boolean;
+  /** Distinct approvers of the version's current review round. */
+  approvals: number;
+  requiredApprovals: number;
+  candidate: QueuedCandidate | null;
+}
+
+export interface TaskPage {
+  tasks: QueuedTask[];
+  /** Send as `cursor` for the next page; null on the last page. */
+  nextCursor: string | null;
+}
+
+/** A document a version cites (or a candidate came from): its clauses are a separate read. */
+export interface TaskDocument {
+  documentId: string;
+  regulator: string;
+  docType: string;
+  externalRef: string;
+  title: string;
+  url: string;
+  publishedAt: string | null;
+}
+
+/** A row of a version's append-only decision audit. */
+export interface AuditEntry {
+  decisionId: string;
+  action: DecisionAction;
+  fromStatus: RuleVersionStatus;
+  toStatus: RuleVersionStatus;
+  actorId: string | null;
+  causedByRuleVersionId: string | null;
+  note: string;
+  decidedAt: string;
+}
+
+export interface ExtractionIssue {
+  /** The check that failed, such as citation_quote_not_found. */
+  code: string;
+  detail: string;
+  clauseRef: string | null;
+}
+
+export interface ProposedCitation {
+  clauseRef: string;
+  clauseId: string;
+  quote: string;
+}
+
+/**
+ * The draft a candidate proposes, before the analyst's edits, in the stored forms: each field
+ * the candidate maps, null for one it does not (`problems` says why), and its quotes.
+ */
+export interface ProposedDraft {
+  title: string | null;
+  summary: string | null;
+  /** The mapping as proposed; null when a condition is refused. */
+  specification: Record<string, unknown> | null;
+  obligationTemplate: Record<string, unknown> | null;
+  recurrence: Record<string, unknown> | null;
+  effectiveFrom: string | null;
+  effectiveTo: string | null;
+  citations: readonly ProposedCitation[];
+  problems: readonly string[];
+}
+
+/** A candidate task's rule candidate: the extraction as stored and the draft it proposes. */
+export interface RuleCandidate {
+  candidateId: string;
+  documentId: string;
+  document: TaskDocument | null;
+  regulator: string;
+  model: string;
+  promptVersion: string;
+  confidence: number;
+  /** Quotes the pipeline verified against the clauses. */
+  citationCount: number;
+  needsReview: boolean;
+  outcome: CandidateOutcome;
+  status: RuleCandidateStatus;
+  rejectReason: RuleRejectReason | null;
+  /** The version drafted from it. */
+  ruleVersionId: string | null;
+  suggestedRuleKey: string | null;
+  /** Whether a rule has the suggested key. */
+  suggestedRuleKnown: boolean;
+  highImpactSuggested: boolean;
+  highImpactReasons: readonly string[];
+  issues: readonly ExtractionIssue[];
+  docType: string | null;
+  sourceKey: string | null;
+  ontologyVersion: string | null;
+  proposed: ProposedDraft;
+  createdAt: string;
+  decidedBy: string | null;
+  decidedAt: string | null;
+}
+
+/** A task with everything its workbench shows. */
+export interface ReviewTaskDetail {
+  task: ReviewTask;
+  /** The version the task reviews; null for a candidate task not drafted yet. */
+  version: RuleVersion | null;
+  /** The predicate tree as the rulebook describes it, two spaces deeper per level. */
+  specificationDescribed: readonly string[];
+  citations: readonly Citation[];
+  /** The documents the citations cite. */
+  documents: readonly TaskDocument[];
+  sourceUrl: string | null;
+  /** Approvers of the version's current round. */
+  approvedBy: readonly string[];
+  requiredApprovals: number;
+  decisions: readonly AuditEntry[];
+  /** Every task of the version (of the candidate before drafting), oldest first. */
+  tasks: readonly ReviewTask[];
+  candidate: RuleCandidate | null;
+}
+
+/** What a decision did: the task after it, the version, the next task a return opened. */
+export interface TaskDecision {
+  task: ReviewTask;
+  /** Null for a candidate rejected before drafting. */
+  version: VersionLifecycle | null;
+  nextTaskId: string | null;
+  candidateStatus: RuleCandidateStatus | null;
+}
+
+export interface SeedTasksOpened {
+  /** Tasks this request opened; 0 when every draft already has one. */
+  opened: number;
+  taskIds: readonly string[];
+}
+
+export interface StatusCounts {
+  open: number;
+  claimed: number;
+  decided: number;
+}
+
+export interface ReviewStats {
+  byStatus: StatusCounts;
+  byRegulator: readonly (StatusCounts & { regulator: string })[];
+  decisions: { approved: number; returned: number; rejected: number };
+  candidates: {
+    decided: number;
+    approved: number;
+    approvedWithoutEdits: number;
+    rejected: number;
+    /** The share approved without edits (ADR-006's measure); null while none is decided. */
+    acceptanceRate: number | null;
+  };
+  /** From a task's opening to its decision, over every decided task; null while none is. */
+  medianSecondsToDecide: number | null;
+  /** The oldest task not decided yet. */
+  oldestOpenAt: string | null;
+  /** Its age when the stats were read; 0 when none waits. */
+  oldestOpenAgeSeconds: number;
+}
+
+/**
+ * The content of a draft an analyst changes: each field present is sent, one left out keeps its
+ * value, and null clears the recurrence or the end date. The three mappings travel in the
+ * kernel's forms.
+ */
+export interface DraftFields {
+  title?: string;
+  summary?: string;
+  specification?: Record<string, unknown>;
+  obligationTemplate?: Record<string, unknown>;
+  recurrence?: Record<string, unknown> | null;
+  effectiveFrom?: string;
+  effectiveTo?: string | null;
+  todo?: readonly string[];
+}
+
+/** An edit of a claimed task's draft: changed fields, citations to add and why. */
+export interface DraftEdit {
+  fields: DraftFields;
+  citations: readonly CitationInput[];
+  note: string;
+}
+
+/** A version drafted from a candidate task's candidate. */
+export interface DraftFromCandidate {
+  ruleKey: string;
+  /** For a key no rule has: the new rule's regulator and level. */
+  newRule: { regulator: string; level: VersionLevel } | null;
+  /** Changes to the content the candidate proposes; null keeps it as proposed. */
+  edits: DraftFields | null;
+  /** The quotes to cite instead of the candidate's; null cites the candidate's. */
+  citations: readonly CitationInput[] | null;
+  /** Relation candidates of the candidate's document to approve onto the draft. */
+  relations: readonly { candidateId: string; targetRuleVersionId: string | null }[];
+  note: string;
+}
+
+export interface TaskDecisionInput {
+  decision: ReviewDecision;
+  note: string;
+  /** With approve: tag the version high impact before this approval counts. */
+  highImpact: boolean;
+  /** With reject, for a candidate task: why the candidate is rejected. */
+  reason: RuleRejectReason | null;
+}
