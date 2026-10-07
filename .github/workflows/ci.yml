@@ -558,11 +558,32 @@ jobs:
       # the tenant make product-seed recorded, through the obligations, the calendar, an
       # obligation's page and its tracking, the changes feed and ask (Playwright project
       # product). It talks HTTP only, so the image costs it nothing over the local processes.
-      # Chromium comes as the web-e2e job fetches it; nothing else is installed.
-      - name: Workspace and Chromium for the product journey
+      # Chromium comes as the web-e2e job fetches it, from the same cache (restored and saved in
+      # separate steps for the same reason); nothing else is installed.
+      - name: Workspace for the product journey
+        run: pnpm install --frozen-lockfile
+      - name: Playwright version
+        id: playwright
         run: |
-          pnpm install --frozen-lockfile
-          pnpm --filter web e2e:install
+          version=$(node -p "require('./apps/web/package.json').devDependencies['@playwright/test']")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v6
+        id: playwright-browsers
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ steps.playwright.outputs.version }}
+      - name: Chromium for the product journey
+        if: steps.playwright-browsers.outputs.cache-hit != 'true'
+        run: pnpm --filter web e2e:install
+      - name: Save the downloaded Chromium to the cache
+        if: steps.playwright-browsers.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ steps.playwright-browsers.outputs.cache-primary-key }}
+      - name: System libraries for the cached Chromium
+        if: steps.playwright-browsers.outputs.cache-hit == 'true'
+        run: pnpm --filter web exec playwright install-deps chromium
       - name: The product journey in the web app (make product-e2e)
         run: make product-e2e
       - name: Product logs
