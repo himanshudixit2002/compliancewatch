@@ -10,16 +10,27 @@ things in different documents: "section 16" of one notification is not "section 
 Such a group is decided mention by mention: the decision names the review items it covers
 (``review_ids``), links only those mentions to the chosen entity, adds no alias, and points only
 the candidates whose target is one of those mentions at the entity.
+
+A decision writes one ``entity_review.decided`` audit entry in its transaction
+(``rulebook.application.audit``). A group has no id of its own, so the entry's subject id is
+the group's key, ``<entity_type>:<proposed_name>`` (``group_key``); the entry's ``after`` holds
+the decision, the entity it chose, how many open mentions it closed and, for a decision by
+mention, the review ids.
 """
 
+import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime
+from typing import Final
 from uuid import UUID
 
+from domain_kernel.audit import MAX_SUBJECT_ID_CHARS
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.ids import CanonicalEntityId
 from domain_kernel.knowledge import EntityType
 from rulebook.application.alignment import Clock, default_clock
+from rulebook.application.audit import actor_for, entry
 from rulebook.domain.errors import (
     EntityTypeMismatchError,
     NonCanonicalNameError,
@@ -27,7 +38,7 @@ from rulebook.domain.errors import (
     ReviewGroupNotFoundError,
     UnknownEntityError,
 )
-from rulebook.domain.repository import KnowledgeUnitOfWorkFactory
+from rulebook.domain.repository import KnowledgeUnitOfWork, KnowledgeUnitOfWorkFactory
 from rulebook.domain.review import (
     EntityRejectReason,
     EntityReviewItem,
@@ -40,6 +51,18 @@ from rulebook.domain.review import (
 
 _PROVISIONS = frozenset({EntityType.SECTION, EntityType.RULE})
 MAX_PAGE = 200
+DECIDED_ACTION: Final = "entity_review.decided"
+SUBJECT: Final = "entity_review"
+
+
+def group_key(entity_type: EntityType, proposed_name: str) -> str:
+    """The audit subject id of a mention group: ``<entity_type>:<proposed_name>``, or, for a name
+    too long for a subject id, ``<entity_type>:sha256:<digest of the name>``."""
+    key = f"{entity_type.value}:{proposed_name}"
+    if len(key) <= MAX_SUBJECT_ID_CHARS:
+        return key
+    digest = hashlib.sha256(proposed_name.encode()).hexdigest()
+    return f"{entity_type.value}:sha256:{digest}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,7 +160,20 @@ class DecideMentionGroup:
                     uow.reviews.save(
                         item.reject(reject_reason, decided_by=decided_by, at=now, note=note)
                     )
-                return GroupDecision(ReviewStatus.REJECTED, None, None, len(open_items), 0)
+                result = GroupDecision(ReviewStatus.REJECTED, None, None, len(open_items), 0)
+                _audit(
+                    uow,
+                    entity_type,
+                    proposed_name,
+                    decision,
+                    result,
+                    decided_by=decided_by,
+                    at=now,
+                    note=note,
+                    reject_reason=reject_reason,
+                    review_ids=review_ids,
+                )
+                return result
 
             if decision is MentionDecision.CREATE_ENTITY:
                 if not _can_name(entity_type, proposed_name):
@@ -183,9 +219,61 @@ class DecideMentionGroup:
             )
             if nameable:
                 updated += uow.candidates.set_target_entity(entity_type, proposed_name, target)
-            return GroupDecision(
+            result = GroupDecision(
                 ReviewStatus.RESOLVED, resolution, target, len(open_items), updated
             )
+            _audit(
+                uow,
+                entity_type,
+                proposed_name,
+                decision,
+                result,
+                decided_by=decided_by,
+                at=now,
+                note=note,
+                review_ids=review_ids,
+            )
+            return result
+
+
+def _audit(
+    uow: KnowledgeUnitOfWork,
+    entity_type: EntityType,
+    proposed_name: str,
+    decision: MentionDecision,
+    result: GroupDecision,
+    *,
+    decided_by: str,
+    at: datetime,
+    note: str,
+    reject_reason: EntityRejectReason | None = None,
+    review_ids: Sequence[UUID] | None = None,
+) -> None:
+    """The decision's ``entity_review.decided`` entry."""
+    after: dict[str, object] = {
+        "decision": decision.value,
+        "status": result.status.value,
+        "resolution": None if result.resolution is None else result.resolution.value,
+        "entity_id": None if result.entity_id is None else str(result.entity_id),
+        "items_closed": result.items_closed,
+        "relation_targets_updated": result.relation_targets_updated,
+    }
+    if reject_reason is not None:
+        after["reject_reason"] = reject_reason.value
+    if review_ids:
+        after["review_ids"] = sorted(str(review_id) for review_id in review_ids)
+    uow.audit.write(
+        entry(
+            DECIDED_ACTION,
+            SUBJECT,
+            group_key(entity_type, proposed_name),
+            actor_for(decided_by),
+            at=at,
+            before={"status": ReviewStatus.OPEN.value},
+            after=after,
+            reason=note,
+        )
+    )
 
 
 def _can_name(entity_type: EntityType, name: str) -> bool:

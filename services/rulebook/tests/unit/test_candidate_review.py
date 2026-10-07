@@ -18,6 +18,7 @@ import pytest
 from jsonschema import Draft202012Validator
 
 import ontology as ontology_package
+from domain_kernel.audit import AuditActor
 from domain_kernel.documents import Clause, DocumentType, clause_id_for, document_id_for
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.ids import SourceId, UserId
@@ -1048,3 +1049,124 @@ def _matches_its_schema(event: RuleRejected) -> None:
     )
     assert message.tenant_id is None
     assert message.causation_id is not None
+
+
+# ---------------------------------------------------------------- the audit log
+
+
+def test_the_intake_writes_nothing_and_a_draft_writes_its_entries(review: Review) -> None:
+    relation = review.relation()
+    task_id = review.received()
+    assert review.store.audit_entries() == [], "the pipeline's intake is no person's action"
+    review.claim.run(task_id, by=ANALYST)
+    detail = review.draft_new_rule(
+        task_id,
+        relations=[RelationChoice(relation, review.monthly)],
+        edit=DraftEdit({"title": "Example: edited"}),
+        note="Example: checked",
+    )
+    assert detail.version is not None
+    claimed, approved, drafted = review.store.audit_entries()
+    assert [entry.action for entry in (claimed, approved, drafted)] == [
+        "review_task.claimed",
+        "relation_candidate.approved",
+        "review_task.drafted",
+    ]
+    assert approved.subject_id == str(relation)
+    assert {entry.actor for entry in (claimed, approved, drafted)} == {AuditActor.user(ANALYST)}
+    assert (drafted.subject_id, drafted.tenant_id, drafted.reason) == (
+        str(task_id),
+        None,
+        "Example: checked",
+    )
+    assert (drafted.before, drafted.after) == (
+        {"rule_version_id": None},
+        {
+            "rule_version_id": str(detail.version.rule_version_id),
+            "rule_key": EXTENSION,
+            "version": 1,
+            "new_rule": True,
+            "candidate_id": str(detail.task.candidate_id),
+            "changed": ("title",),
+            "relations": (str(relation),),
+        },
+    )
+    review.edit.run(task_id, by=ANALYST, edit=DraftEdit({"title": "Example: edited again"}))
+    assert len(review.store.audit_entries()) == 3, "an edit's decision row is its record"
+
+
+def test_a_refused_draft_writes_nothing(review: Review) -> None:
+    task_id = review.received()
+    review.claim.run(task_id, by=ANALYST)
+    with pytest.raises(RuleKeyUnknownError):
+        review.draft.run(task_id, by=ANALYST, rule_key="example_unknown_rule")
+    assert [entry.action for entry in review.store.audit_entries()] == ["review_task.claimed"]
+
+
+def test_a_candidates_rejection_names_the_candidate_and_the_relations_reopened(
+    review: Review,
+) -> None:
+    relation = review.relation()
+    task_id = review.received()
+    review.claim.run(task_id, by=ANALYST)
+    detail = review.draft_new_rule(task_id, relations=[RelationChoice(relation, review.monthly)])
+    assert detail.version is not None
+    review.decide.run(
+        task_id,
+        ReviewDecision.REJECT,
+        by=REVIEWER,
+        note="The model read the date wrongly",
+        reason=RuleRejectReason.WRONG_EXTRACTION,
+    )
+    (decided,) = review.store.audit_entries("review_task.decided")
+    assert (decided.actor, decided.reason) == (
+        AuditActor.user(REVIEWER),
+        "The model read the date wrongly",
+    )
+    assert decided.before == {
+        "status": "claimed",
+        "claimed_by": str(ANALYST),
+        "decision": None,
+        "candidate_status": "drafted",
+    }
+    assert decided.after == {
+        "status": "decided",
+        "claimed_by": str(ANALYST),
+        "decision": "reject",
+        "decided": "reject",
+        "rule_version_id": str(detail.version.rule_version_id),
+        "rule_version_status": "draft",
+        "candidate_status": "rejected",
+        "reject_reason": "wrong_extraction",
+        "reopened_relations": (str(relation),),
+    }
+
+
+def test_a_rejection_before_drafting_and_a_candidates_approval_are_recorded(
+    review: Review,
+) -> None:
+    task_id = review.received()
+    review.claim.run(task_id, by=ANALYST)
+    review.decide.run(
+        task_id,
+        ReviewDecision.REJECT,
+        by=REVIEWER,
+        note="The example notification states no rule",
+        reason=RuleRejectReason.NOT_A_RULE,
+    )
+    (rejected,) = review.store.audit_entries("review_task.decided")
+    assert rejected.after is not None
+    assert "rule_version_id" not in rejected.after
+    assert (rejected.after["candidate_status"], rejected.after["reject_reason"]) == (
+        "rejected",
+        "not_a_rule",
+    )
+
+    approved_task = review.received()
+    review.claim.run(approved_task, by=ANALYST)
+    review.draft_new_rule(approved_task, rule_key="example_extension_2000_01_approved")
+    review.decide.run(approved_task, ReviewDecision.APPROVE, by=REVIEWER)
+    review.decide.run(approved_task, ReviewDecision.APPROVE, by=OTHER_REVIEWER)
+    *_, last = review.store.audit_entries("review_task.decided")
+    assert last.after is not None
+    assert (last.after["status"], last.after["candidate_status"]) == ("decided", "approved")

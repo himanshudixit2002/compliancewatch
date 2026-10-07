@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 import pytest
 
 import ontology as ontology_package
+from domain_kernel.audit import AuditActor
 from domain_kernel.documents import Clause, DocumentType, clause_id_for, document_id_for
 from domain_kernel.errors import InvalidTransitionError, InvariantViolationError
 from domain_kernel.ids import ClauseId, RuleVersionId, SourceId, UserId
@@ -663,3 +664,102 @@ def record_of(detail: TaskDetail) -> RuleVersionRecord:
     """The version a task reviews, which every seed task has."""
     assert detail.version is not None
     return detail.version
+
+
+# ---------------------------------------------------------------- the audit log
+
+
+def test_seeding_claiming_and_editing_write_only_the_claim(
+    store: MemoryKnowledgeStore, review: Review
+) -> None:
+    task_id = cited(store, review)
+    review.claim.run(task_id, by=ANALYST)
+    (claimed,) = store.audit_entries()
+    assert (claimed.action, claimed.subject_type, claimed.subject_id, claimed.tenant_id) == (
+        "review_task.claimed",
+        "review_task",
+        str(task_id),
+        None,
+    )
+    assert (claimed.actor, claimed.before, claimed.after) == (
+        AuditActor.user(ANALYST),
+        {"status": "open", "claimed_by": None},
+        {"status": "claimed", "claimed_by": str(ANALYST)},
+    )
+    with pytest.raises(ReviewTaskClaimedError):
+        review.claim.run(task_id, by=REVIEWER)
+    assert len(store.audit_entries()) == 1, "a refused or repeated claim writes nothing"
+
+
+def test_an_approval_writes_the_versions_steps_then_the_decision(
+    store: MemoryKnowledgeStore, review: Review
+) -> None:
+    task_id = cited(store, review)
+    decided = review.decide.run(task_id, ReviewDecision.APPROVE, by=REVIEWER, note="checked")
+    version = state_of(decided).record.rule_version_id
+    _, submitted, approved, decision = store.audit_entries()
+    assert [(e.action, e.subject_id) for e in (submitted, approved, decision)] == [
+        ("rule_version.submitted", str(version)),
+        ("rule_version.approved", str(version)),
+        ("review_task.decided", str(task_id)),
+    ]
+    assert {e.actor for e in (submitted, approved, decision)} == {AuditActor.user(REVIEWER)}
+    assert decision.reason == "checked"
+    assert (decision.before, decision.after) == (
+        {"status": "claimed", "claimed_by": str(ANALYST), "decision": None},
+        {
+            "status": "decided",
+            "claimed_by": str(ANALYST),
+            "decision": "approve",
+            "decided": "approve",
+            "rule_version_id": str(version),
+            "rule_version_status": "approved",
+        },
+    )
+    review.publish.run(version, actor_id=REVIEWER)
+    (published,) = store.audit_entries("rule_version.published")
+    assert published.subject_id == str(version)
+    assert len(store.audit_entries()) == 5, "publishing after the decision writes it once"
+
+
+def test_a_first_approval_leaves_the_task_open_and_says_so(
+    store: MemoryKnowledgeStore, review: Review
+) -> None:
+    task_id = cited(store, review)
+    review.decide.run(task_id, ReviewDecision.APPROVE, by=REVIEWER, high_impact=True)
+    (decision,) = store.audit_entries("review_task.decided")
+    assert decision.after is not None
+    assert (decision.after["status"], decision.after["rule_version_status"]) == (
+        "open",
+        "in_review",
+    )
+    with pytest.raises(DuplicateApproverError):
+        review.decide.run(task_id, ReviewDecision.APPROVE, by=REVIEWER)
+    assert len(store.audit_entries("review_task.decided")) == 1, "a refused decision: no entry"
+
+
+def test_a_return_and_a_rejection_write_their_decisions(
+    store: MemoryKnowledgeStore, review: Review
+) -> None:
+    task_id = cited(store, review)
+    review.decide.run(task_id, ReviewDecision.APPROVE, by=REVIEWER, high_impact=True)
+    returned = review.decide.run(
+        task_id, ReviewDecision.RETURN, by=OTHER_REVIEWER, note="the quote is too short"
+    )
+    assert returned.next_task is not None
+    (version_returned,) = store.audit_entries("rule_version.returned")
+    assert version_returned.reason == "the quote is too short"
+    _, second = store.audit_entries("review_task.decided")
+    assert second.after is not None
+    assert (second.after["decided"], second.after["next_task_id"]) == (
+        "return",
+        str(returned.next_task.task_id),
+    )
+    review.decide.run(returned.next_task.task_id, ReviewDecision.REJECT, by=REVIEWER, note="no")
+    *_, rejected = store.audit_entries()
+    assert (rejected.action, rejected.subject_id, rejected.reason) == (
+        "review_task.decided",
+        str(returned.next_task.task_id),
+        "no",
+    )
+    assert len(store.audit_entries("rule_version.returned")) == 1, "a draft stays a draft"

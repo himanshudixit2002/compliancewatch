@@ -20,6 +20,7 @@ from testcontainers.community.postgres import PostgresContainer
 from domain_kernel.documents import Clause, DocumentType, clause_id_for, document_id_for
 from domain_kernel.ids import RuleVersionId, SourceId
 from domain_kernel.knowledge import EntityType, RelationKind
+from py_common.audit.testing import install_audit_table
 from rulebook.application.alignment import AlignMentions, SubmittedMention
 from rulebook.application.documents import RegisterDocument
 from rulebook.application.relations import (
@@ -75,6 +76,8 @@ def factory() -> Iterator[PostgresKnowledgeUnitOfWorkFactory]:
         admin = create_engine(base_url, isolation_level="AUTOCOMMIT")
         with admin.connect() as connection:
             connection.execute(text(f"CREATE SCHEMA {SCHEMA}"))
+        with admin.begin() as connection:
+            install_audit_table(connection)
         admin.dispose()
         url = f"{base_url}?options=-csearch_path%3D{SCHEMA}%2Cpublic"
         with pytest.MonkeyPatch.context() as env:

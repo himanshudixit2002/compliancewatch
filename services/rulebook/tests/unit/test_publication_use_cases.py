@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from domain_kernel.audit import AuditActor
 from domain_kernel.documents import Clause, DocumentType, clause_id_for, document_id_for
 from domain_kernel.errors import InvalidTransitionError, InvariantViolationError
 from domain_kernel.ids import ClauseId, DocumentId, RuleVersionId, SourceId, UserId
@@ -686,3 +687,113 @@ def test_publishing_an_unknown_version_is_refused(flow: Flow) -> None:
 def test_sweep_helper_types(flow: Flow) -> None:
     report = flow.sweep.run(date(2026, 9, 1))
     assert (report.as_of, report.transitions, report.events) == (date(2026, 9, 1), (), ())
+
+
+# ---------------------------------------------------------------- the audit log
+
+
+def test_each_step_writes_one_platform_entry(
+    store: MemoryKnowledgeStore, flow: Flow, clock: Clock, clause: ClauseId
+) -> None:
+    version = draft(store)
+    flow.cite.run(version, [CitationInput(clause, QUOTE)])
+    assert store.audit_entries() == [], "citing is content: no entry"
+    flow.submit.run(version, actor_id=ANALYST, note="ready", high_impact=True)
+    flow.approve.run(version, actor_id=REVIEWER)
+    flow.return_to_draft.run(version, actor_id=REVIEWER, note="Example: fix the dates")
+    flow.submit.run(version, actor_id=ANALYST)
+    flow.approve.run(version, actor_id=REVIEWER)
+    flow.approve.run(version, actor_id=ANALYST, note="checked")
+    flow.publish.run(version, actor_id=ANALYST, note="Example: go")
+    published_at = clock.now
+    flow.withdraw.run(version, actor_id=REVIEWER, note="rescinded")
+    entries = store.audit_entries()
+    assert [entry.action for entry in entries] == [
+        "rule_version.submitted",
+        "rule_version.approved",
+        "rule_version.returned",
+        "rule_version.submitted",
+        "rule_version.approved",
+        "rule_version.approved",
+        "rule_version.published",
+        "rule_version.withdrawn",
+    ]
+    assert {(entry.subject_type, entry.subject_id, entry.tenant_id) for entry in entries} == {
+        ("rule_version", str(version), None)
+    }
+    assert [entry.actor for entry in entries] == [
+        AuditActor.user(user)
+        for user in (ANALYST, REVIEWER, REVIEWER, ANALYST, REVIEWER, ANALYST, ANALYST, REVIEWER)
+    ]
+    assert [entry.reason for entry in entries] == [
+        "ready",
+        "",
+        "Example: fix the dates",
+        "",
+        "",
+        "checked",
+        "Example: go",
+        "rescinded",
+    ]
+    submitted, first, returned, _, second, third, published, withdrawn = entries
+    assert (submitted.before, submitted.after) == (
+        {"status": "draft"},
+        {"status": "in_review", "high_impact": True},
+    )
+    assert (first.before, first.after) == (
+        {"status": "in_review"},
+        {"status": "in_review", "approvals": 1, "required_approvals": 2, "synthetic": False},
+    )
+    assert (returned.before, returned.after) == ({"status": "in_review"}, {"status": "draft"})
+    assert second.after is not None
+    assert second.after["approvals"] == 1, "the returned round's approval no longer counts"
+    assert third.after == {
+        "status": "approved",
+        "approvals": 2,
+        "required_approvals": 2,
+        "synthetic": False,
+    }
+    assert (published.before, published.after, published.occurred_at) == (
+        {"status": "approved"},
+        {"status": "published", "replaced": ()},
+        published_at,
+    )
+    assert (withdrawn.before, withdrawn.after) == (
+        {"status": "published"},
+        {"status": "withdrawn"},
+    )
+
+
+def test_a_publication_names_the_versions_it_replaces(
+    store: MemoryKnowledgeStore, flow: Flow, clause: ClauseId
+) -> None:
+    _, old = store.add_rule(
+        "gstr3b_monthly", title="Monthly", status=RuleVersionStatus.PUBLISHED, effective_from=APRIL
+    )
+    new = store.add_version("gstr3b_monthly", title="Monthly, amended", effective_from=JULY)
+    relate(store, new, RelationKind.SUPERSEDES, old, clause)
+    flow.through_review(new, clause)
+    flow.publish.run(new, actor_id=ANALYST)
+    (published,) = store.audit_entries("rule_version.published")
+    assert published.after == {"status": "published", "replaced": (str(old),)}
+    assert store.audit_entries("rule_version.superseded") == [], "a moved version: no entry"
+
+
+def test_a_refused_step_writes_nothing(
+    store: MemoryKnowledgeStore, flow: Flow, clock: Clock
+) -> None:
+    version = draft(store)
+    with pytest.raises(InvalidTransitionError):
+        flow.approve.run(version, actor_id=REVIEWER)
+    flow.submit.run(version, actor_id=ANALYST)
+    flow.approve.run(version, actor_id=REVIEWER)
+    with pytest.raises(CitationsMissingError):
+        flow.publish.run(version, actor_id=ANALYST)
+    with pytest.raises(PublishingDisabledError):
+        WithdrawVersion(store, enabled=False, clock=clock).run(version, actor_id=ANALYST)
+    with pytest.raises(InvalidTransitionError):
+        flow.withdraw.run(version, actor_id=ANALYST)
+    assert [entry.action for entry in store.audit_entries()] == [
+        "rule_version.submitted",
+        "rule_version.approved",
+    ]

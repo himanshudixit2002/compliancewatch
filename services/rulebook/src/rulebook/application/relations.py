@@ -16,16 +16,23 @@ relations the analyst picks onto the new draft in the drafting's own transaction
 from is rejected: it deletes their ``rule_relation`` rows and opens the candidates again, in the
 rejection's transaction, so they can be approved onto another draft. That draft is closed from
 then on (``publication.require_open``) and takes no relation.
+
+An approval writes ``relation_candidate.approved`` and a rejection ``relation_candidate.rejected``
+to the audit log in its transaction (``rulebook.application.audit``), the candidate id as the
+subject. Staging and reopening write none: the pipeline's intake is not a person's decision, and
+a reopening is part of the rule candidate's rejection, which its review task's entry records.
 """
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from typing import Final
 from uuid import UUID
 
 from domain_kernel.ids import CanonicalEntityId, DocumentId, RuleVersionId
 from domain_kernel.knowledge import EntityType, RelationKind
 from rulebook.application.alignment import Clock, default_clock
+from rulebook.application.audit import actor_for, entry
 from rulebook.application.publication import require_open
 from rulebook.domain.alignment import Resolved, resolve
 from rulebook.domain.errors import (
@@ -51,6 +58,9 @@ from rulebook.domain.repository import KnowledgeUnitOfWork, KnowledgeUnitOfWorkF
 from rulebook.domain.runs import ExtractionRun, RuleSummary
 
 MAX_PAGE = 200
+SUBJECT: Final = "relation_candidate"
+APPROVED_ACTION: Final = "relation_candidate.approved"
+REJECTED_ACTION: Final = "relation_candidate.rejected"
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,7 +256,27 @@ def approve_relation(
         candidate.evidence_clause_id,
     )
     uow.relations.add(relation, relation_id=relation_id, candidate_id=candidate_id)
-    uow.candidates.save(candidate.approve(decided_by=decided_by, at=now, note=note))
+    approved = candidate.approve(decided_by=decided_by, at=now, note=note)
+    uow.candidates.save(approved)
+    uow.audit.write(
+        entry(
+            APPROVED_ACTION,
+            SUBJECT,
+            candidate_id,
+            actor_for(decided_by),
+            at=now,
+            before={"status": candidate.status.value},
+            after={
+                "status": approved.status.value,
+                "from_rule_version_id": str(from_rule_version_id),
+                "target_rule_version_id": None
+                if target_rule_version_id is None
+                else str(target_rule_version_id),
+                "rule_relation_id": str(relation_id),
+            },
+            reason=note,
+        )
+    )
     return Approval(candidate_id=candidate_id, rule_relation_id=relation_id)
 
 
@@ -344,6 +374,18 @@ class RejectRelationCandidate:
                 raise CandidateClosedError(f"candidate {candidate_id} is {candidate.status.value}")
             rejected = candidate.reject(reason, decided_by=decided_by, at=now, note=note)
             uow.candidates.save(rejected)
+            uow.audit.write(
+                entry(
+                    REJECTED_ACTION,
+                    SUBJECT,
+                    candidate_id,
+                    actor_for(decided_by),
+                    at=now,
+                    before={"status": candidate.status.value},
+                    after={"status": rejected.status.value, "reject_reason": reason.value},
+                    reason=note,
+                )
+            )
         return rejected
 
 

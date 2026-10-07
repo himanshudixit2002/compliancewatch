@@ -21,6 +21,7 @@ import ontology as ontology_package
 from domain_kernel.documents import Clause, DocumentType, clause_id_for, document_id_for
 from domain_kernel.ids import ClauseId, SourceId, UserId
 from domain_kernel.status import RuleVersionStatus
+from py_common.audit.testing import install_audit_table
 from rulebook.application.documents import RegisterDocument
 from rulebook.application.publication import CitationInput, PublishVersion, VersionState
 from rulebook.application.review_tasks import (
@@ -82,6 +83,8 @@ def database_url() -> Iterator[str]:
         admin = create_engine(base_url, isolation_level="AUTOCOMMIT")
         with admin.connect() as connection:
             connection.execute(text(f"CREATE SCHEMA {SCHEMA}"))
+        with admin.begin() as connection:
+            install_audit_table(connection)
         admin.dispose()
         yield f"{base_url}?options=-csearch_path%3D{SCHEMA}%2Cpublic"
 

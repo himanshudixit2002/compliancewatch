@@ -6,9 +6,10 @@ from uuid import UUID
 
 import pytest
 
+from domain_kernel.audit import AuditActor
 from domain_kernel.documents import Clause, DocumentType, clause_id_for, document_id_for
 from domain_kernel.errors import InvalidRelationError, InvariantViolationError
-from domain_kernel.ids import CanonicalEntityId, DocumentId, RuleVersionId, SourceId
+from domain_kernel.ids import CanonicalEntityId, DocumentId, RuleVersionId, SourceId, UserId
 from domain_kernel.knowledge import EntityRef, EntityType, RelationKind, RuleRelation
 from domain_kernel.status import RuleVersionStatus
 from rulebook.application.alignment import AlignMentions, SubmittedMention
@@ -867,3 +868,133 @@ def test_an_aliased_target_is_recorded_under_its_canonical_name(
     ApproveRelationCandidate(store, clock).run(candidate_id, version, None, decided_by="a")
     ((relation, _),) = store.rule_relations()
     assert (relation.to_kind, relation.to_ref) == ("form", "GSTR-3B")
+
+
+# ---------------------------------------------------------------- the audit log
+
+ANALYST_ID = UserId(UUID(int=81))
+
+
+def test_a_group_decision_writes_one_platform_entry(store: MemoryKnowledgeStore) -> None:
+    AlignMentions(store).run(DOC, GRAMMAR, [SECTION_MENTION])
+    stage(store, REFERS)
+    decided = DecideMentionGroup(store, clock).run(
+        EntityType.SECTION,
+        "39(6)@cgst-act",
+        MentionDecision.CREATE_ENTITY,
+        decided_by=str(ANALYST_ID),
+        note="Example: the statute is known",
+    )
+    (logged,) = store.audit_entries()
+    assert (logged.action, logged.subject_type, logged.subject_id) == (
+        "entity_review.decided",
+        "entity_review",
+        "section:39(6)@cgst-act",
+    )
+    assert (logged.tenant_id, logged.actor, logged.occurred_at) == (
+        None,
+        AuditActor.user(ANALYST_ID),
+        NOW,
+    )
+    assert logged.reason == "Example: the statute is known"
+    assert logged.before == {"status": "open"}
+    assert logged.after == {
+        "decision": "create_entity",
+        "status": "resolved",
+        "resolution": "created",
+        "entity_id": str(decided.entity_id),
+        "items_closed": 1,
+        "relation_targets_updated": 1,
+    }
+
+
+def test_a_group_rejection_by_mention_names_its_items(store: MemoryKnowledgeStore) -> None:
+    AlignMentions(store).run(DOC, GRAMMAR, [BARE_SECTION])
+    (item,) = ListGroupItems(store).run(EntityType.SECTION, "39")
+    DecideMentionGroup(store, clock).run(
+        EntityType.SECTION,
+        "39",
+        MentionDecision.REJECT,
+        decided_by="analyst@example.invalid",
+        reject_reason=EntityRejectReason.NOT_AN_ENTITY,
+        review_ids=[item.review_id],
+    )
+    (logged,) = store.audit_entries("entity_review.decided")
+    assert logged.actor == AuditActor.system("rulebook"), "a name sent without a token"
+    assert logged.after is not None
+    assert (logged.after["status"], logged.after["entity_id"], logged.after["reject_reason"]) == (
+        "rejected",
+        None,
+        "not_an_entity",
+    )
+    assert logged.after["review_ids"] == (str(item.review_id),)
+
+
+def test_a_refused_group_decision_writes_nothing(store: MemoryKnowledgeStore) -> None:
+    AlignMentions(store).run(DOC, GRAMMAR, [SECTION_MENTION])
+    with pytest.raises(InvariantViolationError):
+        DecideMentionGroup(store, clock).run(
+            EntityType.SECTION, "39(6)@cgst-act", MentionDecision.REJECT, decided_by="a"
+        )
+    with pytest.raises(UnknownEntityError):
+        DecideMentionGroup(store, clock).run(
+            EntityType.SECTION,
+            "39(6)@cgst-act",
+            MentionDecision.ADD_ALIAS,
+            decided_by="a",
+            entity_id=CanonicalEntityId(UUID(int=82)),
+        )
+    assert store.audit_entries() == []
+
+
+def test_approving_and_rejecting_candidates_write_their_entries(
+    store: MemoryKnowledgeStore,
+) -> None:
+    store.add_rule("gstr3b_monthly")
+    _, new_version = store.add_rule("gstr3b_extension_2026_03", status=RuleVersionStatus.DRAFT)
+    _, affected = store.add_rule("gstr3b_monthly_v1", status=RuleVersionStatus.PUBLISHED)
+    extends, refers = stage(store, EXTENDS, REFERS)
+    approve = ApproveRelationCandidate(store, clock)
+    with pytest.raises(TargetVersionRequiredError):
+        approve.run(extends, new_version, None, decided_by=str(ANALYST_ID))
+    assert store.audit_entries() == [], "a refused approval writes nothing"
+    approval = approve.run(
+        extends, new_version, affected, decided_by=str(ANALYST_ID), note="Example: checked"
+    )
+    RejectRelationCandidate(store, clock).run(
+        refers, CandidateRejectReason.WRONG_TARGET, decided_by=str(ANALYST_ID), note="cites only"
+    )
+    approved, rejected = store.audit_entries()
+    assert (approved.action, approved.subject_type, approved.subject_id) == (
+        "relation_candidate.approved",
+        "relation_candidate",
+        str(extends),
+    )
+    assert (approved.tenant_id, approved.actor, approved.reason) == (
+        None,
+        AuditActor.user(ANALYST_ID),
+        "Example: checked",
+    )
+    assert (approved.before, approved.after) == (
+        {"status": "open"},
+        {
+            "status": "approved",
+            "from_rule_version_id": str(new_version),
+            "target_rule_version_id": str(affected),
+            "rule_relation_id": str(approval.rule_relation_id),
+        },
+    )
+    assert (rejected.action, rejected.subject_id, rejected.reason) == (
+        "relation_candidate.rejected",
+        str(refers),
+        "cites only",
+    )
+    assert (rejected.before, rejected.after) == (
+        {"status": "open"},
+        {"status": "rejected", "reject_reason": "wrong_target"},
+    )
+    with pytest.raises(CandidateClosedError):
+        RejectRelationCandidate(store, clock).run(
+            refers, CandidateRejectReason.WRONG_TARGET, decided_by="a"
+        )
+    assert len(store.audit_entries()) == 2

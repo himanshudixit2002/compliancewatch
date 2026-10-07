@@ -6,6 +6,8 @@ so two overlapping requests cannot both start from the same tables and lose a wr
 uniqueness rules are the database's: first write wins, a repeat is a no-op. Events go to an
 outbox list that is part of the tables, so they are kept or dropped with the unit of work, and
 a status change must follow the kernel's transitions, as the Postgres trigger requires.
+Audit entries wait in the unit's ``MemoryAuditSink`` and join the store's log only when the
+unit exits cleanly (``audit_entries()`` reads it), as rows of ``audit.event`` commit with it.
 """
 
 import copy
@@ -18,6 +20,7 @@ from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from uuid import UUID, uuid4
 
+from domain_kernel.audit import AuditEntry
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.events import utc_now
 from domain_kernel.ids import (
@@ -33,6 +36,7 @@ from domain_kernel.ontology import AttributeLevel
 from domain_kernel.predicates import specification_to_mapping
 from domain_kernel.status import RULE_VERSION_TRANSITIONS, RuleVersionStatus
 from domain_kernel.vectors import ClauseFilter, Vector
+from py_common.audit import MemoryAuditSink
 from rulebook.domain.changes import (
     CHANGE_ACTIONS,
     ChangeEntry,
@@ -1366,7 +1370,12 @@ class MemoryRunRepository:
 
 
 class MemoryUnitOfWork:
-    def __init__(self, tables: _Tables, clock: Callable[[], datetime] = utc_now) -> None:
+    def __init__(
+        self,
+        tables: _Tables,
+        clock: Callable[[], datetime] = utc_now,
+        audit: list[AuditEntry] | None = None,
+    ) -> None:
         self._documents = MemoryDocumentRepository(tables)
         self._entities = MemoryEntityRepository(tables)
         self._mentions = MemoryMentionRepository(tables)
@@ -1381,6 +1390,7 @@ class MemoryUnitOfWork:
         self._index = MemoryClauseIndex(tables)
         self._runs = MemoryRunRepository(tables)
         self._events = MemoryEventSink(tables)
+        self._audit = MemoryAuditSink([] if audit is None else audit)
 
     @property
     def documents(self) -> MemoryDocumentRepository:
@@ -1438,13 +1448,22 @@ class MemoryUnitOfWork:
     def events(self) -> MemoryEventSink:
         return self._events
 
+    @property
+    def audit(self) -> MemoryAuditSink:
+        return self._audit
+
 
 class MemoryKnowledgeStore:
     """``store()`` opens a unit of work on a copy of the tables; a clean exit publishes it.
-    ``clock`` stamps review items when they are queued, as ``created_at`` does in Postgres."""
+    ``clock`` stamps review items when they are queued, as ``created_at`` does in Postgres.
+    ``audit`` is the log committed audit entries go to: a list of the store's own unless another
+    one is shared, as every service shares ``audit.event`` (an in-process journey's)."""
 
-    def __init__(self, clock: Callable[[], datetime] = utc_now) -> None:
+    def __init__(
+        self, clock: Callable[[], datetime] = utc_now, *, audit: list[AuditEntry] | None = None
+    ) -> None:
         self._tables = _Tables()
+        self._audit: list[AuditEntry] = [] if audit is None else audit
         self._lock = threading.Lock()
         self._clock = clock
 
@@ -1455,7 +1474,9 @@ class MemoryKnowledgeStore:
     def _open(self) -> Iterator[KnowledgeUnitOfWork]:
         with self._lock:
             working = self._tables.copy()
-            yield MemoryUnitOfWork(working, self._clock)
+            unit = MemoryUnitOfWork(working, self._clock, self._audit)
+            yield unit
+            unit.audit.commit()
             self._tables = working
 
     def ping(self) -> bool:
@@ -1667,6 +1688,11 @@ class MemoryKnowledgeStore:
         """The committed outbox, oldest first."""
         with self._lock:
             return list(self._tables.outbox)
+
+    def audit_entries(self, action: str | None = None) -> list[AuditEntry]:
+        """The committed audit log, oldest first; one action's when it is named."""
+        with self._lock:
+            return [entry for entry in self._audit if action in (None, entry.action)]
 
     def decisions(self, rule_version_id: RuleVersionId | None = None) -> list[RuleVersionDecision]:
         """The committed decision audit, oldest first; one version's when it is named."""
