@@ -5,8 +5,8 @@ Design reference: Project Foundation guide, sections 7, 8, 11 and 14.
 
 - **Owns:** ApplicabilityDecisions: coarse filter by regulator and attribute index, per-business predicate evaluation, LLM-judged free-text predicates with confidence, Temporal fan-out in batches of 1,000
 - **Owning team:** Core Product (deterministic path and fan-out); AI Platform owns the LLM evaluator (guide section 14)
-- **Consumes:** profile.updated (the business and the registrations under it; group `applicability-engine.profiles`); rule.published and rule.withdrawn (the fan-out; group `applicability-engine.rules`); profile and rulebook read APIs; LLM gateway API (not yet)
-- **Emits / publishes:** applicability.decided
+- **Consumes:** profile.updated (the business and the registrations under it; group `applicability-engine.profiles`); rule.published and rule.withdrawn (the fan-out; group `applicability-engine.rules`); tenant.deletion.requested (group `applicability-engine.erasure`); profile and rulebook read APIs; LLM gateway API (not yet)
+- **Emits / publishes:** applicability.decided and tenant.data.erased
 
 ## What is here
 
@@ -272,6 +272,19 @@ counts it among the routes that call other services while they serve (`loopback_
 
 Not built yet: the LLM evaluator for free-text predicates, the golden set, and the coarse filter
 over indexed profile attributes that lets a fan-out skip businesses a version cannot apply to.
+
+## Erasure
+
+The worker's consumer of tenant.deletion.requested, group `applicability-engine.erasure`, only
+logs `erasure.off` while the flag `identity.tenant_erasure` (`CW_TENANT_ERASURE_ENABLED`, per tenant with `CW_TENANT_ERASURE_TENANTS`; off by default) is off for the tenant. On, under the tenant's setting and
+`app.erasure` (the only way past the decisions' append-only guard), it deletes the tenant's
+`review_item`, `applicability_decision` and `business_directory` rows, its idempotency keys and
+its published events, and answers tenant.data.erased (service applicability-engine) with the row
+counts and a `tenant.erased` audit row, in the transaction that marks the event processed
+(`infrastructure.erasure`). It keeps `fanout_run` and `fanout_hold`, rule-level counters with no
+tenant. A profile.updated or rule event still in flight can write a directory entry or a decision
+after the erasure; the staging drill checks for it and `identity-admin erasure resend` erases
+again.
 
 ## Layout
 

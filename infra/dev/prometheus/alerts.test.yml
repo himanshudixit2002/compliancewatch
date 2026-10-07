@@ -539,7 +539,7 @@ tests:
               severity: page
               team: identity-partner
             exp_annotations:
-              summary: "A tenant's data request is past its 30-day deadline with no answer"
+              summary: "A tenant's data request is past its 30-day deadline and not answered"
               runbook_url: https://github.com/himanshudixit2002/compliancewatch/blob/main/docs/runbooks/data-requests.md
       - eval_time: 100m
         alertname: DataRequestOverdue

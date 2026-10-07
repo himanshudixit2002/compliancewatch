@@ -6,7 +6,8 @@ Design reference: Project Foundation guide, sections 7, 14 and 16.
 - **Owns:** Tenants, users, roles, API keys; maps OIDC claims to roles; issues partner API keys; enforces plan limits; the audit log's table, `audit.event`
 - **Owning team:** Identity and Partner (guide section 14)
 - **Consumes:** Keycloak events; admin API
-- **Emits / publishes:** tenant.created, user.role.changed (through the outbox)
+- **Emits / publishes:** tenant.created, user.role.changed, tenant.deletion.requested and its own tenant.data.erased (through the outbox)
+- **Consumes (worker):** tenant.deletion.requested (group `identity.erasure`) and tenant.data.erased (group `identity.erasure-records`)
 
 ## What is here
 
@@ -32,8 +33,8 @@ Design reference: Project Foundation guide, sections 7, 14 and 16.
 | `POST /v1/identity/billing/subscriptions` | Start a subscription with the provider (`Idempotency-Key` required: a retry with the same key and body gets the first answer and starts nothing more; another body is a 422); 503 while `CW_BILLING_PROVIDER=none` |
 | `POST /v1/identity/billing/webhook` | Provider webhook; the body is verified against the webhook secret (`X-Razorpay-Signature`) before it is read; 200 with `ignored` when it names no tenant, `duplicate` when the tenant received the same body before |
 | `GET /v1/identity/entitlements` | What the tenant's plan entitles it to: the plan, its status, the `registrations` and `seats` limits (null is none) and whether they are `enforced`; a user's own tenant, or a service with `entitlements:read` naming the tenant in `x-tenant-id` |
-| `POST /v1/identity/data-requests` | Ask for a copy of the tenant's data (`kind` export; deletion is a 422 `identity-data-request-kind-unavailable` until the erasure cascade exists), due 30 days later; the tenant's owner or CA admin, or the regulatory team's admin naming the tenant in `tenant_id` as a support request with a reason |
-| `GET /v1/identity/data-requests`, `GET /v1/identity/data-requests/{request_id}` | The tenant's requests, newest first, or one (404 `identity-data-request-not-found`), each with its deadline, whether it is overdue, the services that answered its export and those still pending; owners and CA admins |
+| `POST /v1/identity/data-requests` | Ask for a copy of the tenant's data (`kind` export) or its deletion (`kind` deletion: the tenant is shut at once and every service erases it), due 30 days later; the tenant's owner or CA admin, or the regulatory team's admin naming the tenant in `tenant_id` as a support request with a reason; 403 `identity-tenant-deleting` once the tenant asked for its deletion, 422 `identity-tenant-not-erasable` for the internal tenant |
+| `GET /v1/identity/data-requests`, `GET /v1/identity/data-requests/{request_id}` | The tenant's requests, newest first, or one (404 `identity-data-request-not-found`), each with its deadline, whether it is overdue, the services that answered it (held its export, or erased the tenant) and those still pending; owners and CA admins, of a tenant being deleted too |
 | `GET /v1/identity/data-requests/{request_id}/export` | The export as a JSON attachment, assembled now and never stored (409 `identity-export-not-ready` for a request that is not an export); owners and CA admins |
 
 Purposes: `terms`, `privacy_notice`, `profile_processing`, `whatsapp_reminders`,
@@ -63,8 +64,8 @@ or the regulatory team's admin records one for a tenant that asked support. The 
 as soon as it is made: it is `in_progress` (offered for download) until a download has had every
 service's part, then `completed`. One the tenant never completes expires quietly at its deadline:
 it is no longer open and never overdue, since only the tenant can complete it. Only a request
-still `received`, never answered (a deletion, once M3-6 answers them), is overdue past its
-deadline. The export is assembled on download and never stored: identity's own data of the
+still `received`, never answered, is overdue past its deadline, and so is a deletion not
+completed, whatever its status. The export is assembled on download and never stored: identity's own data of the
 tenant (the tenant, its users, its consent records, its billing customer, subscriptions and
 webhooks, its data requests; the growing ones read 500 rows at a time) and the part each service
 of `CW_IDENTITY_EXPORT_SOURCES` answers on `GET /v1/<service>/data-export` (profile, the
@@ -84,6 +85,37 @@ platform's own payment account id), and a support request shows `support` as who
 tenant's audit trail names the admin who recorded it, as it names every actor. The table is
 `data_request` (migration 0010), under forced row-level security; `data_request.created` and
 `data_request.exported` go to the tenant's audit trail.
+
+Deletion (the erasure cascade; `docs/runbooks/data-requests.md`). A deletion request turns the
+tenant `deletion_requested` in the transaction that records it, with `tenant.deletion.requested`
+(1.0.1) in the outbox and `data_request.created`: the session exchange refuses the tenant's
+people (403 `identity-tenant-deleting`), its tokens open no identity route but its data requests
+and its audit trail, and it asks for nothing more. The internal tenant is never erased (422
+`identity-tenant-not-erasable`). The worker (`identity.worker`, `make worker SERVICE=identity`,
+or `cw-mvp worker`) hosts two consumers:
+
+- `identity.erasure` on tenant.deletion.requested: while the flag `identity.tenant_erasure`
+  (`CW_TENANT_ERASURE_ENABLED`, per tenant with `CW_TENANT_ERASURE_TENANTS`; owner
+  identity-partner, off) is off for the tenant it only logs `erasure.off`. On, it deletes every
+  user's account at the identity provider first, with no transaction open (an account already
+  gone counts as deleted), then in one transaction under `app.erasure`: deletes `user_subject`,
+  `app_user` and the idempotency keys; pseudonymises `consent_record` (the subject becomes
+  `erased:` and the first 16 hex digits of sha256(tenant|subject), the evidence is emptied and
+  `recorded_by` nulled) and the billing customer's email and name, keeping the provider's ids,
+  the subscriptions, starts and masked webhooks for the tax records (for the lawyer to confirm);
+  keeps the data requests; empties the tenant's name and marks it `erased`; prunes its published
+  events; and writes `tenant.data.erased` (service identity) with its `tenant.erased` audit row.
+- `identity.erasure-records` on tenant.data.erased: each service's answer joins the tenant's open
+  deletion request (`data_request.erased`); it completes (`data_request.completed`) once every
+  service of `CW_IDENTITY_ERASURE_SERVICES` (identity, profile, obligation, notification,
+  applicability-engine, rulebook by default) has answered.
+
+Migration 0011 adds the consumers' `processed_event`, the consent records' guard (a trigger
+refuses every DELETE, and lets an UPDATE through only under `app.erasure=on` and only of
+subject, evidence and `recorded_by`) and lets an erased tenant's name be empty. With the flag
+off a deletion request stays `received` and turns overdue after 30 days, which pages;
+`identity-admin erasure resend --tenant ID --reason TEXT` sends it again once the flag is on
+(every erasure is idempotent). The audit log is never erased.
 
 Counting every tenant's overdue requests needs to read past row-level security, so it goes
 through `identity.data_requests_open()`: a `SECURITY DEFINER` function owned by the NOLOGIN role
@@ -155,7 +187,10 @@ never a contact detail), `consent.recorded`, `subscription.started`, and by
 event, or one after a cancellation) and `subscription.unmatched` (a webhook for a subscription
 the tenant may not hold), and from `identity-admin` `service_client.created`,
 `service_client.revoked` and `audit.exported` (by `system:identity-admin`). Channel consents and
-the dev service clients made at start are not audited.
+the dev service clients made at start are not audited. A tenant's deletion writes
+`data_request.created`, then `tenant.erased` (by `system:identity`, with the row counts),
+`data_request.erased` per service that answered and `data_request.completed`; `identity-admin
+erasure resend` writes `data_request.resent` (by `system:identity-admin`).
 
 Billing ledger (migrations 0008 and 0009, `identity.billing_customer`, `billing_subscription`,
 `billing_start` and `billing_event`, all under forced row-level security): a tenant's provider

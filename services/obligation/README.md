@@ -5,8 +5,8 @@ Design reference: Project Foundation guide, sections 7 and 14.
 
 - **Owns:** Obligations, evidence metadata, the append-only change log of every obligation (`obligation_change`); builds obligations from the RuleVersion template, computes due dates, schedules reminders
 - **Owning team:** Core Product (guide section 14)
-- **Consumes:** applicability.decided; rule.published, rule.superseded, rule.withdrawn and rule.deadline_changed; user actions (start, complete, waive, assign, comment)
-- **Emits / publishes:** obligation.created, obligation.rescheduled, obligation.closed and obligation.due_soon (through the outbox)
+- **Consumes:** applicability.decided; rule.published, rule.superseded, rule.withdrawn and rule.deadline_changed; tenant.deletion.requested (group `obligation.erasure`); user actions (start, complete, waive, assign, comment)
+- **Emits / publishes:** obligation.created, obligation.rescheduled, obligation.closed, obligation.due_soon and tenant.data.erased (through the outbox)
 
 ## What is here
 
@@ -216,6 +216,18 @@ read, whichever event reached the service first; the detail carries the citation
 second call to the citations route is needed. A deadline change of a period that has no
 obligation yet is not remembered: an obligation made later for that period takes the version's
 own due date.
+
+## Erasure
+
+The worker's consumer of tenant.deletion.requested, group `obligation.erasure`, only logs
+`erasure.off` while the flag `identity.tenant_erasure` (`CW_TENANT_ERASURE_ENABLED`, per tenant with `CW_TENANT_ERASURE_TENANTS`; off by default) is off for the tenant. On, under the tenant's setting and
+`app.erasure` (the only way past the append-only guards of the changes and comments), it deletes
+the tenant's `obligation_change`, `obligation_comment`, `obligation_reminder`, `obligation`,
+`obligation_decision`, its row of the `obligation_tenant` directory, its idempotency keys and its
+published events, and answers tenant.data.erased (service obligation) with the row counts and a
+`tenant.erased` audit row, in the transaction that marks the event processed
+(`infrastructure.erasure`). It keeps `rule_version_ref`, the rule-level cache of rule versions,
+which names no tenant.
 
 ## API
 

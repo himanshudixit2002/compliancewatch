@@ -474,6 +474,22 @@ Identity reads the log (`GET /v1/identity/audit`, `identity-admin audit-export`;
 README and [docs/runbooks/audit-export.md](../../docs/runbooks/audit-export.md) describe both).
 Not built yet: pseudonymising rows on a tenant's erasure.
 
+## Tenant erasure
+
+`py_common.erasure` is the common part of the erasure consumers (docs/runbooks/data-requests.md):
+`erasure_component(service, eraser_on, enabled=...)` is the consumer of
+`tenant.deletion.requested` in group `<service>.erasure` a service's worker hosts. Its handler
+runs on the consumer's connection (`sync_handler`): while `enabled(tenant)` answers false it only
+logs `erasure.off`; otherwise `eraser_on(connection)` makes the service's `TenantEraser`
+(`domain_kernel.erasure`), which erases and then records `tenant.data.erased` in the service's
+outbox and its `tenant.erased` row in `audit.event`, all committing with the `processed_event`
+row (`erase_and_record`). `ErasureSwitch(settings)` answers `enabled` from the flag
+`identity.tenant_erasure` per tenant, configuring the process's flags on first use. A Postgres
+eraser subclasses `PostgresTenantEraser` (the recording half) and builds on `begin_erasure`
+(`app.tenant_id` and `app.erasure` for the transaction), `delete_rows`, `count_rows` and
+`prune_outbox` (the tenant's published or dead outbox rows; `OUTBOX_RETAINED` names the pending
+ones it keeps).
+
 ## Worker processes
 
 A service with background work exposes `<pkg>.worker.components(settings)`, which returns

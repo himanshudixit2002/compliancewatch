@@ -18,8 +18,8 @@ Design reference: Project Foundation guide, sections 7, 8, 9 and 14; Architectur
   the knowledge tables `canonical_entity`, `clause_entity` and `rule_relation` (aligned entities,
   clause mentions, typed relations between rule versions and entities)
 - **Owning team:** Regulatory Intelligence
-- **Consumes:** parsed documents from the pipeline over `PUT /v1/rulebook/documents/{id}` (ADR-018); rule.candidate.created (the worker's group `rulebook.rule-candidates`, see Candidate intake); rulebook read API (served to the engine, Q&A and review service)
-- **Emits / publishes:** rule.published, rule.superseded, rule.withdrawn and rule.deadline_changed
+- **Consumes:** parsed documents from the pipeline over `PUT /v1/rulebook/documents/{id}` (ADR-018); rule.candidate.created (the worker's group `rulebook.rule-candidates`, see Candidate intake); tenant.deletion.requested (group `rulebook.erasure`, see Erasure); rulebook read API (served to the engine, Q&A and review service)
+- **Emits / publishes:** rule.published, rule.superseded, rule.withdrawn, rule.deadline_changed and tenant.data.erased
   through `outbox_event` (ADR-005); the applicability engine fans a publication out and cancels it
   on a withdrawal, and the obligation service acts on all four. rule.rejected when an analyst
   rejects a rule candidate; nothing consumes it yet
@@ -398,6 +398,17 @@ Nothing is drafted by the intake: an analyst drafts, as above. Off, no group rea
 which keeps the candidates a month; turned on, the group reads them from the start. `make product`
 leaves it off, so the product never writes candidates into the database it shares. A failed
 extraction is run again by ingesting the stored document again (the pipeline's business).
+
+## Erasure
+
+The worker always hosts the consumer of tenant.deletion.requested in group `rulebook.erasure`.
+While the flag `identity.tenant_erasure` (`CW_TENANT_ERASURE_ENABLED`, per tenant with `CW_TENANT_ERASURE_TENANTS`; off by default) is off for the tenant, it only logs `erasure.off`. On, it erases nothing: the
+rulebook holds regulatory data of no tenant (documents, rules and their versions, citations,
+candidates and the review of all of them), and none of its tables references a tenant today. It
+answers tenant.data.erased (service rulebook) with an empty `tables` and the tables it keeps,
+each with its reason, and writes a `tenant.erased` audit row, so the deletion request can
+complete (`infrastructure.erasure`). When a table gains a tenant reference (error reports,
+M3-7), its erasure nulls it there.
 
 ## Changes feed
 
