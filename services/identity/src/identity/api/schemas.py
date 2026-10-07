@@ -525,7 +525,10 @@ class UsersOut(BaseModel):
 
 class DataRequestIn(Strict):
     kind: Literal["export", "deletion"] = Field(
-        description="export; deletion is refused (422) until the erasure cascade exists"
+        description=(
+            "export, a copy of the tenant's data; deletion, its erasure in every service, after "
+            "which nobody signs in to the tenant"
+        )
     )
     reason: str = Field(default="", max_length=MAX_REASON_CHARS)
     tenant_id: UUID | None = Field(
@@ -545,10 +548,18 @@ class DataRequestOut(BaseModel):
     requested_at: datetime
     deadline_at: datetime = Field(description="30 days after it was made")
     status: DataRequestStatus
-    overdue: bool = Field(description="Past its deadline and not completed")
+    overdue: bool = Field(
+        description=(
+            "Past its deadline and still owed: an export never answered, or a deletion not "
+            "completed"
+        )
+    )
     services_done: list[str]
     services_pending: list[str] = Field(
-        description="The services whose data an export of it has not held yet"
+        description=(
+            "The services whose data an export of it has not held yet, or that have not erased "
+            "the tenant for a deletion"
+        )
     )
     completed_at: datetime | None
 

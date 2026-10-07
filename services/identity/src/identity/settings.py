@@ -49,6 +49,14 @@ ports and the combined product points them at its internal listener (loopback).
 ``identity_export_concurrency`` (4) at a time, all of them within
 ``identity_export_deadline_seconds`` (45 s), so a download answers within about a minute, below
 a proxy's usual timeout, and a service still answering at the deadline counts as pending.
+
+``identity_erasure_services`` (``CW_IDENTITY_ERASURE_SERVICES``) are the services a deletion
+request waits for, as a comma-separated list: each must answer ``tenant.data.erased`` before the
+request completes. By default identity, profile, obligation, notification, applicability-engine
+and rulebook, the services with an erasure consumer; identity is always among them. Whether
+anything is erased at all is the flag ``identity.tenant_erasure`` (``CW_TENANT_ERASURE_ENABLED``,
+per tenant with ``CW_TENANT_ERASURE_TENANTS``), which the consumers read; it is not a field
+here.
 """
 
 import tomllib
@@ -61,7 +69,8 @@ from pydantic import Field, SecretStr, field_validator, model_validator
 
 from domain_kernel.access import Scope
 from identity.domain.billing import MAX_QUANTITY
-from identity.domain.data_requests import parse_export_sources
+from identity.domain.data_requests import parse_export_sources, parse_services
+from identity.domain.erasure import ERASURE_SERVICES
 from py_common.settings import Settings
 
 MIN_FAKE_SECRET_BYTES = 32
@@ -104,6 +113,7 @@ class IdentitySettings(Settings):
     identity_export_timeout_seconds: float = Field(default=20.0, gt=0, le=120)
     identity_export_concurrency: int = Field(default=4, ge=1, le=16)
     identity_export_deadline_seconds: float = Field(default=45.0, gt=0, le=120)
+    identity_erasure_services: str = ",".join(ERASURE_SERVICES)
 
     @field_validator("razorpay_plan_ids", mode="before")
     @classmethod
@@ -172,6 +182,17 @@ class IdentitySettings(Settings):
                     "a service in the same process"
                 )
         return self
+
+    @model_validator(mode="after")
+    def _check_the_erasure_services(self) -> Self:
+        if "identity" not in self.erasure_services:
+            raise ValueError("CW_IDENTITY_ERASURE_SERVICES always names identity")
+        return self
+
+    @property
+    def erasure_services(self) -> tuple[str, ...]:
+        """The services a deletion request waits for, sorted."""
+        return parse_services(self.identity_erasure_services, "CW_IDENTITY_ERASURE_SERVICES")
 
     @property
     def export_sources(self) -> Mapping[str, str]:

@@ -35,6 +35,10 @@ class TenantRepository(Protocol):
         locking it waits, then reads what the first committed."""
         ...
 
+    def save(self, tenant: Tenant) -> None:
+        """Store the changed status and name of the unit of work's own tenant."""
+        ...
+
 
 class UserRepository(Protocol):
     def add(self, user: User) -> None: ...

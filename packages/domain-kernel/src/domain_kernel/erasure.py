@@ -39,7 +39,7 @@ ERASURE_PURPOSE: Final = "erasure"
 ERASED_ACTION: Final = "tenant.erased"
 """The audit action each service writes once it has erased a tenant."""
 ERASED_SUBJECT_TYPE: Final = "tenant"
-SERVICE_NAME: Final = re.compile(r"[a-z][a-z-]*")
+SERVICE_PATTERN: Final = re.compile(r"[a-z][a-z-]*")
 TABLE_NAME: Final = re.compile(r"[a-z_][a-z0-9_.]*")
 MAX_REASON_CHARS: Final = 300
 
@@ -51,7 +51,7 @@ def erasure_group(service: str) -> str:
 
 def _service(value: object) -> str:
     text = require_text(value, "service")
-    if not SERVICE_NAME.fullmatch(text):
+    if not SERVICE_PATTERN.fullmatch(text):
         raise InvariantViolationError(f"service must be a service directory name, got {text!r}")
     return text
 

@@ -111,6 +111,13 @@ class MemoryDataRequestRepository:
         mine = [r for r in self._requests.values() if r.tenant_id == self._tenant]
         return sorted(mine, key=lambda r: (r.requested_at, r.id.value), reverse=True)
 
+    def open_deletion(self) -> DataRequest | None:
+        """The newest deletion request not completed; already locked, as ``lock`` is."""
+        for request in self.list():
+            if request.is_deletion and not request.is_completed:
+                return request
+        return None
+
 
 def _page[T](
     rows: Iterable[T],
@@ -146,6 +153,10 @@ class MemoryTenantRepository:
     def lock(self, tenant_id: TenantId) -> Tenant | None:
         """``get``: memory units of work run one at a time, so the row is already locked."""
         return self.get(tenant_id)
+
+    def save(self, tenant: Tenant) -> None:
+        if tenant.id == self._tenant and tenant.id in self._tenants:
+            self._tenants[tenant.id] = tenant
 
 
 class MemoryUserRepository:
@@ -360,6 +371,11 @@ class MemoryStore:
 
     def __call__(self, tenant_id: TenantId | None) -> AbstractContextManager[UnitOfWork]:
         return self._open(tenant_id)
+
+    @property
+    def lock(self) -> threading.Lock:
+        """What a unit of work holds from open to commit; an eraser holds it too."""
+        return self._lock
 
     @contextmanager
     def _open(self, tenant_id: TenantId | None) -> Iterator[UnitOfWork]:

@@ -9,8 +9,13 @@ Who may (the routes admit the rest of the callers they name):
 - in header mode the anonymous caller, for the tenant the header names.
 
 ``RequestExport`` records an export request with its 30-day deadline and a
-``data_request.created`` audit entry. Deletion requests are refused until the erasure cascade
-exists (``DataRequestKindUnavailableError``, 422).
+``data_request.created`` audit entry. ``RequestDeletion`` records a deletion request the same
+way, and in the same transaction turns the tenant ``deletion_requested`` (nobody signs in to it
+any more, and it asks for nothing else) and writes ``tenant.deletion.requested`` to the outbox;
+the services' erasure consumers answer it (``identity.application.erasure``). The internal tenant
+is never erased (``TenantNotErasableError``, 422), and a tenant already being deleted asks
+nothing more (``TenantDeletingError``, 403). The tenant's owner may still list and read its
+requests while the erasure runs, with the token it holds.
 
 ``ExportTenantData`` assembles the export on download, and never stores it: identity's own data
 of the tenant (the tenant, its users, its consent records, its billing ledger and its data
@@ -42,6 +47,7 @@ from datetime import datetime
 from typing import Any, Final
 
 from domain_kernel.access import Principal, PrincipalKind, Role
+from domain_kernel.audit import AuditEntry
 from domain_kernel.events import utc_now
 from domain_kernel.ids import TenantId
 from identity.application.audit import audit_entry
@@ -58,11 +64,14 @@ from identity.domain.data_requests import (
     SourceSection,
 )
 from identity.domain.errors import (
-    DataRequestKindUnavailableError,
     DataRequestNotFoundError,
     ExportNotReadyError,
+    TenantDeletingError,
+    TenantInactiveError,
+    TenantNotErasableError,
     TenantNotFoundError,
 )
+from identity.domain.events import TenantDeletionRequested
 from identity.domain.pages import EXPORT_PAGE_SIZE, ExportAfter
 from identity.domain.repository import UnitOfWork, UnitOfWorkFactory
 from identity.domain.tenancy import Tenant, TenantKind, User
@@ -75,8 +84,6 @@ CREATED: Final = "data_request.created"
 EXPORTED: Final = "data_request.exported"
 BUNDLE_FORMAT: Final = "compliancewatch.tenant-export"
 BUNDLE_VERSION: Final = 1
-AVAILABLE_KINDS: Final = frozenset({DataRequestKind.EXPORT})
-"""The kinds the routes take; deletion waits for the erasure cascade."""
 DEFAULT_CONCURRENCY: Final = 4
 """How many services an export asks at once."""
 DEFAULT_DEADLINE_SECONDS: Final = 45.0
@@ -86,9 +93,12 @@ PLATFORM_FIELDS: Final = frozenset({"account_id"})
 data, and stay out of the bundle."""
 
 
-def requester_context(uow: UnitOfWork, tenant_id: TenantId, actor: Principal) -> Tenant:
+def requester_context(
+    uow: UnitOfWork, tenant_id: TenantId, actor: Principal, *, deleting_ok: bool = False
+) -> Tenant:
     """The tenant, after checking the actor may handle its data requests: the anonymous caller
-    of header mode, or an active owner or CA admin of the tenant whose session is current."""
+    of header mode, or an active owner or CA admin of the tenant whose session is current.
+    ``deleting_ok`` admits a tenant that asked for its deletion (to read its requests)."""
     tenant = uow.tenants.get(tenant_id)
     if tenant is None:
         raise TenantNotFoundError()
@@ -96,7 +106,7 @@ def requester_context(uow: UnitOfWork, tenant_id: TenantId, actor: Principal) ->
         return tenant
     if actor.kind is not PrincipalKind.USER:
         raise AuthForbiddenError("data requests answer for a person, not a service")
-    _, user = check_session(uow, actor)
+    _, user = check_session(uow, actor, deleting_ok=deleting_ok)
     if not user.roles & REQUESTER_ROLES:
         raise AuthForbiddenError("data requests are made by the tenant's owner or CA admin")
     return tenant
@@ -113,26 +123,49 @@ def support_context(uow: UnitOfWork, actor: Principal) -> User:
     return user
 
 
-class RequestExport:
+def _created_entry(request: DataRequest, actor: Principal) -> AuditEntry:
+    return audit_entry(
+        CREATED,
+        tenant_id=request.tenant_id,
+        subject_type=SUBJECT_TYPE,
+        subject_id=str(request.id),
+        at=request.requested_at,
+        after={
+            "kind": request.kind.value,
+            "source": request.source.value,
+            "deadline_at": request.deadline_at.isoformat(),
+        },
+        reason=request.reason,
+        principal=actor,
+    )
+
+
+def _require_active(tenant: Tenant) -> None:
+    """A tenant asks for nothing once it asked for its deletion, or was erased."""
+    if tenant.is_deleting:
+        raise TenantDeletingError()
+    if not tenant.is_active:
+        raise TenantInactiveError()
+
+
+class _MakeRequest:
     def __init__(
         self, unit_of_work: UnitOfWorkFactory, *, clock: Callable[[], datetime] = utc_now
     ) -> None:
         self._unit_of_work = unit_of_work
         self._clock = clock
 
-    def run(
+    def _new(
         self,
         actor: Principal,
         tenant_id: TenantId,
         kind: DataRequestKind,
         *,
-        reason: str = "",
-        for_tenant: TenantId | None = None,
+        reason: str,
+        for_tenant: TenantId | None,
     ) -> DataRequest:
         """A request of the request's tenant, or with ``for_tenant`` a support request for that
         tenant by the regulatory team's admin (``tenant_id`` is then the admin's own)."""
-        if kind not in AVAILABLE_KINDS:
-            raise DataRequestKindUnavailableError(kind.value)
         source = DataRequestSource.SELF_SERVICE
         target = tenant_id
         if for_tenant is not None and for_tenant != tenant_id:
@@ -140,7 +173,7 @@ class RequestExport:
                 support_context(uow, actor)
             source = DataRequestSource.SUPPORT
             target = for_tenant
-        request = DataRequest.new(
+        return DataRequest.new(
             target,
             kind,
             source,
@@ -148,30 +181,85 @@ class RequestExport:
             reason=reason,
             at=self._clock(),
         )
-        with self._unit_of_work(target) as uow:
-            if source is DataRequestSource.SUPPORT:
-                if uow.tenants.get(target) is None:
-                    raise TenantNotFoundError()
-            else:
-                requester_context(uow, target, actor)
+
+    @staticmethod
+    def _tenant(uow: UnitOfWork, request: DataRequest, actor: Principal) -> Tenant:
+        """The request's tenant, after checking who asks for it."""
+        if request.source is DataRequestSource.SUPPORT:
+            tenant = uow.tenants.lock(request.tenant_id)
+            if tenant is None:
+                raise TenantNotFoundError()
+            return tenant
+        requester_context(uow, request.tenant_id, actor)
+        tenant = uow.tenants.lock(request.tenant_id)
+        if tenant is None:  # pragma: no cover - requester_context found it
+            raise TenantNotFoundError()
+        return tenant
+
+
+class RequestExport(_MakeRequest):
+    def run(
+        self,
+        actor: Principal,
+        tenant_id: TenantId,
+        *,
+        reason: str = "",
+        for_tenant: TenantId | None = None,
+    ) -> DataRequest:
+        """An export request, offered at once."""
+        request = self._new(
+            actor, tenant_id, DataRequestKind.EXPORT, reason=reason, for_tenant=for_tenant
+        )
+        with self._unit_of_work(request.tenant_id) as uow:
+            _require_active(self._tenant(uow, request, actor))
             uow.data_requests.add(request)
-            uow.audit.write(
-                audit_entry(
-                    CREATED,
-                    tenant_id=target,
-                    subject_type=SUBJECT_TYPE,
-                    subject_id=str(request.id),
-                    at=request.requested_at,
-                    after={
-                        "kind": request.kind.value,
-                        "source": request.source.value,
-                        "deadline_at": request.deadline_at.isoformat(),
-                    },
-                    reason=request.reason,
-                    principal=actor,
-                )
-            )
+            uow.audit.write(_created_entry(request, actor))
         return request
+
+
+class RequestDeletion(_MakeRequest):
+    def run(
+        self,
+        actor: Principal,
+        tenant_id: TenantId,
+        *,
+        reason: str = "",
+        for_tenant: TenantId | None = None,
+    ) -> DataRequest:
+        """A deletion request: the tenant turns ``deletion_requested`` and the services are
+        asked to erase it (``tenant.deletion.requested``), all in one transaction."""
+        request = self._new(
+            actor, tenant_id, DataRequestKind.DELETION, reason=reason, for_tenant=for_tenant
+        )
+        with self._unit_of_work(request.tenant_id) as uow:
+            tenant = self._tenant(uow, request, actor)
+            if tenant.kind is TenantKind.INTERNAL:
+                raise TenantNotErasableError()
+            _require_active(tenant)
+            uow.tenants.save(tenant.deletion_requested())
+            uow.data_requests.add(request)
+            uow.events.publish(deletion_event(request, actor))
+            uow.audit.write(_created_entry(request, actor))
+        return request
+
+
+def deletion_event(request: DataRequest, actor: Principal | None) -> TenantDeletionRequested:
+    """The ``tenant.deletion.requested`` a deletion request sends: who asked, a user of the
+    tenant, or None for a support request or an unnamed caller."""
+    asked_by = None
+    if (
+        actor is not None
+        and request.source is DataRequestSource.SELF_SERVICE
+        and actor.kind is PrincipalKind.USER
+    ):
+        asked_by = actor.user_id
+    return TenantDeletionRequested(
+        tenant_id=request.tenant_id,
+        requested_by=asked_by,
+        requested_at=request.requested_at,
+        deadline_at=request.deadline_at,
+        reason=request.reason,
+    )
 
 
 class ListDataRequests:
@@ -181,7 +269,7 @@ class ListDataRequests:
     def run(self, actor: Principal, tenant_id: TenantId) -> list[DataRequest]:
         """The tenant's requests, newest first."""
         with self._unit_of_work(tenant_id) as uow:
-            requester_context(uow, tenant_id, actor)
+            requester_context(uow, tenant_id, actor, deleting_ok=True)
             return uow.data_requests.list()
 
 
@@ -191,7 +279,7 @@ class ReadDataRequest:
 
     def run(self, actor: Principal, tenant_id: TenantId, request_id: DataRequestId) -> DataRequest:
         with self._unit_of_work(tenant_id) as uow:
-            requester_context(uow, tenant_id, actor)
+            requester_context(uow, tenant_id, actor, deleting_ok=True)
             request = uow.data_requests.get(request_id)
         if request is None:
             raise DataRequestNotFoundError()

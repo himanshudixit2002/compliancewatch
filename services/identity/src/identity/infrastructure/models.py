@@ -174,7 +174,7 @@ class TenantRow(Base):
         CheckConstraint(sql_in_list("kind", TENANT_KINDS), name="ck_tenant_kind"),
         CheckConstraint(sql_in_list("status", TENANT_STATUSES), name="ck_tenant_status"),
         CheckConstraint(sql_in_list("region", REGIONS), name="ck_tenant_region"),
-        CheckConstraint("btrim(name) <> ''", name="ck_tenant_name"),
+        CheckConstraint("btrim(name) <> '' OR status = 'erased'", name="ck_tenant_name"),
         Index(
             INTERNAL_TENANT_INDEX,
             "kind",

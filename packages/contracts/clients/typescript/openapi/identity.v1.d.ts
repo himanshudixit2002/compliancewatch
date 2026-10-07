@@ -204,9 +204,11 @@ export type paths = {
     get: operations["list_data_requests_v1_identity_data_requests_get"];
     put?: never;
     /**
-     * Ask for a copy of the tenant's data; it is due within 30 days
+     * Ask for a copy of the tenant's data or its deletion; it is due within 30 days
      * @description ``tenant_id`` is for the regulatory team's admin recording a support request for that
-     *     tenant (a reason is then required); anyone else leaves it out or names their own tenant.
+     *     tenant (a reason is then required); anyone else leaves it out or names their own tenant. A
+     *     deletion makes the tenant unusable at once: 403 identity-tenant-deleting on its sign-ins and
+     *     on every later request but reading its data requests and its audit trail.
      */
     post: operations["make_data_request_v1_identity_data_requests_post"];
     delete?: never;
@@ -728,7 +730,7 @@ export type components = {
     DataRequestIn: {
       /**
        * Kind
-       * @description export; deletion is refused (422) until the erasure cascade exists
+       * @description export, a copy of the tenant's data; deletion, its erasure in every service, after which nobody signs in to the tenant
        * @enum {string}
        */
       kind: "export" | "deletion";
@@ -766,7 +768,7 @@ export type components = {
       kind: components["schemas"]["DataRequestKind"];
       /**
        * Overdue
-       * @description Past its deadline and not completed
+       * @description Past its deadline and still owed: an export never answered, or a deletion not completed
        */
       overdue: boolean;
       /** Reason */
@@ -780,7 +782,7 @@ export type components = {
       services_done: string[];
       /**
        * Services Pending
-       * @description The services whose data an export of it has not held yet
+       * @description The services whose data an export of it has not held yet, or that have not erased the tenant for a deletion
        */
       services_pending: string[];
       source: components["schemas"]["DataRequestSource"];

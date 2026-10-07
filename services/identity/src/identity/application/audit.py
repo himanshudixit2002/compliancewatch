@@ -140,7 +140,8 @@ class ReadAuditTrail:
         if not actor.is_authenticated:
             return AuditScope.TENANT
         with self._unit_of_work(tenant_id) as uow:
-            tenant, user = check_session(uow, actor)
+            # A tenant being deleted still reads its own trail: the erasures are on it.
+            tenant, user = check_session(uow, actor, deleting_ok=True)
         if user.roles & REGULATORY_ROLES and tenant.kind is TenantKind.INTERNAL:
             # The tenancy rules keep these roles to the internal tenant already; a customer
             # tenant never reads the platform's rows even if one rule slips.

@@ -11,6 +11,7 @@ from identity.application.data_requests import (
     ExportTenantData,
     ListDataRequests,
     ReadDataRequest,
+    RequestDeletion,
     RequestExport,
 )
 from identity.application.entitlements import ReadEntitlements
@@ -63,6 +64,7 @@ class Wiring:
     read_entitlements: ReadEntitlements
     idempotency: IdempotencyStore
     request_export: RequestExport
+    request_deletion: RequestDeletion
     list_data_requests: ListDataRequests
     read_data_request: ReadDataRequest
     export_tenant_data: ExportTenantData

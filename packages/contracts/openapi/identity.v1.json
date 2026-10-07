@@ -537,7 +537,7 @@
         "additionalProperties": false,
         "properties": {
           "kind": {
-            "description": "export; deletion is refused (422) until the erasure cascade exists",
+            "description": "export, a copy of the tenant's data; deletion, its erasure in every service, after which nobody signs in to the tenant",
             "enum": [
               "export",
               "deletion"
@@ -608,7 +608,7 @@
             "$ref": "#/components/schemas/DataRequestKind"
           },
           "overdue": {
-            "description": "Past its deadline and not completed",
+            "description": "Past its deadline and still owed: an export never answered, or a deletion not completed",
             "title": "Overdue",
             "type": "boolean"
           },
@@ -629,7 +629,7 @@
             "type": "array"
           },
           "services_pending": {
-            "description": "The services whose data an export of it has not held yet",
+            "description": "The services whose data an export of it has not held yet, or that have not erased the tenant for a deletion",
             "items": {
               "type": "string"
             },
@@ -2882,7 +2882,7 @@
         ]
       },
       "post": {
-        "description": "``tenant_id`` is for the regulatory team's admin recording a support request for that\ntenant (a reason is then required); anyone else leaves it out or names their own tenant.",
+        "description": "``tenant_id`` is for the regulatory team's admin recording a support request for that\ntenant (a reason is then required); anyone else leaves it out or names their own tenant. A\ndeletion makes the tenant unusable at once: 403 identity-tenant-deleting on its sign-ins and\non every later request but reading its data requests and its audit trail.",
         "operationId": "make_data_request_v1_identity_data_requests_post",
         "parameters": [
           {
@@ -2982,7 +2982,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Ask for a copy of the tenant's data; it is due within 30 days",
+        "summary": "Ask for a copy of the tenant's data or its deletion; it is due within 30 days",
         "tags": [
           "identity"
         ]

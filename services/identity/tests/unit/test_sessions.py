@@ -29,6 +29,7 @@ from identity.domain.errors import (
     ServiceClientNotFoundError,
     SessionRevokedError,
     SubjectRegisteredError,
+    TenantDeletingError,
     TenantInactiveError,
     UserDisabledError,
     UserNotProvisionedError,
@@ -172,8 +173,10 @@ def test_a_tenant_that_asked_for_deletion_signs_nobody_in(world: World) -> None:
         status=TenantStatus.DELETION_REQUESTED,
     )
     world.store.tenants[closing.id] = closing
-    with pytest.raises(TenantInactiveError):
+    with pytest.raises(TenantDeletingError):
         world.exchange.run(world.token())
+    with pytest.raises(TenantDeletingError):
+        CurrentUser(world.store).run(created.session.principal)
 
 
 def test_unreachable_provider_keys_fail_sign_in_closed(world: World) -> None:
@@ -218,9 +221,7 @@ def test_check_session_refuses_an_older_session_version(world: World) -> None:
 def test_check_session_refuses_an_inactive_tenant(world: World) -> None:
     created = world.create.run(world.token(), TenantKind.BUSINESS, "Acme Traders")
     tenant = created.tenant
-    world.store.tenants[tenant.id] = Tenant(
-        tenant.id, tenant.kind, tenant.name, tenant.created_at, status=TenantStatus.ERASED
-    )
+    world.store.tenants[tenant.id] = tenant.deletion_requested().erased()
     with pytest.raises(TenantInactiveError):
         CurrentUser(world.store).run(created.session.principal)
 

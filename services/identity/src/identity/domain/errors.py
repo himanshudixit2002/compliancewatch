@@ -192,13 +192,27 @@ class MfaRequiredError(DomainError):
 
 
 class TenantInactiveError(DomainError):
-    """The user's tenant asked for deletion or was erased, so nobody signs in to it (403)."""
+    """The user's tenant was erased, so nobody signs in to it (403)."""
 
     type_slug: ClassVar[str] = "identity-tenant-inactive"
     title: ClassVar[str] = "Tenant is not active"
 
     def __init__(self) -> None:
-        super().__init__("this tenant asked for deletion or was erased; nobody signs in to it")
+        super().__init__("this tenant was erased; nobody signs in to it")
+
+
+class TenantDeletingError(DomainError):
+    """The tenant asked for its data to be deleted, which is under way: nobody signs in to it and
+    it asks for nothing more (403)."""
+
+    type_slug: ClassVar[str] = "identity-tenant-deleting"
+    title: ClassVar[str] = "Tenant is being deleted"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "this tenant asked for its data to be deleted; nobody signs in to it while that "
+            "is under way"
+        )
 
 
 class SessionRevokedError(DomainError):
@@ -337,12 +351,24 @@ class ExportNotReadyError(DomainError):
         super().__init__(f"a {kind} request has no export to download")
 
 
-class DataRequestKindUnavailableError(DomainError):
-    """A kind of request the service cannot answer yet: deletions wait for the erasure cascade
-    (422)."""
+class TenantNotErasableError(DomainError):
+    """The internal tenant, where the regulatory team works, is never erased (422)."""
 
-    type_slug: ClassVar[str] = "identity-data-request-kind-unavailable"
-    title: ClassVar[str] = "This kind of data request is not available yet"
+    type_slug: ClassVar[str] = "identity-tenant-not-erasable"
+    title: ClassVar[str] = "This tenant is not erased"
 
-    def __init__(self, kind: str) -> None:
-        super().__init__(f"{kind} requests are not available yet")
+    def __init__(self) -> None:
+        super().__init__(
+            "the internal tenant holds the regulatory team's accounts and is not erased; "
+            "disable its users instead"
+        )
+
+
+class DeletionRequestNotFoundError(DomainError):
+    """The tenant has no deletion request still waiting on the services (404)."""
+
+    type_slug: ClassVar[str] = "identity-deletion-request-not-found"
+    title: ClassVar[str] = "No open deletion request"
+
+    def __init__(self) -> None:
+        super().__init__("the tenant has no deletion request that is not completed")

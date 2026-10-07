@@ -11,7 +11,9 @@ audit log every service writes (``GET /v1/identity/audit``). A tenant's data req
 export (``/v1/identity/data-requests``) gather identity's own data and the data each service of
 ``CW_IDENTITY_EXPORT_SOURCES`` answers, called with a service token identity mints for itself;
 ``export_sources`` replaces them (tests and demos). With telemetry on, the app reports every
-tenant's open and overdue data requests (``install_data_request_metrics``).
+tenant's open and overdue data requests (``install_data_request_metrics``). A deletion request
+turns the tenant ``deletion_requested`` and asks every service to erase it; identity's own worker
+(``identity.worker``) erases identity's part and records the answers.
 
 In local and test, with ``CW_IDENTITY_DEV_CLIENT_SECRET`` set, the app makes the dev service
 clients exist when it starts.
@@ -46,6 +48,7 @@ from identity.application.data_requests import (
     ExportTenantData,
     ListDataRequests,
     ReadDataRequest,
+    RequestDeletion,
     RequestExport,
 )
 from identity.application.entitlements import ReadEntitlements, SeatCheck
@@ -71,8 +74,8 @@ from identity.domain.errors import (
     ChannelSubjectInvalidError,
     ChannelTokenInvalidError,
     ChannelWritesDisabledError,
-    DataRequestKindUnavailableError,
     DataRequestNotFoundError,
+    DeletionRequestNotFoundError,
     DevSignInUnavailableError,
     ExportNotReadyError,
     InternalTenantExistsError,
@@ -89,7 +92,9 @@ from identity.domain.errors import (
     SessionRevokedError,
     SubjectRegisteredError,
     SubscriptionStartPendingError,
+    TenantDeletingError,
     TenantInactiveError,
+    TenantNotErasableError,
     TenantNotFoundError,
     TenantRequiredError,
     UserDisabledError,
@@ -156,6 +161,7 @@ PROBLEM_STATUS: dict[type[DomainError], int] = {
     UserNotProvisionedError: 404,
     MfaRequiredError: 403,
     TenantInactiveError: 403,
+    TenantDeletingError: 403,
     SessionRevokedError: 401,
     ServiceClientInvalidError: 401,
     DevSignInUnavailableError: 404,
@@ -165,7 +171,8 @@ PROBLEM_STATUS: dict[type[DomainError], int] = {
     SubscriptionStartPendingError: 409,
     DataRequestNotFoundError: 404,
     ExportNotReadyError: 409,
-    DataRequestKindUnavailableError: 422,
+    TenantNotErasableError: 422,
+    DeletionRequestNotFoundError: 404,
 }
 EXPORT_SCOPES = frozenset({Scope.DATA_EXPORT})
 """What identity's own token carries when it asks a service for a tenant's data: data:export
@@ -333,6 +340,7 @@ def wire(
         read_entitlements=ReadEntitlements(unit_of_work, PLANS, free, flags, past_due_grace=grace),
         idempotency=idempotency,
         request_export=RequestExport(unit_of_work),
+        request_deletion=RequestDeletion(unit_of_work),
         list_data_requests=ListDataRequests(unit_of_work),
         read_data_request=ReadDataRequest(unit_of_work),
         export_tenant_data=ExportTenantData(
