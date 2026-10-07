@@ -192,8 +192,9 @@ def test_token_mode_lets_a_member_change_an_obligation_as_themselves(
     (change,) = [c for c in detail["history"] if c["kind"] == "started"]
     assert change["actor"] == str(OWNER_ID)
     store = token_mode.app.state.wiring.unit_of_work  # type: ignore[attr-defined]
-    assert {entry.actor.label for entry in store.audit} == {"owner"}
-    assert {entry.actor.id for entry in store.audit} == {str(OWNER_ID)}
+    tracked = [entry for entry in store.audit if entry.action != "obligation.created"]
+    assert {entry.actor.label for entry in tracked} == {"owner"}
+    assert {entry.actor.id for entry in tracked} == {str(OWNER_ID)}
 
 
 def test_token_mode_lets_a_service_read_an_obligation_but_never_change_one(

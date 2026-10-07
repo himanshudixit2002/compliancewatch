@@ -1,5 +1,6 @@
-"""audit.event on Postgres: the table ``create_audit_table`` makes, as identity's migration does,
-written by ``AuditWriter`` in the transaction of an action. Needs Docker.
+"""audit.event on Postgres: the table ``create_audit_table`` and ``create_audit_read_policies``
+make, as identity's migrations do, written by ``AuditWriter`` in the transaction of an action and
+read under the regulatory and export scopes. Needs Docker.
 
 The writes run as a role that owns nothing and is not a superuser, granted what
 ``infra/dev/postgres/50-app-role.sql`` grants ``cw_app``, so row-level security applies to it as
@@ -20,9 +21,16 @@ from testcontainers.community.postgres import PostgresContainer
 from domain_kernel.audit import AuditActor, AuditEntry
 from domain_kernel.ids import TenantId
 from py_common.audit.schema import (
+    AUDIT_SCOPE_SETTING,
+    EXPORT_READ_POLICY,
+    EXPORT_SCOPE,
     PLATFORM_INSERT_POLICY,
+    PLATFORM_READ_POLICY,
     QUALIFIED_TABLE,
+    REGULATORY_SCOPE,
+    create_audit_read_policies,
     create_audit_table,
+    drop_audit_read_policies,
     drop_audit_table,
 )
 from py_common.audit.testing import audit_entry, install_audit_table, read_audit_entries
@@ -89,6 +97,13 @@ def act(connection: Connection, thing: uuid.UUID, tenant: TenantId) -> None:
     )
 
 
+def in_scope(connection: Connection, scope: str) -> None:
+    connection.execute(
+        text("SELECT set_config(:name, :scope, true)"),
+        {"name": AUDIT_SCOPE_SETTING, "scope": scope},
+    )
+
+
 def entry_of(tenant: TenantId | None, **overrides: object) -> AuditEntry:
     values: dict[str, object] = {"tenant_id": tenant, "subject_id": f"thing-{uuid.uuid4()}"}
     return audit_entry(**{**values, **overrides})
@@ -131,7 +146,7 @@ def test_the_app_role_is_not_a_superuser(app: Engine) -> None:
         assert connection.execute(query).scalar_one() is False
 
 
-def test_the_table_has_forced_row_level_security_and_two_policies(admin: Engine) -> None:
+def test_the_table_has_forced_row_level_security_and_four_policies(admin: Engine) -> None:
     with admin.connect() as connection:
         flags = connection.execute(
             text(
@@ -147,7 +162,9 @@ def test_the_table_has_forced_row_level_security_and_two_policies(admin: Engine)
         ).all()
     assert tuple(flags) == (True, True)
     assert [tuple(policy) for policy in policies] == [
+        (EXPORT_READ_POLICY, "SELECT"),
         (PLATFORM_INSERT_POLICY, "INSERT"),
+        (PLATFORM_READ_POLICY, "SELECT"),
         ("event_tenant_isolation", "ALL"),
     ]
 
@@ -205,7 +222,7 @@ def test_row_level_security_refuses_an_entry_of_another_tenant(admin: Engine, ap
     assert [stored(admin, entry) for entry in platform_wide] == [1, 1]
 
 
-def test_a_tenant_reads_its_own_entries_and_no_one_reads_the_platform_ones(
+def test_a_tenant_reads_its_own_entries_and_no_tenant_reads_the_platform_ones(
     admin: Engine, app: Engine
 ) -> None:
     mine, theirs, platform = entry_of(TENANT_A), entry_of(TENANT_B), entry_of(None)
@@ -223,6 +240,58 @@ def test_a_tenant_reads_its_own_entries_and_no_one_reads_the_platform_ones(
     with admin.connect() as connection:
         everything = read_audit_entries(connection)
     assert {mine, theirs, platform} <= set(everything), "the superuser bypasses the policies"
+
+
+def test_the_regulatory_scope_reads_the_platform_rows_and_the_export_scope_every_row(
+    app: Engine,
+) -> None:
+    mine, theirs, platform = entry_of(TENANT_A), entry_of(TENANT_B), entry_of(None)
+    write_as(app, TENANT_A, mine, platform)
+    write_as(app, TENANT_B, theirs)
+
+    with app.begin() as connection:
+        in_scope(connection, REGULATORY_SCOPE)
+        regulatory = read_audit_entries(connection)
+    assert platform in regulatory
+    assert {entry.tenant_id for entry in regulatory} == {None}, "no tenant's rows"
+
+    with app.begin() as connection:
+        as_tenant(connection, TENANT_A)
+        in_scope(connection, REGULATORY_SCOPE)
+        both = read_audit_entries(connection)
+    assert {mine, platform} <= set(both)
+    assert theirs not in both
+    assert {entry.tenant_id for entry in both} == {TENANT_A, None}
+
+    with app.begin() as connection:
+        in_scope(connection, "something-else")
+        assert read_audit_entries(connection) == [], "an unknown scope reads nothing"
+
+    with app.begin() as connection:
+        in_scope(connection, EXPORT_SCOPE)
+        exported = read_audit_entries(connection)
+    assert {mine, theirs, platform} <= set(exported)
+
+
+@pytest.mark.parametrize("scope", [REGULATORY_SCOPE, EXPORT_SCOPE])
+def test_a_read_scope_admits_no_write(admin: Engine, app: Engine, scope: str) -> None:
+    platform = entry_of(None)
+    write_as(app, None, platform)
+    for statement in (
+        f"UPDATE {QUALIFIED_TABLE} SET reason = 'rewritten' WHERE id = :id",
+        f"DELETE FROM {QUALIFIED_TABLE} WHERE id = :id",
+    ):
+        with app.begin() as connection:
+            in_scope(connection, scope)
+            touched = connection.execute(text(statement), {"id": platform.entry_id.value})
+            assert touched.rowcount == 0, "no policy admits an UPDATE or DELETE of the row"
+    refused = entry_of(TENANT_B)
+    with app.connect() as connection, connection.begin():
+        in_scope(connection, scope)
+        with pytest.raises(ProgrammingError, match="row-level security"):
+            AuditWriter().write(connection, refused)
+    assert stored(admin, platform) == 1
+    assert stored(admin, refused) == 0
 
 
 @pytest.mark.parametrize(
@@ -278,6 +347,7 @@ def test_the_drop_removes_the_table_and_its_function_but_keeps_the_schema(admin:
     with admin.connect() as connection:
         transaction = connection.begin()
         op = Operations(MigrationContext.configure(connection))
+        drop_audit_read_policies(op)
         drop_audit_table(op)
         assert not exists(connection, f"SELECT to_regclass('{QUALIFIED_TABLE}') IS NOT NULL")
         assert not exists(
@@ -287,5 +357,6 @@ def test_the_drop_removes_the_table_and_its_function_but_keeps_the_schema(admin:
             connection, "SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'audit')"
         )
         create_audit_table(op)
+        create_audit_read_policies(op)
         assert exists(connection, f"SELECT to_regclass('{QUALIFIED_TABLE}') IS NOT NULL")
         transaction.rollback()

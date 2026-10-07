@@ -1,5 +1,6 @@
 """In-memory repository, unit of work and eval recorder: the fakes for tests and the app
-before Postgres.
+before Postgres. A unit's audit entries (``MemoryAuditSink``) join the store's ``audit`` log
+when it commits, and are dropped with the rest of the unit when it fails.
 
 A unit of work works on a copy of the store and replaces it when the block exits cleanly. Units
 run one at a time (a store-level lock held from open to commit or rollback), so two overlapping
@@ -11,12 +12,14 @@ from collections.abc import Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from uuid import UUID
 
+from domain_kernel.audit import AuditEntry
 from domain_kernel.events import DomainEvent
 from domain_kernel.ids import BusinessId, TenantId
 from domain_kernel.ontology import AttributeLevel
 from profile_service.domain.errors import ProfileNodeNotFoundError
 from profile_service.domain.model import ProfileNode, ReviewTask
 from profile_service.domain.repository import UnitOfWork
+from py_common.audit import MemoryAuditSink
 
 
 class MemoryProfileRepository:
@@ -159,6 +162,7 @@ class MemoryUnitOfWork:
         self.profiles = MemoryProfileRepository(self._nodes, self._tasks, tenant_id)
         self.events = MemorySink(store.events)
         self.eval_cases = MemoryEvalRecorder(store.eval_cases)
+        self.audit = MemoryAuditSink(store.audit, tenant_id=tenant_id)
 
     def commit(self) -> None:
         self._store.nodes.clear()
@@ -167,6 +171,7 @@ class MemoryUnitOfWork:
         self._store.tasks.update(self._tasks)
         self.events.commit()
         self.eval_cases.commit()
+        self.audit.commit()
 
 
 class MemoryStore:
@@ -175,6 +180,7 @@ class MemoryStore:
         self.tasks: dict[BusinessId, ReviewTask] = {}
         self.events: list[DomainEvent] = []
         self.eval_cases: list[Mapping[str, object]] = []
+        self.audit: list[AuditEntry] = []
         self._lock = threading.Lock()
 
     def __call__(self, tenant_id: TenantId) -> AbstractContextManager[UnitOfWork]:

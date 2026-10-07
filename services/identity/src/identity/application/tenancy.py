@@ -21,6 +21,11 @@ first and removes it again when the user cannot be stored. A change of roles and
 bump the user's session version; every change publishes user.role.changed. The last active admin
 of a tenant can be neither demoted nor disabled, and changes and disables in one tenant run one at
 a time (``admin_context`` locks the tenant), so two of them at once cannot both pass that check.
+
+Each change writes its audit entry in the unit of work of the change (``application.audit``):
+``tenant.created`` by the person signing up, ``user.invited``, ``user.roles_changed`` and
+``user.disabled`` by the admin a verified token names (else the system, in header mode). An entry
+holds roles and status, never a contact detail.
 """
 
 from collections.abc import Callable, Iterable
@@ -30,9 +35,11 @@ from datetime import datetime, timedelta
 from typing import Final
 
 from domain_kernel.access import REGULATORY_ROLES, TENANT_ADMIN_ROLES, Principal, Role
+from domain_kernel.audit import AuditActor, AuditEntry
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.events import utc_now
 from domain_kernel.ids import TenantId, UserId
+from identity.application.audit import audit_entry, sorted_role_names
 from identity.application.sessions import Session, check_session, user_principal
 from identity.domain.errors import (
     MfaRequiredError,
@@ -69,6 +76,25 @@ class CreatedTenant:
     tenant: Tenant
     user: User
     session: Session
+
+
+def tenant_created_entry(tenant: Tenant, user: User, *, actor: AuditActor) -> AuditEntry:
+    """The ``tenant.created`` entry of a new tenant and its first user."""
+    return audit_entry(
+        "tenant.created",
+        tenant_id=tenant.id,
+        subject_type="tenant",
+        subject_id=str(tenant.id),
+        at=tenant.created_at,
+        after={
+            "kind": tenant.kind.value,
+            "region": tenant.region,
+            "status": tenant.status.value,
+            "first_user_id": str(user.id),
+            "first_user_roles": sorted_role_names(user.roles),
+        },
+        actor=actor,
+    )
 
 
 def first_user_events(
@@ -141,6 +167,9 @@ class CreateTenant:
             uow.subjects.add(SubjectEntry.of(user))
             for event in first_user_events(tenant, user, changed_by=user):
                 uow.events.publish(event)
+            uow.audit.write(
+                tenant_created_entry(tenant, user, actor=AuditActor.user(user.id, user.roles))
+            )
         principal = user_principal(user, mfa=identity.mfa)
         session = Session(self._minter.mint(principal, self._ttl), principal, tenant, user)
         return CreatedTenant(tenant, user, session)
@@ -301,6 +330,15 @@ class InviteUser:
                     changed_by=_changed_by(admin),
                 )
             )
+            uow.audit.write(
+                _user_entry(
+                    "user.invited",
+                    user,
+                    actor,
+                    before=None,
+                    after={"roles": sorted_role_names(user.roles), "status": user.status.value},
+                )
+            )
         return user
 
 
@@ -335,6 +373,15 @@ class ChangeRoles:
                     changed_by=_changed_by(admin),
                 )
             )
+            uow.audit.write(
+                _user_entry(
+                    "user.roles_changed",
+                    changed,
+                    actor,
+                    before={"roles": sorted_role_names(user.roles)},
+                    after={"roles": sorted_role_names(changed.roles)},
+                )
+            )
         return changed
 
 
@@ -365,4 +412,34 @@ class DisableUser:
                     changed_by=_changed_by(admin),
                 )
             )
+            uow.audit.write(
+                _user_entry(
+                    "user.disabled",
+                    disabled,
+                    actor,
+                    before={"status": user.status.value},
+                    after={"status": disabled.status.value},
+                )
+            )
         return disabled
+
+
+def _user_entry(
+    action: str,
+    user: User,
+    actor: Principal,
+    *,
+    before: dict[str, object] | None,
+    after: dict[str, object] | None,
+) -> AuditEntry:
+    """An admin's change to ``user``, by the admin a verified token names (else the system)."""
+    return audit_entry(
+        action,
+        tenant_id=user.tenant_id,
+        subject_type="user",
+        subject_id=str(user.id),
+        at=user.updated_at,
+        before=before,
+        after=after,
+        principal=actor,
+    )

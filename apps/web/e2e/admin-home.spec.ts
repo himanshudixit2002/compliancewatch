@@ -18,7 +18,10 @@ test.describe("admin home", () => {
     await expect(sources).toContainText("Available");
     await expect(page.locator("[data-tool='admin.pipeline']")).toContainText("Available");
     await expect(page.locator("[data-tool='admin.evals.run']")).toContainText("Ready to build");
-    await expect(page.locator("[data-tool='admin.audit']")).toContainText("Waiting for a backend");
+    await expect(page.locator("[data-tool='admin.audit']")).toContainText("Ready to build");
+    await expect(page.locator("[data-tool='admin.tenants']")).toContainText(
+      "Waiting for a backend",
+    );
     await expect(page.locator("[data-tool='admin.system']")).toContainText("Available");
     await expect(page.locator("[data-tool='admin.flags']")).toContainText("Available");
     await expect(page.getByRole("navigation", { name: "Internal tools" }).first()).toBeVisible();
@@ -63,7 +66,9 @@ test.describe("admin home", () => {
     const team = sidebar.getByRole("link", { name: "Internal users", exact: true });
     await expect(team).toHaveAccessibleDescription("Not built");
     const audit = sidebar.getByRole("link", { name: "Audit trail", exact: true });
-    await expect(audit).toHaveAccessibleDescription("Waiting");
+    await expect(audit).toHaveAccessibleDescription("Not built");
+    const tenants = sidebar.getByRole("link", { name: "Tenants", exact: true });
+    await expect(tenants).toHaveAccessibleDescription("Waiting");
     await expect(sources).toHaveText("Sources");
   });
 

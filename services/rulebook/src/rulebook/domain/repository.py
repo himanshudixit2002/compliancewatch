@@ -7,6 +7,7 @@ from datetime import date, datetime
 from typing import Protocol
 from uuid import UUID
 
+from domain_kernel.audit import AuditSink
 from domain_kernel.ids import CanonicalEntityId, ClauseId, DocumentId, RuleId, RuleVersionId, UserId
 from domain_kernel.knowledge import EntityType, RuleRelation
 from domain_kernel.status import RuleVersionStatus
@@ -462,6 +463,11 @@ class KnowledgeUnitOfWork(Protocol):
 
     @property
     def events(self) -> EventSink: ...
+
+    @property
+    def audit(self) -> AuditSink:
+        """Where the unit's audit entries go (``audit.event``), committed with its changes."""
+        ...
 
 
 class KnowledgeUnitOfWorkFactory(Protocol):

@@ -65,8 +65,8 @@ src/py_common/
   audit/               # the audit log, audit.event; the package itself loads no SQLAlchemy
     context.py         # audit_actor(service, principal), current_correlation_id()
     memory.py          # MemoryAuditSink: the memory stores' twin, refusing what the table refuses
-    schema.py          # audit.event; create/drop_audit_table(op) for identity's migration
-    writer.py          # AuditWriter.write(connection, entry); PostgresAuditSink, a unit of work's audit
+    schema.py          # audit.event; create/drop_audit_table(op), create/drop_audit_read_policies(op)
+    writer.py          # AuditWriter.write(connection, entry); PostgresAuditSink; entry_from_row
     testing.py         # audit_entry, install_audit_table, read_audit_entries
 tests/unit/
 tests/integration/     # the outbox against Postgres and Redpanda, the migration helpers, idempotency keys and the audit table on Postgres, flags on an Unleash server (testcontainers)
@@ -443,8 +443,10 @@ what the table refuses.
 - Identity's migration owns the table (`py_common.audit.schema.create_audit_table(op)`): the schema
   `audit` when it is missing, indexes on (tenant_id, occurred_at) and (action, occurred_at),
   forced row-level security that lets a session read and write its tenant's rows and add rows of
-  no tenant, and a trigger that refuses UPDATE and DELETE, a tenant's erasure included. No policy
-  reads the rows of no tenant yet.
+  no tenant, and a trigger that refuses UPDATE and DELETE, a tenant's erasure included. Its
+  migration 0006 adds the read scopes (`create_audit_read_policies(op)`), two FOR SELECT policies
+  on the setting `app.audit_scope`: `regulatory` reads the rows of no tenant, `export` reads every
+  row. Only identity sets it, after its own role checks.
 - `py_common.audit.testing` has `audit_entry(...)`, `install_audit_table(connection)` for a
   service's integration tests and `read_audit_entries(connection)`.
 - The log keeps an entry masked for personal identifiers (`py_common.audit.masked_entry`), with
@@ -464,10 +466,13 @@ what the table refuses.
 
 Each service's database role (`infra/dev/postgres/roles.sql`, `cw_<schema>`) may only insert
 into the table, and only `cw_identity` may also read it; the writer needs nothing more, since it
-inserts without `RETURNING`.
+inserts without `RETURNING`. The MVP image's one role, `cw_app`, holds SELECT on `audit` as well,
+so under it the read scopes are a code convention rather than a role boundary
+([docs/runbooks/audit-export.md](../../docs/runbooks/audit-export.md)).
 
-Not built yet: the read route `GET /v1/identity/audit`, the NDJSON export, pseudonymising rows on
-a tenant's erasure and the call sites in every service.
+Identity reads the log (`GET /v1/identity/audit`, `identity-admin audit-export`; the identity
+README and [docs/runbooks/audit-export.md](../../docs/runbooks/audit-export.md) describe both).
+Not built yet: pseudonymising rows on a tenant's erasure.
 
 ## Worker processes
 

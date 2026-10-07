@@ -441,3 +441,46 @@ def test_history_reads_one_obligations_changes_in_order_within_its_tenant() -> N
     assert kinds == [ChangeKind.CREATED, ChangeKind.RESCHEDULED, ChangeKind.CLOSED]
     with store(OTHER_TENANT) as uow:
         assert uow.history.for_obligation(september.id) == []
+
+
+def test_each_change_writes_its_audit_entry_by_the_system() -> None:
+    store = MemoryStore()
+    the_rule = rule()
+    made = MaterialiseObligations(store, window=2, clock=clock).run(request(rule=the_rule))
+    created = [entry for entry in store.audit if entry.action == "obligation.created"]
+    assert [entry.subject_id for entry in created] == [str(o) for o in made.created]
+    assert {(entry.tenant_id, entry.actor.label) for entry in created} == {
+        (TENANT, "system:obligation")
+    }
+    assert created[0].before is None
+    assert created[0].after is not None
+    assert (created[0].after["status"], created[0].after["period"]) == ("open", "2026-09")
+    assert created[0].after["rule_version_id"] == str(the_rule.rule_version_id)
+
+    amendment = RuleVersionId.new()
+    ApplyDeadlineChange(store, clock=clock).run(
+        DeadlineChange(
+            TENANT,
+            the_rule.rule_version_id,
+            "2026-09",
+            date(2026, 10, 25),
+            RescheduleReason.DEADLINE_EXTENDED,
+            caused_by=amendment,
+        )
+    )
+    (moved,) = [entry for entry in store.audit if entry.action == "obligation.rescheduled"]
+    assert moved.subject_id == str(made.created[0])
+    assert moved.reason == "deadline_extended"
+    assert moved.before == {"due_at": "2026-10-20T23:59:59+05:30"}
+    assert moved.after == {
+        "due_at": "2026-10-25T23:59:59+05:30",
+        "cause": "deadline_extended",
+        "caused_by_rule_version_id": str(amendment),
+    }
+
+    WithdrawRule(store, clock=clock).run(TENANT, the_rule.rule_version_id)
+    closed = [entry for entry in store.audit if entry.action == "obligation.closed"]
+    assert sorted(entry.subject_id for entry in closed) == sorted(str(o) for o in made.created)
+    assert {entry.reason for entry in closed} == {"rule_withdrawn"}
+    assert closed[0].after == {"status": "closed_not_applicable", "closed_reason": "rule_withdrawn"}
+    assert len(store.audit) == 5, "one entry per change, none for what stayed as it was"

@@ -15,9 +15,11 @@ from sqlalchemy import Engine, create_engine, inspect, text
 from sqlalchemy.exc import IntegrityError
 from testcontainers.community.postgres import PostgresContainer
 
+from domain_kernel.audit import AuditActor
 from domain_kernel.documents import Clause, DocumentType, clause_id_for, document_id_for
 from domain_kernel.ids import ClauseId, CorrelationId, RuleId, RuleVersionId, SourceId, UserId
 from domain_kernel.knowledge import RelationKind, RuleRelation
+from py_common.audit.testing import install_audit_table, read_audit_entries
 from rulebook.application.documents import RegisterDocument
 from rulebook.application.publication import (
     AddCitations,
@@ -29,6 +31,7 @@ from rulebook.application.publication import (
 )
 from rulebook.application.rule_versions import ListRuleVersions, ReadRuleVersion
 from rulebook.domain.documents import StoredDocument
+from rulebook.domain.errors import CitationsMissingError
 from rulebook.domain.events import RuleWithdrawn
 from rulebook.infrastructure.knowledge_repository import PostgresKnowledgeUnitOfWorkFactory
 from rulebook.transitions import main as transitions_main
@@ -60,6 +63,8 @@ def database_url() -> Iterator[str]:
         admin = create_engine(base_url, isolation_level="AUTOCOMMIT")
         with admin.connect() as connection:
             connection.execute(text(f"CREATE SCHEMA {SCHEMA}"))
+        with admin.begin() as connection:
+            install_audit_table(connection)
         admin.dispose()
         yield f"{base_url}?options=-csearch_path%3D{SCHEMA}%2Cpublic"
 
@@ -497,6 +502,42 @@ def test_a_publication_writes_its_events_with_the_change(
     detail = ReadRuleVersion(factory).run(new)
     assert (detail.approved_by, detail.record.published_at) == ((REVIEWER,), clock.now)
     assert ReadRuleVersion(factory).run(old).approved_by == (REVIEWER,), "superseded keeps them"
+    with engine.connect() as connection:
+        logged = [
+            entry
+            for entry in read_audit_entries(connection, action="rule_version.published")
+            if entry.subject_id == str(new)
+        ]
+    (entry,) = logged
+    assert (entry.subject_type, entry.tenant_id, entry.actor) == (
+        "rule_version",
+        None,
+        AuditActor.user(ANALYST),
+    )
+    assert (entry.before, entry.after, entry.occurred_at) == (
+        {"status": "approved"},
+        {"status": "published", "replaced": (str(old),)},
+        clock.now,
+    )
+
+
+def test_a_refused_publication_writes_no_audit_row(
+    factory: PostgresKnowledgeUnitOfWorkFactory, clause: ClauseId
+) -> None:
+    engine = factory.engine
+    clock = Clock()
+    version_id = version(engine, rule(engine), 1)
+    SubmitForReview(factory, clock).run(version_id, actor_id=ANALYST)
+    ApproveVersion(factory, clock).run(version_id, actor_id=REVIEWER)
+    with pytest.raises(CitationsMissingError):
+        PublishVersion(factory, enabled=True, clock=clock).run(version_id, actor_id=ANALYST)
+    with engine.connect() as connection:
+        actions = [
+            entry.action
+            for entry in read_audit_entries(connection)
+            if entry.subject_id == str(version_id)
+        ]
+    assert actions == ["rule_version.submitted", "rule_version.approved"]
 
 
 def test_the_sweep_moves_a_version_when_its_replacement_takes_effect(

@@ -15,7 +15,8 @@ task is opened so the values are checked once a provider is available.
 
 ``run`` looks the GSTIN up outside any transaction and writes in one unit of work. ``look_up``
 and ``apply`` are the two halves, for a use case that creates the registration and pre-fills it
-in the same unit of work.
+in the same unit of work. Each node the pre-fill changes writes one ``profile_node.prefilled``
+audit entry with the values it filled.
 """
 
 from collections.abc import Callable
@@ -27,6 +28,7 @@ from domain_kernel.identifiers import Gstin
 from domain_kernel.ids import BusinessId, TenantId, UserId
 from domain_kernel.ontology import AttributeLevel, AttributeSource, Ontology
 from profile_service.application.attributes import apply_changes, open_review
+from profile_service.application.audit import PREFILLED
 from profile_service.domain.errors import InvalidHierarchyError, ProfileNodeNotFoundError
 from profile_service.domain.events import ChangeSource
 from profile_service.domain.flags import GSTIN_CATEGORY_PREFILL, FeatureFlags
@@ -120,6 +122,7 @@ class PrefillFromGstin:
                     source=ChangeSource.GSTIN_LOOKUP,
                     by=by,
                     now=now,
+                    audit_action=PREFILLED,
                 )
                 applied.extend(outcome.changed)
         task = None if result is not None else _open_verification(uow, tenant_id, registration, now)

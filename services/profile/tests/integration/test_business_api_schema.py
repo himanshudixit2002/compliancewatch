@@ -32,6 +32,7 @@ from profile_service.infrastructure.repository import PostgresUnitOfWorkFactory
 from profile_service.main import build_app
 from profile_service.settings import ProfileSettings
 from profile_service.testing import GSTIN_DELHI, GSTIN_KARNATAKA, FixedFlags
+from py_common.audit.testing import install_audit_table
 from py_common.db_roles import apply_roles, as_role
 
 SERVICE_DIR = Path(__file__).resolve().parents[2]
@@ -52,6 +53,15 @@ def database_url() -> Iterator[str]:
         yield f"{base_url}?options=-csearch_path%3D{SCHEMA}%2Cpublic"
 
 
+def install_audit(database_url: str) -> None:
+    """``audit.event`` as identity's migration makes it, before the roles are applied, so
+    cw_profile may add rows to it."""
+    engine = create_engine(database_url)
+    with engine.begin() as connection:
+        install_audit_table(connection)
+    engine.dispose()
+
+
 @pytest.fixture(scope="module")
 def migrated(database_url: str) -> Iterator[Config]:
     with pytest.MonkeyPatch.context() as env:
@@ -59,6 +69,7 @@ def migrated(database_url: str) -> Iterator[Config]:
         env.setenv("CW_DB_SCHEMA", SCHEMA)
         config = Config(str(SERVICE_DIR / "alembic.ini"))
         command.upgrade(config, "head")
+        install_audit(database_url)
         yield config
 
 

@@ -9,13 +9,23 @@ to the one table.
 - The schema ``audit`` is created when it is missing: ``infra/dev/postgres/init.sql`` makes it
   in the dev stack, the migration in every other environment. The downgrade keeps it.
 - Indexes: (tenant_id, occurred_at) for a tenant's trail, (action, occurred_at) for one kind of
-  action across tenants.
+  action across tenants, and (subject_type, subject_id, occurred_at) for one subject's history
+  (``create_audit_subject_index``, identity's migration 0007).
 - Row-level security, enabled and forced. ``event_tenant_isolation``
   (``py_common.migrations.enable_tenant_rls``) admits the rows of the tenant ``app.tenant_id``
   names, to read and to write; ``event_platform_insert`` lets any session insert a row of no
-  tenant, a platform-wide action. No policy reads the rows of no tenant: a route scoped to the
-  regulatory team will read them (not built yet). The migration lint exempts the table, whose
-  tenant_id may be null (infra/scripts/migration_lint.toml).
+  tenant, a platform-wide action. The migration lint exempts the table, whose tenant_id may be
+  null (infra/scripts/migration_lint.toml).
+- Read scopes (``create_audit_read_policies``, identity's migration 0006), both FOR SELECT only:
+  ``event_platform_read`` admits the rows of no tenant while ``app.audit_scope`` is
+  ``regulatory``, and ``event_export_read`` admits every row while it is ``export``. Permissive
+  policies combine with OR, so a regulatory session that also names a tenant reads that tenant's
+  rows and the platform's. Only identity's code sets the scope, after its own role checks (the
+  audit trail route and ``identity-admin audit-export``). Among the per-service roles only
+  ``cw_identity`` holds SELECT on the table (infra/dev/postgres/roles.sql), so there a writer's
+  role reads nothing. The MVP's one image runs every service as ``cw_app``, which holds SELECT
+  on ``audit`` too (infra/dev/postgres/50-app-role.sql): there any service's code could name a
+  scope, and the scopes hold by code convention, as defence in depth, not as a role boundary.
 - Append-only: a trigger refuses UPDATE and DELETE (``create_append_only_guard`` without the
   erasure exception). Rows outlive a tenant's erasure, which will pseudonymise them rather than
   delete them (not built yet); the guide keeps them seven years (section 9).
@@ -62,9 +72,17 @@ AUDIT_TABLE: Final = "event"
 QUALIFIED_TABLE: Final = f"{AUDIT_SCHEMA}.{AUDIT_TABLE}"
 TENANT_TIME_INDEX: Final = "ix_audit_event_tenant_time"
 ACTION_TIME_INDEX: Final = "ix_audit_event_action_time"
+SUBJECT_TIME_INDEX: Final = "ix_audit_event_subject_time"
 PLATFORM_INSERT_POLICY: Final = "event_platform_insert"
 PLATFORM_ROW: Final = "tenant_id IS NULL"
 """The WITH CHECK of ``event_platform_insert``: a row of no tenant."""
+AUDIT_SCOPE_SETTING: Final = "app.audit_scope"
+"""The setting the read policies compare: ``regulatory`` or ``export``; identity sets it per
+transaction, after its own role checks."""
+REGULATORY_SCOPE: Final = "regulatory"
+EXPORT_SCOPE: Final = "export"
+PLATFORM_READ_POLICY: Final = "event_platform_read"
+EXPORT_READ_POLICY: Final = "event_export_read"
 MAX_CORRELATION_ID_CHARS: Final = 64
 ACTOR_KINDS: Final = tuple(kind.value for kind in AuditActorKind)
 AUDIT_COMMENT: Final = (
@@ -130,6 +148,12 @@ def _columns() -> list[SchemaItem]:
 audit_event = Table(AUDIT_TABLE, metadata, *_columns(), schema=AUDIT_SCHEMA, comment=AUDIT_COMMENT)
 Index(TENANT_TIME_INDEX, audit_event.c.tenant_id, audit_event.c.occurred_at)
 Index(ACTION_TIME_INDEX, audit_event.c.action, audit_event.c.occurred_at)
+Index(
+    SUBJECT_TIME_INDEX,
+    audit_event.c.subject_type,
+    audit_event.c.subject_id,
+    audit_event.c.occurred_at,
+)
 
 
 def create_audit_table(op: Operations) -> None:
@@ -147,6 +171,46 @@ def create_audit_table(op: Operations) -> None:
         f"FOR INSERT WITH CHECK ({PLATFORM_ROW})"
     )
     create_append_only_guard(op, AUDIT_TABLE, schema=AUDIT_SCHEMA)
+
+
+def _scope_is(scope: str) -> str:
+    return f"current_setting('{AUDIT_SCOPE_SETTING}', true) = '{scope}'"
+
+
+def create_audit_read_policies(op: Operations) -> None:
+    """The read scopes: the rows of no tenant under ``app.audit_scope = 'regulatory'``, every row
+    under ``'export'``. Both FOR SELECT, so neither admits a write. Call from identity's
+    migration 0006, after ``create_audit_table``."""
+    op.execute(
+        f"CREATE POLICY {PLATFORM_READ_POLICY} ON {QUALIFIED_TABLE} FOR SELECT "
+        f"USING ({PLATFORM_ROW} AND {_scope_is(REGULATORY_SCOPE)})"
+    )
+    op.execute(
+        f"CREATE POLICY {EXPORT_READ_POLICY} ON {QUALIFIED_TABLE} FOR SELECT "
+        f"USING ({_scope_is(EXPORT_SCOPE)})"
+    )
+
+
+def drop_audit_read_policies(op: Operations) -> None:
+    """Reverse ``create_audit_read_policies``."""
+    op.execute(f"DROP POLICY IF EXISTS {EXPORT_READ_POLICY} ON {QUALIFIED_TABLE}")
+    op.execute(f"DROP POLICY IF EXISTS {PLATFORM_READ_POLICY} ON {QUALIFIED_TABLE}")
+
+
+def create_audit_subject_index(op: Operations) -> None:
+    """The index on (subject_type, subject_id, occurred_at): one subject's history, such as a
+    rule version's, without a scan of every tenant's rows. Call from identity's migration 0007."""
+    op.create_index(
+        SUBJECT_TIME_INDEX,
+        AUDIT_TABLE,
+        ["subject_type", "subject_id", "occurred_at"],
+        schema=AUDIT_SCHEMA,
+    )
+
+
+def drop_audit_subject_index(op: Operations) -> None:
+    """Reverse ``create_audit_subject_index``."""
+    op.drop_index(SUBJECT_TIME_INDEX, table_name=AUDIT_TABLE, schema=AUDIT_SCHEMA)
 
 
 def drop_audit_table(op: Operations) -> None:

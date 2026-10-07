@@ -24,13 +24,22 @@ Days are days in India: "today" is the date in Asia/Kolkata when the step runs. 
 dated in the future cuts the replaced version's ``effective_to`` at publication and moves its
 status when the day comes, which ``ApplyDueTransitions`` does once a day.
 
+Submitting, approving, returning, publishing and withdrawing each write one audit entry in their
+transaction (``rulebook.application.audit``): ``rule_version.submitted``, ``.approved``,
+``.returned``, ``.published`` and ``.withdrawn``, the version id as the subject, the status
+before and after (with the round's approvals for an approval), the note as the reason. The
+step writes it, so a review task's decision that runs a step records it once. Citing writes
+none (a citation is content, which the draft's edits record), nor does the sweep, which moves
+versions for nobody.
+
 ``CW_RULEBOOK_PUBLISH_ENABLED`` gates publishing, withdrawing and the sweep (``enabled``). Citing
 and review work with it off, so analysts can prepare versions before publication is turned on.
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta, timezone
+from typing import Final
 from uuid import UUID, uuid4
 
 from domain_kernel.errors import InvariantViolationError
@@ -38,6 +47,7 @@ from domain_kernel.ids import ClauseId, CorrelationId, RuleVersionId, UserId
 from domain_kernel.knowledge import RelationKind
 from domain_kernel.status import RULE_VERSION_TRANSITIONS, RuleVersionStatus
 from rulebook.application.alignment import Clock, default_clock
+from rulebook.application.audit import actor_for, entry
 from rulebook.domain.errors import (
     CitationNotVerifiedError,
     DuplicateApproverError,
@@ -73,6 +83,12 @@ IST = timezone(timedelta(hours=5, minutes=30), "Asia/Kolkata")
 """India keeps one offset all year, so a fixed zone gives the same dates as Asia/Kolkata."""
 MAX_CITATIONS = 50
 MAX_RELATIONS = 1_000
+SUBJECT: Final = "rule_version"
+SUBMITTED_ACTION: Final = "rule_version.submitted"
+APPROVED_ACTION: Final = "rule_version.approved"
+RETURNED_ACTION: Final = "rule_version.returned"
+PUBLISHED_ACTION: Final = "rule_version.published"
+WITHDRAWN_ACTION: Final = "rule_version.withdrawn"
 
 
 def today_in_india(now: datetime) -> date:
@@ -178,6 +194,31 @@ def _decision(
     )
 
 
+def _audit(
+    uow: KnowledgeUnitOfWork,
+    action: str,
+    before: RuleVersionRecord,
+    after: Mapping[str, object],
+    *,
+    actor_id: UserId,
+    at: datetime,
+    note: str,
+) -> None:
+    """The step's audit entry: the version's status before it, ``after`` what it changed."""
+    uow.audit.write(
+        entry(
+            action,
+            SUBJECT,
+            before.rule_version_id,
+            actor_for(actor_id),
+            at=at,
+            before={"status": before.status.value},
+            after=after,
+            reason=note,
+        )
+    )
+
+
 def add_citations(
     uow: KnowledgeUnitOfWork,
     rule_version_id: RuleVersionId,
@@ -264,6 +305,15 @@ def submit_for_review(
             version, DecisionAction.SUBMITTED, submitted.status, now, actor_id=actor_id, note=note
         )
     )
+    _audit(
+        uow,
+        SUBMITTED_ACTION,
+        version,
+        {"status": submitted.status.value, "high_impact": submitted.high_impact},
+        actor_id=actor_id,
+        at=now,
+        note=note,
+    )
     return VersionState(submitted)
 
 
@@ -289,6 +339,15 @@ def return_to_draft(
         _decision(
             version, DecisionAction.RETURNED, returned.status, now, actor_id=actor_id, note=note
         )
+    )
+    _audit(
+        uow,
+        RETURNED_ACTION,
+        version,
+        {"status": returned.status.value},
+        actor_id=actor_id,
+        at=now,
+        note=note,
     )
     return VersionState(returned)
 
@@ -330,6 +389,20 @@ def approve_version(
         uow.rule_versions.save_lifecycle(after)
     uow.rule_versions.record_decision(
         _decision(version, DecisionAction.APPROVED, after.status, now, actor_id=actor_id, note=note)
+    )
+    _audit(
+        uow,
+        APPROVED_ACTION,
+        version,
+        {
+            "status": after.status.value,
+            "approvals": len(approvers),
+            "required_approvals": required_approvals(version.high_impact),
+            "synthetic": synthetic,
+        },
+        actor_id=actor_id,
+        at=now,
+        note=note,
     )
     return VersionState(after, tuple(sorted(approvers, key=str)))
 
@@ -493,6 +566,20 @@ class PublishVersion:
                     note=note,
                 )
             )
+            _audit(
+                uow,
+                PUBLISHED_ACTION,
+                version,
+                {
+                    "status": plan.published.status.value,
+                    "replaced": sorted(
+                        str(replacement.target.rule_version_id) for replacement in plan.replacements
+                    ),
+                },
+                actor_id=actor_id,
+                at=now,
+                note=note,
+            )
             for replacement in plan.replacements:
                 uow.rule_versions.save_lifecycle(replacement.updated)
                 if replacement.due:
@@ -562,6 +649,15 @@ class WithdrawVersion:
                     actor_id=actor_id,
                     note=note,
                 )
+            )
+            _audit(
+                uow,
+                WITHDRAWN_ACTION,
+                version,
+                {"status": withdrawn.status.value},
+                actor_id=actor_id,
+                at=now,
+                note=note,
             )
             event = transition_event(
                 version.rule_id,

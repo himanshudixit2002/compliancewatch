@@ -186,7 +186,8 @@ describe("navFor", () => {
     expect(links.find((link) => link.id === "admin.sources")?.status).toBeUndefined();
     expect(links.find((link) => link.id === "admin.pipeline")?.status).toBeUndefined();
     expect(links.find((link) => link.id === "admin.team")?.status).toBe("ready");
-    expect(links.find((link) => link.id === "admin.audit")?.status).toBe("waiting");
+    expect(links.find((link) => link.id === "admin.audit")?.status).toBe("ready");
+    expect(links.find((link) => link.id === "admin.tenants")?.status).toBe("waiting");
     expect(links.find((link) => link.id === "admin.backfill")?.status).toBe("planned");
   });
 

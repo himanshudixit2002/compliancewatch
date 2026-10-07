@@ -37,6 +37,7 @@ from identity.application.tenancy import (
     ListUsers,
     admin_context,
 )
+from identity.domain.audit import AuditQuery, AuditScope
 from identity.domain.errors import (
     InternalTenantExistsError,
     LastAdminError,
@@ -45,6 +46,7 @@ from identity.domain.errors import (
 )
 from identity.domain.events import RoleChangeReason, TenantCreated, UserRoleChanged, sorted_roles
 from identity.domain.tenancy import Contact, SubjectEntry, Tenant, TenantKind, User
+from identity.infrastructure.audit_reader import PostgresAuditReader
 from identity.infrastructure.minter import IssuerMinter
 from identity.infrastructure.models import Base
 from identity.infrastructure.providers.fake import FakeIdentityProvider
@@ -93,6 +95,9 @@ def engine(database_url: str, alembic_config: Config) -> Iterator[Engine]:
 
 @pytest.fixture(scope="module")
 def app_engine(database_url: str, engine: Engine) -> Iterator[Engine]:
+    # Again after the migrations: identity's 0005 makes the audit schema, which the role must
+    # be able to write to (USAGE and INSERT), as make migrate's db-roles step grants.
+    apply_roles(database_url)
     engine = create_engine(as_role(database_url, SCHEMA))
     yield engine
     engine.dispose()
@@ -388,6 +393,13 @@ def test_service_clients_through_a_plain_role(app_engine: Engine) -> None:
     with factory(None) as uow:
         stored = uow.service_clients.get("integration-client")
     assert stored == revoked
+    platform = PostgresAuditReader(app_engine).page(
+        AuditScope.REGULATORY, None, AuditQuery(subject_id="integration-client")
+    )
+    assert [entry.action for entry in platform] == [
+        "service_client.revoked",
+        "service_client.created",
+    ]
 
 
 def test_locking_a_tenant_makes_another_transaction_wait(app_engine: Engine) -> None:
@@ -487,3 +499,14 @@ def test_the_team_use_cases_through_a_plain_role(app_engine: Engine, engine: Eng
             ).scalars()
         )
     assert reasons == ["created", "invited", "roles_changed", "disabled"]
+    # The audit entries, read back through identity's own role in the tenant's scope.
+    trail = PostgresAuditReader(app_engine).page(
+        AuditScope.TENANT, created.tenant.id, AuditQuery(limit=10)
+    )
+    assert [entry.action for entry in trail] == [
+        "user.disabled",
+        "user.roles_changed",
+        "user.invited",
+        "tenant.created",
+    ]
+    assert {entry.actor.id for entry in trail} == {str(created.user.id)}

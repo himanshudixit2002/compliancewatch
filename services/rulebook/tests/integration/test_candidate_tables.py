@@ -31,6 +31,7 @@ from domain_kernel.documents import Clause, DocumentType, clause_id_for, documen
 from domain_kernel.ids import RuleVersionId, SourceId, UserId
 from domain_kernel.knowledge import EntityType, RelationKind
 from domain_kernel.ontology import AttributeLevel
+from py_common.audit.testing import install_audit_table
 from py_common.events import EventMessage, encode
 from py_common.outbox import (
     ConsumerConfig,
@@ -133,6 +134,8 @@ def database_url() -> Iterator[str]:
         admin = create_engine(base_url, isolation_level="AUTOCOMMIT")
         with admin.connect() as connection:
             connection.execute(text(f"CREATE SCHEMA {SCHEMA}"))
+        with admin.begin() as connection:
+            install_audit_table(connection)
         admin.dispose()
         yield f"{base_url}?options=-csearch_path%3D{SCHEMA}%2Cpublic"
 

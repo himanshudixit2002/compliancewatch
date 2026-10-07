@@ -86,6 +86,10 @@ class World:
             )
         )
         self.first, self.second = made.created
+        # Materialising wrote one obligation.created entry per obligation; the tests here count
+        # what tracking writes after it.
+        assert [e.action for e in self.store.audit] == ["obligation.created"] * 2
+        self.store.audit.clear()
         if cached:
             self.store.rule_versions[self.rule.rule_version_id] = ref_of(self.rule)
         self.read = ReadObligation(self.store, self.reader)

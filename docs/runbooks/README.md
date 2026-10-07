@@ -13,6 +13,7 @@ Design reference: Project Foundation guide, section 18.
 Flat; one markdown file per alert or operational procedure.
 
 - [api-slo-burn.md](api-slo-burn.md): the availability and latency SLO alerts on the product APIs.
+- [audit-export.md](audit-export.md): what the audit trail holds, who reads which rows (`GET /v1/identity/audit`), exporting a month with `identity-admin audit-export` and uploading it to the object-locked bucket.
 - [backup-restore.md](backup-restore.md): what holds state, dev backups, the quarterly restore drill.
 - [entity-review-queue.md](entity-review-queue.md): mentions waiting too long or piling up in the rulebook's entity review queue (EntityReviewQueueStale, EntityReviewQueueBacklog).
 - [fan-out-control.md](fan-out-control.md): the rule.published fan-out over every business: the global hold, pausing, resuming and cancelling a run, a run that paused itself on flips, one that stays held, paused or failed, a publication with no run, and rolling a version back.

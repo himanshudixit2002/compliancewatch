@@ -54,7 +54,8 @@ service as its own `cw_<schema>` role instead needs a database URL per service i
      libpq's form (`postgresql://...`, not the `postgresql+psycopg://...` of the services'
      settings). It makes one login role per schema, `cw_<schema>`, that is neither a superuser
      nor BYPASSRLS, with its own schema, public and INSERT on the audit log (`cw_identity` also
-     reads it), and default privileges for the tables later migrations by that owner create. A
+     reads it; the one role the MVP image runs as reads it too, so there the audit read scopes
+     are a code convention: docs/runbooks/audit-export.md), and default privileges for the tables later migrations by that owner create. A
      schema the release has not made yet is skipped with a notice, so run it again after a
      release that adds one.
    - The owner needs CREATEROLE to create the roles; otherwise an administrator creates the ten
@@ -82,6 +83,13 @@ service as its own `cw_<schema>` role instead needs a database URL per service i
    `services/identity/README.md` ("Supabase: manual steps"). Deploy identity before the services
    that verify its tokens. Run staging with `CW_AUTH_MODE=dual`, then `token`; production refuses
    any other mode and the fake provider.
+8. Audit log archive (no account yet): a bucket in Mumbai with object lock in compliance mode and
+   a default retention of seven years, writable by the operator who exports and by nobody else.
+   Each month, on or after the 3rd (two days' grace for rows that commit late), export the
+   month before with `identity-admin audit-export` and upload the NDJSON file and its
+   `manifest.json` under `audit/<YYYY-MM>/`, never a `*.partial` file, as
+   [docs/runbooks/audit-export.md](../../docs/runbooks/audit-export.md) describes. Nothing in
+   this repository creates the bucket or uploads to it.
 
 ## Environment matrix
 

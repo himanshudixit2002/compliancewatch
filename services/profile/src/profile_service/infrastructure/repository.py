@@ -1,6 +1,6 @@
 """The Postgres unit of work: one transaction with the tenant setting for row-level security,
-the profile repository on it, the outbox writer as the event sink, and an optional JSON-lines
-recorder for eval cases."""
+the profile repository on it, the outbox writer as the event sink, the audit writer
+(``audit.event``) on the same connection, and an optional JSON-lines recorder for eval cases."""
 
 import json
 import uuid
@@ -36,6 +36,7 @@ from profile_service.infrastructure.models import (
     ProfileVersionRow,
     ReviewTaskRow,
 )
+from py_common.audit.writer import PostgresAuditSink
 from py_common.outbox import OutboxWriter
 
 
@@ -333,6 +334,7 @@ class SqlAlchemyUnitOfWork:
         self.profiles = SqlAlchemyProfileRepository(session, tenant_id)
         self.events = OutboxSink(connection, writer)
         self.eval_cases = eval_cases
+        self.audit = PostgresAuditSink(connection)
 
 
 class PostgresUnitOfWorkFactory:

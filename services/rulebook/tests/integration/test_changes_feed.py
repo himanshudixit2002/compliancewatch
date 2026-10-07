@@ -20,6 +20,7 @@ from testcontainers.community.postgres import PostgresContainer
 from domain_kernel.documents import Clause, DocumentType, clause_id_for, document_id_for
 from domain_kernel.ids import ClauseId, RuleId, RuleVersionId, SourceId, UserId
 from domain_kernel.knowledge import EntityType, RelationKind, RuleRelation
+from py_common.audit.testing import install_audit_table
 from py_common.db_roles import apply_roles, as_role
 from rulebook.application.changes import ListChanges
 from rulebook.application.documents import RegisterDocument
@@ -68,6 +69,8 @@ def database_url() -> Iterator[str]:
         admin = create_engine(base_url, isolation_level="AUTOCOMMIT")
         with admin.connect() as connection:
             connection.execute(text(f"CREATE SCHEMA {SCHEMA}"))
+        with admin.begin() as connection:
+            install_audit_table(connection)
         admin.dispose()
         yield f"{base_url}?options=-csearch_path%3D{SCHEMA}%2Cpublic"
 

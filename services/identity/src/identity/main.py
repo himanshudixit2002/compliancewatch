@@ -5,7 +5,8 @@ The service owns tenants, users and roles, signs people in through the identity 
 (``CW_AUTH_PROVIDER``, ADR-014) and issues the access tokens every service verifies, with its own
 ES256 keys (``CW_IDENTITY_SIGNING_KEYS``). It verifies its own tokens in the process: the
 authenticator it hands to ``create_app`` holds the same keys. It also keeps consent records,
-channel consents for numbers no tenant owns yet, and billing behind ``CW_BILLING_PROVIDER``.
+channel consents for numbers no tenant owns yet, and billing behind ``CW_BILLING_PROVIDER``, and
+it reads the audit log every service writes (``GET /v1/identity/audit``).
 
 In local and test, with ``CW_IDENTITY_DEV_CLIENT_SECRET`` set, the app makes the dev service
 clients exist when it starts.
@@ -22,9 +23,11 @@ from starlette.concurrency import run_in_threadpool
 
 from domain_kernel.errors import DomainError
 from identity import __version__
+from identity.api.audit import router as audit_router
 from identity.api.auth import router as auth_router
 from identity.api.router import router
 from identity.api.tenancy import router as tenancy_router
+from identity.application.audit import ReadAuditTrail
 from identity.application.billing import BillingLedger, ReceiveBillingWebhook, StartSubscription
 from identity.application.bootstrap import EnsureDevServiceClients
 from identity.application.channel_consents import ChannelConsentStatus, RecordChannelConsent
@@ -40,6 +43,7 @@ from identity.application.tenancy import (
     ReadMembership,
 )
 from identity.composition import identity_provider
+from identity.domain.audit import AuditReader
 from identity.domain.billing import BillingProvider
 from identity.domain.channel_consent import ChannelUnitOfWorkFactory
 from identity.domain.errors import (
@@ -70,9 +74,10 @@ from identity.domain.errors import (
 )
 from identity.domain.provider import DevIdentityProvider
 from identity.domain.repository import UnitOfWorkFactory
+from identity.infrastructure.audit_reader import PostgresAuditReader
 from identity.infrastructure.billing.memory import MemoryBillingProvider
 from identity.infrastructure.billing.razorpay import RazorpayBillingProvider
-from identity.infrastructure.memory import MemoryChannelStore, MemoryStore
+from identity.infrastructure.memory import MemoryAuditReader, MemoryChannelStore, MemoryStore
 from identity.infrastructure.minter import IssuerMinter
 from identity.infrastructure.providers.fake import FakeIdentityProvider
 from identity.infrastructure.repository import PostgresUnitOfWorkFactory
@@ -170,15 +175,18 @@ def token_verifier(settings: IdentitySettings, keys: KeySet) -> TokenVerifier:
 def wire(settings: IdentitySettings) -> Wiring:
     unit_of_work: UnitOfWorkFactory
     channel_unit_of_work: ChannelUnitOfWorkFactory
+    audit_reader: AuditReader
     ping: Callable[[], bool]
     if settings.identity_store == "memory":
         memory = MemoryStore()
         unit_of_work, ping = memory, memory.ping
         channel_unit_of_work = MemoryChannelStore()
+        audit_reader = MemoryAuditReader(memory)
     else:
         postgres = PostgresUnitOfWorkFactory.from_url(settings.database_url)
         unit_of_work, ping = postgres, postgres.ping
         channel_unit_of_work = postgres.channel_unit_of_work
+        audit_reader = PostgresAuditReader(postgres.engine)
 
     async def store_ready() -> bool:
         return await run_in_threadpool(ping)
@@ -205,8 +213,12 @@ def wire(settings: IdentitySettings) -> Wiring:
         channel_consent_status=ChannelConsentStatus(channel_unit_of_work),
         billing_enabled=billing is not None,
         billing_ledger=ledger,
-        start_subscription=None if billing is None else StartSubscription(billing, ledger),
-        receive_billing_webhook=None if billing is None else ReceiveBillingWebhook(billing, ledger),
+        start_subscription=None
+        if billing is None
+        else StartSubscription(billing, ledger, unit_of_work),
+        receive_billing_webhook=None
+        if billing is None
+        else ReceiveBillingWebhook(billing, ledger, unit_of_work),
         keys=keys,
         provider=provider,
         dev_provider=dev_provider,
@@ -221,6 +233,7 @@ def wire(settings: IdentitySettings) -> Wiring:
         invite_user=InviteUser(unit_of_work, provider),
         change_roles=ChangeRoles(unit_of_work),
         disable_user=DisableUser(unit_of_work),
+        read_audit_trail=ReadAuditTrail(audit_reader, unit_of_work),
     )
 
 
@@ -253,7 +266,7 @@ def build_app(settings: IdentitySettings | None = None) -> FastAPI:
     app = create_app(
         service_name=SERVICE_NAME,
         version=__version__,
-        routers=[router, auth_router, tenancy_router],
+        routers=[router, auth_router, tenancy_router, audit_router],
         settings=settings,
         readiness_checks=[("store", wiring.store_ready)],
         lifespan=lifespan,

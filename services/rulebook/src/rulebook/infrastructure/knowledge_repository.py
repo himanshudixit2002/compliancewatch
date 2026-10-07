@@ -22,6 +22,9 @@ commits with the version's transition; the ``review_task`` trigger keeps a decid
 owns, such as the inbox transaction of the worker's consumer of rule.candidate.created
 (``py_common.outbox.sync``): the candidate, its review task and the ``processed_event`` row then
 commit together, or none of them. A unit there neither commits nor rolls back.
+
+A unit's audit entries (``audit``, ``py_common.audit.writer``) go to ``audit.event`` on the same
+connection, as platform rows: regulatory data belongs to no tenant.
 """
 
 from collections.abc import Iterator, Mapping, Sequence
@@ -76,6 +79,7 @@ from domain_kernel.knowledge import EntityRef, EntityType, RelationKind, RuleRel
 from domain_kernel.ontology import AttributeLevel
 from domain_kernel.status import RuleVersionStatus
 from domain_kernel.vectors import ClauseFilter, Vector
+from py_common.audit.writer import PostgresAuditSink
 from py_common.outbox import OutboxWriter
 from rulebook.domain.alignment import ReviewReason
 from rulebook.domain.changes import CHANGE_ACTIONS, ChangeEntry, ChangeQuery, RuleChangeKind
@@ -1483,6 +1487,7 @@ class SqlAlchemyKnowledgeUnitOfWork:
         self._index = SqlAlchemyClauseIndex(session)
         self._runs = SqlAlchemyRunRepository(session)
         self._events = SqlAlchemyEventSink(session, writer)
+        self._audit = PostgresAuditSink(session.connection())
 
     @property
     def documents(self) -> SqlAlchemyDocumentRepository:
@@ -1539,6 +1544,11 @@ class SqlAlchemyKnowledgeUnitOfWork:
     @property
     def events(self) -> SqlAlchemyEventSink:
         return self._events
+
+    @property
+    def audit(self) -> PostgresAuditSink:
+        """Audit entries on the unit's connection, so they commit with its changes."""
+        return self._audit
 
 
 class PostgresKnowledgeUnitOfWorkFactory:

@@ -59,11 +59,23 @@
 
 Who acts is the caller's business (``api.deps``): the verified user of a token, or the body's
 actor with the review token in header and dual mode.
+
+The audit log (``rulebook.application.audit``), each in the action's transaction, the task id as
+the subject: ``review_task.claimed`` when a claim changes the task, ``review_task.drafted`` when
+a version is drafted from the candidate (no row of the decision audit records the drafting
+itself: an ``edited`` row records only what the analyst changed), and ``review_task.decided``
+for every decision, with the task's status after it (open again when an approval waits for a
+second reviewer), the candidate's status and the relation candidates a rejection reopened. The
+version's own steps (submitted, approved, returned) write their entries themselves
+(``publication``), and the relations approved onto a new draft theirs (``relations``). An edit
+of the draft writes no entry: its ``edited`` row of the decision audit is its record. Opening
+seed tasks writes none.
 """
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
+from typing import Final
 from uuid import UUID, uuid4
 
 from domain_kernel.documents import clause_id_for
@@ -72,6 +84,7 @@ from domain_kernel.ids import CorrelationId, EventId, RuleId, RuleVersionId, Use
 from domain_kernel.ontology import AttributeLevel, Ontology
 from domain_kernel.status import RULE_VERSION_TRANSITIONS, RuleVersionStatus
 from rulebook.application.alignment import Clock, default_clock
+from rulebook.application.audit import actor_for, entry
 from rulebook.application.publication import (
     MAX_CITATIONS,
     CitationInput,
@@ -103,6 +116,7 @@ from rulebook.domain.intake import (
     DraftContent,
     DraftedContent,
     RuleCandidate,
+    RuleCandidateStatus,
     RuleRejectReason,
     draft_content,
     drafted_content,
@@ -130,6 +144,10 @@ RETURNABLE = frozenset({RuleVersionStatus.IN_REVIEW, RuleVersionStatus.APPROVED}
 ONE_MICROSECOND = timedelta(microseconds=1)
 MAX_RELATIONS = 50
 """Relation candidates approved onto one draft at most."""
+SUBJECT: Final = "review_task"
+CLAIMED_ACTION: Final = "review_task.claimed"
+DRAFTED_ACTION: Final = "review_task.drafted"
+DECIDED_ACTION: Final = "review_task.decided"
 
 
 @dataclass(frozen=True, slots=True)
@@ -257,6 +275,40 @@ def _approvers(uow: KnowledgeUnitOfWork, version: RuleVersionRecord) -> tuple[Us
     return tuple(sorted(found, key=str))
 
 
+def _task_state(task: ReviewTask) -> dict[str, object]:
+    """What an audit entry keeps of a task: its status, who holds it and its decision."""
+    return {
+        "status": task.status.value,
+        "claimed_by": None if task.claimed_by is None else str(task.claimed_by),
+        "decision": None if task.decision is None else task.decision.value,
+    }
+
+
+def _audit(
+    uow: KnowledgeUnitOfWork,
+    action: str,
+    task: ReviewTask,
+    *,
+    by: UserId,
+    at: datetime,
+    before: dict[str, object],
+    after: dict[str, object],
+    note: str = "",
+) -> None:
+    uow.audit.write(
+        entry(
+            action,
+            SUBJECT,
+            task.task_id,
+            actor_for(by),
+            at=at,
+            before=before,
+            after=after,
+            reason=note,
+        )
+    )
+
+
 def candidate_detail(uow: KnowledgeUnitOfWork, candidate: RuleCandidate) -> CandidateDetail:
     key = candidate.suggested_rule_key
     return CandidateDetail(
@@ -363,6 +415,18 @@ class ClaimReviewTask:
             claimed = task.claim(by, now)
             if claimed != task:
                 uow.review_tasks.save(claimed)
+                _audit(
+                    uow,
+                    CLAIMED_ACTION,
+                    task,
+                    by=by,
+                    at=now,
+                    before={
+                        "status": task.status.value,
+                        "claimed_by": None if task.claimed_by is None else str(task.claimed_by),
+                    },
+                    after={"status": claimed.status.value, "claimed_by": str(by)},
+                )
             return claimed
 
 
@@ -476,6 +540,24 @@ class DraftFromCandidate:
             uow.rule_candidates.save(candidate.drafted(record.rule_version_id))
             drafted = task.drafted(record.rule_version_id)
             uow.review_tasks.save(drafted)
+            _audit(
+                uow,
+                DRAFTED_ACTION,
+                task,
+                by=by,
+                at=now,
+                before={"rule_version_id": None},
+                after={
+                    "rule_version_id": str(record.rule_version_id),
+                    "rule_key": record.rule_key,
+                    "version": record.version,
+                    "new_rule": new_rule is not None,
+                    "candidate_id": str(candidate.candidate_id),
+                    "changed": sorted(changed),
+                    "relations": sorted(str(choice.candidate_id) for choice in relations),
+                },
+                note=note,
+            )
             return task_detail(uow, drafted)
 
     def _content(
@@ -718,10 +800,12 @@ class DecideReviewTask:
                     )
             elif reason is not None:
                 raise InvariantViolationError("only a candidate task's rejection takes a reason")
+            before_candidate = None if candidate is None else candidate.status
             if candidate is not None and task.rule_version_id is None:
                 if decision is not ReviewDecision.REJECT:
                     raise _not_drafted(task)
-                return self._reject_candidate(uow, task, candidate, None, by, now, note, reason)
+                result = self._reject_candidate(uow, task, candidate, None, by, now, note, reason)
+                return _decided(uow, task, decision, result, before_candidate, by, now, note)
             version = _drafted_version(uow, task)
             if decision is ReviewDecision.APPROVE:
                 state, at = self._approve(uow, version, by=by, note=note, high_impact=high_impact)
@@ -731,10 +815,12 @@ class DecideReviewTask:
                 if done and candidate is not None:
                     candidate = candidate.approved(by=by, at=at)
                     uow.rule_candidates.save(candidate)
-                return TaskDecision(after, state, candidate=candidate)
+                result = TaskDecision(after, state, candidate=candidate)
+                return _decided(uow, task, decision, result, before_candidate, by, at, note)
             state = self._send_back(uow, version, decision, by=by, note=note, now=now)
             if decision is ReviewDecision.REJECT and candidate is not None:
-                return self._reject_candidate(uow, task, candidate, state, by, now, note, reason)
+                result = self._reject_candidate(uow, task, candidate, state, by, now, note, reason)
+                return _decided(uow, task, decision, result, before_candidate, by, now, note)
             after = task.decide(decision, by=by, at=now, note=note)
             uow.review_tasks.save(after)
             following = None
@@ -742,7 +828,8 @@ class DecideReviewTask:
                 following = after.next_round(at=now)
                 if not uow.review_tasks.add(following):  # pragma: no cover - decided just now
                     following = None
-            return TaskDecision(after, state, following, candidate=candidate)
+            result = TaskDecision(after, state, following, candidate=candidate)
+            return _decided(uow, task, decision, result, before_candidate, by, now, note)
 
     @staticmethod
     def _reject_candidate(
@@ -835,6 +922,35 @@ class DecideReviewTask:
         if version.status is not RuleVersionStatus.DRAFT and decision is ReviewDecision.RETURN:
             RULE_VERSION_TRANSITIONS.assert_transition(version.status, RuleVersionStatus.DRAFT)
         return VersionState(version, _approvers(uow, version))
+
+
+def _decided(
+    uow: KnowledgeUnitOfWork,
+    task: ReviewTask,
+    decision: ReviewDecision,
+    result: TaskDecision,
+    candidate_before: RuleCandidateStatus | None,
+    by: UserId,
+    at: datetime,
+    note: str,
+) -> TaskDecision:
+    """Write the decision's ``review_task.decided`` entry and return ``result``."""
+    before = _task_state(task)
+    after: dict[str, object] = {**_task_state(result.task), "decided": decision.value}
+    if result.version is not None:
+        after["rule_version_id"] = str(result.version.record.rule_version_id)
+        after["rule_version_status"] = result.version.record.status.value
+    if result.next_task is not None:
+        after["next_task_id"] = str(result.next_task.task_id)
+    if result.candidate is not None and candidate_before is not None:
+        before["candidate_status"] = candidate_before.value
+        after["candidate_status"] = result.candidate.status.value
+        if result.candidate.reject_reason is not None:
+            after["reject_reason"] = result.candidate.reject_reason.value
+    if result.reopened_relations:
+        after["reopened_relations"] = [str(found) for found in result.reopened_relations]
+    _audit(uow, DECIDED_ACTION, task, by=by, at=at, before=before, after=after, note=note)
+    return result
 
 
 class ReadReviewStats:

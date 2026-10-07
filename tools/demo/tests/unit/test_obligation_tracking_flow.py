@@ -290,6 +290,8 @@ def test_a_member_tracks_an_obligation_from_start_to_comment(tmp_path: Path) -> 
     kinds = [c.kind for c in store.changes if c.obligation_id == tracked]
     assert kinds == [ChangeKind.CREATED, ChangeKind.STARTED, ChangeKind.ASSIGNED, ChangeKind.CLOSED]
     entries = [e for e in store.audit if e.subject_id == str(tracked)]
+    assert entries[0].action == "obligation.created", "materialised by the system"
+    entries = entries[1:]
     assert [e.action for e in entries] == [
         START_ACTION,
         ASSIGN_ACTION,

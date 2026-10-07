@@ -34,10 +34,17 @@ from py_common.audit import (
 )
 from py_common.audit.schema import (
     ACTION_TIME_INDEX,
+    EXPORT_READ_POLICY,
     PLATFORM_INSERT_POLICY,
+    PLATFORM_READ_POLICY,
+    SUBJECT_TIME_INDEX,
     TENANT_TIME_INDEX,
     audit_event,
+    create_audit_read_policies,
+    create_audit_subject_index,
     create_audit_table,
+    drop_audit_read_policies,
+    drop_audit_subject_index,
     drop_audit_table,
     metadata,
 )
@@ -45,10 +52,9 @@ from py_common.audit.testing import (
     SAMPLE_AT,
     SAMPLE_TENANT,
     audit_entry,
-    entry_from_row,
     read_audit_entries,
 )
-from py_common.audit.writer import AuditWriter, PostgresAuditSink, audit_row
+from py_common.audit.writer import AuditWriter, PostgresAuditSink, audit_row, entry_from_row
 from py_common.auth.context import principal_bound
 from py_common.request_context import REQUEST_ID_HEADER, REQUEST_ID_SHAPE, RequestContextMiddleware
 
@@ -368,7 +374,7 @@ def test_the_table_is_created_with_its_indexes_policies_and_trigger() -> None:
         f"CREATE POLICY {PLATFORM_INSERT_POLICY} ON audit.event FOR INSERT "
         "WITH CHECK (tenant_id IS NULL);"
     ) in sql
-    assert "FOR SELECT" not in sql, "no policy reads the rows of no tenant"
+    assert "FOR SELECT" not in sql, "the read scopes come in a later migration of their own"
     assert (
         "CREATE TRIGGER tr_event_append_only BEFORE UPDATE OR DELETE ON audit.event "
         "FOR EACH ROW EXECUTE FUNCTION audit.audit_append_only();"
@@ -385,3 +391,29 @@ def test_the_drop_keeps_the_schema() -> None:
         "DROP TABLE audit.event",
     ]
     assert not [s for s in statements if s.startswith("DROP SCHEMA")]
+
+
+def test_the_read_scopes_are_select_policies_on_the_audit_scope_setting() -> None:
+    statements = [s.strip() for s in emitted(create_audit_read_policies).split(";") if s.strip()]
+    assert statements == [
+        f"CREATE POLICY {PLATFORM_READ_POLICY} ON audit.event FOR SELECT "
+        "USING (tenant_id IS NULL AND current_setting('app.audit_scope', true) = 'regulatory')",
+        f"CREATE POLICY {EXPORT_READ_POLICY} ON audit.event FOR SELECT "
+        "USING (current_setting('app.audit_scope', true) = 'export')",
+    ]
+    dropped = [s.strip() for s in emitted(drop_audit_read_policies).split(";") if s.strip()]
+    assert dropped == [
+        f"DROP POLICY IF EXISTS {EXPORT_READ_POLICY} ON audit.event",
+        f"DROP POLICY IF EXISTS {PLATFORM_READ_POLICY} ON audit.event",
+    ]
+
+
+def test_the_subject_index_comes_in_a_migration_of_its_own() -> None:
+    assert SUBJECT_TIME_INDEX not in emitted(create_audit_table)
+    created = [s.strip() for s in emitted(create_audit_subject_index).split(";") if s.strip()]
+    assert created == [
+        f"CREATE INDEX {SUBJECT_TIME_INDEX} ON audit.event (subject_type, subject_id, occurred_at)"
+    ]
+    dropped = [s.strip() for s in emitted(drop_audit_subject_index).split(";") if s.strip()]
+    assert dropped == [f"DROP INDEX audit.{SUBJECT_TIME_INDEX}"]
+    assert SUBJECT_TIME_INDEX in {index.name for index in audit_event.indexes}

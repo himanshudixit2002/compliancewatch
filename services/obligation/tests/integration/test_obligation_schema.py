@@ -31,6 +31,7 @@ from obligation.domain.events import RescheduleReason
 from obligation.domain.model import DueWindow
 from obligation.infrastructure.repository import PostgresUnitOfWorkFactory
 from obligation.testing import rule
+from py_common.audit.testing import install_audit_table
 from py_common.db_roles import apply_roles, as_role
 
 SERVICE_DIR = Path(__file__).resolve().parents[2]
@@ -58,6 +59,8 @@ def database_url() -> Iterator[str]:
         admin = create_engine(base_url, isolation_level="AUTOCOMMIT")
         with admin.connect() as connection:
             connection.execute(text(f"CREATE SCHEMA {SCHEMA}"))
+            # audit.event, which identity's migrations make: every change writes its entry.
+            install_audit_table(connection)
         admin.dispose()
         yield f"{base_url}?options=-csearch_path%3D{SCHEMA}%2Cpublic"
 

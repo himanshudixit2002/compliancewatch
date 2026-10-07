@@ -86,8 +86,12 @@ reason = """
 The audit log every service writes, so tenant_id is null for a platform-wide action that no tenant
 owns. Row-level security is enabled and forced all the same: event_tenant_isolation, the tenant
 policy, lets a session read and write the rows of its app.tenant_id setting, and
-event_platform_insert lets it insert a row with no tenant. No policy reads the rows of no tenant,
-and a trigger refuses UPDATE and DELETE (migration 0005 of identity, py_common.audit.schema).
+event_platform_insert lets it insert a row with no tenant. Two FOR SELECT policies admit no write:
+event_platform_read reads the rows of no tenant while app.audit_scope is 'regulatory', and
+event_export_read reads every row while it is 'export'; only identity's code sets the scope.
+Among the per-service roles only cw_identity holds SELECT; the MVP's one role, cw_app, holds it
+too, so there the scopes are a code convention (defence in depth). A trigger refuses UPDATE and
+DELETE (migrations 0005 and 0006 of identity, py_common.audit.schema).
 """
 
 [[exemptions]]
