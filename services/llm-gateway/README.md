@@ -68,7 +68,7 @@ curl -s http://localhost:8008/health; curl -s http://localhost:8008/ready; curl 
 | `POST /v1/llm-gateway/completions` | One completion through prompt check, PII masking, budget check, cache, breaker, provider (with fallback), ledger, trace and event. Synchronous. |
 | `POST /v1/llm-gateway/embeddings` | Vectors for 1 to 64 texts through PII masking, budget check, breaker, provider (one model, no fallback), vector check, ledger, trace and event. Synchronous, never cached. See [Embeddings](#embeddings). |
 | `GET /v1/llm-gateway/usage` | Spend for one UTC month. `tenant_id` (query, defaults to the header but not to a signed-in user's tenant) gives the tenant scope; `feature` alone gives the feature scope; neither is a 422. `month=YYYY-MM` defaults to the current month. |
-| `GET /v1/llm-gateway/models` | The routing table: per feature the primary and fallback model, provider filters, sort, reasoning effort, timeout and whether the row is a default or an override. |
+| `GET /v1/llm-gateway/models` | The routing table: per feature the primary and fallback model, provider filters, sort, reasoning effort, timeout and whether the row is a default or an override. Every row carries the residency policy as `residency` (`policy`, `real_models_allowed`); see [Residency](#residency). |
 | `GET /v1/llm-gateway/prompts` | The prompt registry: name, version, owner, eval case count, sha256 and description. |
 | `GET /health`, `GET /ready`, `GET /v1/llm-gateway/ping` | From py-common and the router. `/ready` runs the checks `ledger`, `prompt_registry` and `provider`. |
 
@@ -127,6 +127,7 @@ Every error is `application/problem+json` (RFC 9457) with a stable `type` URI, t
 | `llm-budget-exceeded` | 429 | Tenant or feature monthly budget spent, or the Vercel quota; `Retry-After` counts to the first of next month UTC |
 | `llm-provider-response-invalid` | 502 | The provider answered with something the gateway cannot use (no choices, empty content, bad request rejected upstream, or embeddings of the wrong count or length) |
 | `llm-provider-unavailable` | 503 | Every candidate model failed, the breaker is open, or the gateway has no credits; `Retry-After` when the provider gave one |
+| `llm-residency-unavailable` | 503 | `CW_LLM_RESIDENCY=india_only` and the model is a real one, which runs outside India; refused before any call, with no fallback and no `Retry-After` (see [Residency](#residency)) |
 | `internal-error` | 500 | Anything else; the detail never carries internals |
 
 ## Settings
@@ -137,6 +138,7 @@ empty means unset). Everything below is read at process start.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `CW_LLM_PROVIDER` | `fake` | `fake` serves every route from the deterministic provider; `vercel` uses the Vercel AI Gateway and requires the key |
+| `CW_LLM_RESIDENCY` | `global` | `global` lets the masked text reach models outside India; `india_only` refuses every call to a real model with 503 `llm-residency-unavailable` (flag `llm_gateway.residency`; see [Residency](#residency)) |
 | `CW_LLM_LEDGER` | `memory` | `memory` (per process) or `postgres` (table `llm_gateway.cost_ledger`, after `make migrate SERVICE=llm-gateway`) |
 | `CW_AI_GATEWAY_API_KEY` | unset | Vercel AI Gateway key. Never committed; the process refuses to start with `vercel` and no key |
 | `CW_AI_GATEWAY_BASE_URL` | `https://ai-gateway.vercel.sh/v1` | OpenAI-compatible endpoint |
@@ -180,7 +182,8 @@ providers by time to first token, and the fallback is a Gemini model as a safety
 The `only` lists leave out the native `deepseek` endpoint and the Alibaba-hosted DeepSeek because
 both double their price during Indian working hours. No provider runs inference in India; text
 leaves the country on every real call, which is why masking happens before the call and zero
-data retention is requested.
+data retention is requested. `CW_LLM_RESIDENCY=india_only` refuses those calls instead (see
+[Residency](#residency)).
 
 Retrieval follows ADR-013, which names Voyage for the MVP embeddings, and has no fallback on
 purpose: vectors from two models do not compare, so a `primary,fallback` override for it stops
@@ -290,6 +293,31 @@ The patterns, their order and the tokens are the kernel's (`domain_kernel.pii.ma
 `llm_gateway.domain.scrub` keeps the gateway's names for them (`scrub`, `ScrubResult`,
 `PII_KINDS`). py-common's logging and the audit writer mask with the same patterns.
 
+## Residency
+
+No routed model runs inference in India: every real call sends the masked text abroad, to the
+hosts the route allows, with zero data retention asked for. `CW_LLM_RESIDENCY` (flag
+`llm_gateway.residency`, owner ai-platform) says whether that may happen:
+
+- `global`, the default, and what `make product` and the image run: it may, as described above.
+- `india_only`: no text leaves India. The composition root wires the Vercel provider behind
+  `ResidencyBlockedProvider` (`infrastructure/providers/residency.py`), which refuses every
+  completion and embedding with 503 `llm-residency-unavailable` without calling it. The refusal
+  is booked in the ledger at no cost and traced like any failed call; no fallback model is tried
+  and the breaker does not count it. `fake/...` models, which the gateway serves in process,
+  still answer, and with `CW_LLM_PROVIDER=fake` every route does. Today that means `india_only`
+  stops every real model call: rule extraction, judgement, question answering and retrieval
+  fail until a provider that runs inference in India is wired (unwrapped) behind the gateway.
+
+`GET /v1/llm-gateway/models` reports the policy on every route as
+`residency: {policy, real_models_allowed}`, and the `gateway_wired` line at start logs it.
+`cw-mvp check-config` refuses `CW_LLM_PROVIDER=fake` in staging and production under either
+policy, so `india_only` there answers every real model call with a 503. Which policy production
+runs is the maintainer's decision with counsel:
+[ADR-020](../../docs/adr/ADR-020-model-calls-and-data-residency.md) (Proposed) sets out option A
+(masked calls to models outside India with zero data retention) and option B (providers in India
+only).
+
 ## Prompt registry
 
 `prompts/registry.toml` lists every prompt the gateway accepts, one `[[prompts]]` table each
@@ -342,11 +370,11 @@ src/llm_gateway/
   wiring.py         # GatewayWiring: what main.py builds and the API reads from app.state
   main.py           # composition root: wire(settings) -> create_app(...) from py-common
   domain/           # features, errors, prompts, routing, pricing, budgets, breaker, cache key,
-                    # scrub, ledger entry, tracing record, events, config, embeddings;
+                    # scrub, residency, ledger entry, tracing record, events, config, embeddings;
                     # stdlib + domain-kernel only
   application/      # Complete and Embed (the call pipelines), BudgetGuard and error rows
                     # (metering), Usage (budget reports)
-  infrastructure/   # providers/{fake,vercel}, ledger/{memory,sqlalchemy,models}, cache/memory,
+  infrastructure/   # providers/{fake,vercel,residency}, ledger/{memory,sqlalchemy,models}, cache/memory,
                     # prompts/toml, tracing/{log,langfuse,composite}, events/log
   api/              # schemas, dependencies (tenant header, correlation id), router
 prompts/registry.toml
@@ -398,5 +426,6 @@ dimensions.
 - Kafka outbox for `llm.call.completed`; events are logged only
 - Queueing non-urgent work when a budget is exhausted; callers get a 429 today
 - `Idempotency-Key`, streaming responses, a second real provider adapter
+- A provider that runs inference in India, which `CW_LLM_RESIDENCY=india_only` would let through
 - Eval harness that refuses an unregistered prompt; the gateway does, the harness does not exist
 - Langfuse v3 server and SDK; a cost dashboard over the ledger; Helm values for the settings above

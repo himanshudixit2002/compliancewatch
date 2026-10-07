@@ -21,6 +21,7 @@ from llm_gateway.api.schemas import (
     EmbeddingOut,
     ModelRouteOut,
     PromptOut,
+    ResidencyOut,
     UsageOut,
 )
 from llm_gateway.domain.features import Feature
@@ -105,11 +106,16 @@ def usage(
 
 @router.get(
     "/models",
-    summary="The routing table with overrides applied",
+    summary="The routing table with overrides applied, and the residency policy",
     responses=problem_responses(401, 403),
 )
 def models(caller: Operator, gateway: Gateway) -> list[ModelRouteOut]:
-    return [ModelRouteOut.from_route(route) for route in gateway.routing.routes()]
+    """Every route carries the gateway's residency policy (`CW_LLM_RESIDENCY`): under
+    `india_only` a call to any real model is refused with 503 `llm-residency-unavailable`."""
+    residency = ResidencyOut.from_policy(gateway.residency)
+    return [
+        ModelRouteOut.from_route(route, residency=residency) for route in gateway.routing.routes()
+    ]
 
 
 @router.get("/prompts", summary="Registered prompts", responses=problem_responses(401, 403))

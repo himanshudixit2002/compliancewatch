@@ -20,6 +20,7 @@ from llm_gateway.domain.embeddings import (
 from llm_gateway.domain.features import Feature
 from llm_gateway.domain.ledger import MAX_MODEL_ID
 from llm_gateway.domain.prompts import PROMPT_NAME, PROMPT_VERSION, PromptSpec
+from llm_gateway.domain.residency import ResidencyPolicy
 from llm_gateway.domain.routing import MODEL_ID, Route
 
 PROMPT_REF_PATTERN = f"^{PROMPT_NAME.pattern}@{PROMPT_VERSION.pattern}$"
@@ -222,6 +223,26 @@ class UsageOut(BaseModel):
         )
 
 
+class ResidencyOut(BaseModel):
+    policy: ResidencyPolicy = Field(
+        description=(
+            "CW_LLM_RESIDENCY: global lets the masked text reach models outside India, with zero "
+            "data retention asked for; india_only refuses every call to a real model with 503 "
+            "llm-residency-unavailable, since no routed model runs inference in India"
+        )
+    )
+    real_models_allowed: bool = Field(
+        description=(
+            "False under india_only: only fake/... models, which the gateway serves in process, "
+            "answer"
+        )
+    )
+
+    @classmethod
+    def from_policy(cls, policy: ResidencyPolicy) -> Self:
+        return cls(policy=policy, real_models_allowed=policy.real_models_allowed)
+
+
 class ModelRouteOut(BaseModel):
     feature: Feature
     primary: str
@@ -232,9 +253,12 @@ class ModelRouteOut(BaseModel):
     reasoning_effort: str | None
     timeout_seconds: float
     source: Literal["default", "override"]
+    residency: ResidencyOut = Field(
+        description="The gateway's residency policy, the same on every route (ADR-020)"
+    )
 
     @classmethod
-    def from_route(cls, route: Route) -> Self:
+    def from_route(cls, route: Route, *, residency: ResidencyOut) -> Self:
         return cls(
             feature=route.feature,
             primary=route.primary,
@@ -245,6 +269,7 @@ class ModelRouteOut(BaseModel):
             reasoning_effort=route.reasoning_effort,
             timeout_seconds=route.timeout_seconds,
             source=route.source,
+            residency=residency,
         )
 
 

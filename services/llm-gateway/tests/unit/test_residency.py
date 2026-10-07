@@ -1,5 +1,5 @@
-"""CW_LLM_RESIDENCY: india_only refuses every call to a real model before it is made, and the fake
-provider keeps answering."""
+"""CW_LLM_RESIDENCY: india_only refuses every call to a real model before it is made, the fake
+provider keeps answering, and GET /models reports the policy on every route."""
 
 from collections.abc import Callable
 from decimal import Decimal
@@ -25,6 +25,7 @@ AppFactory = Callable[..., FastAPI]
 
 COMPLETIONS = "/v1/llm-gateway/completions"
 EMBEDDINGS = "/v1/llm-gateway/embeddings"
+MODELS = "/v1/llm-gateway/models"
 PROBLEM = "urn:compliancewatch:problem:llm-residency-unavailable"
 QA = {"feature": "qa", "prompt": "smoke.echo@1", "user": "Example question about GSTR-3B"}
 REAL = {
@@ -170,3 +171,23 @@ def test_india_only_with_the_fake_provider_answers_every_route(make_app: AppFact
     assert completion.json()["provider"] == "fake"
     assert embedding.status_code == 200
     assert embedding.json()["model_served"] == "fake/hash-ngram-512"
+
+
+@pytest.mark.parametrize(
+    ("overrides", "residency"),
+    [
+        ({}, {"policy": "global", "real_models_allowed": True}),
+        ({"llm_residency": "india_only"}, {"policy": "india_only", "real_models_allowed": False}),
+        (
+            {"llm_residency": "india_only", **REAL},
+            {"policy": "india_only", "real_models_allowed": False},
+        ),
+    ],
+)
+def test_models_reports_the_policy_on_every_route(
+    make_app: AppFactory, overrides: dict[str, Any], residency: dict[str, Any]
+) -> None:
+    with TestClient(make_app(**overrides)) as client:
+        routes = client.get(MODELS).json()
+    assert [route["feature"] for route in routes] == [feature.value for feature in Feature]
+    assert all(route["residency"] == residency for route in routes)

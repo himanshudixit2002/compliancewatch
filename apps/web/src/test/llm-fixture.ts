@@ -29,6 +29,7 @@ export function modelRouteDto(overrides: Partial<ModelRouteDto> = {}): ModelRout
     reasoning_effort: "low",
     timeout_seconds: 30,
     source: "default",
+    residency: { policy: "global", real_models_allowed: true },
     ...overrides,
   };
 }

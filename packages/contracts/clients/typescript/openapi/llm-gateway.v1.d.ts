@@ -82,7 +82,11 @@ export type paths = {
       path?: never;
       cookie?: never;
     };
-    /** The routing table with overrides applied */
+    /**
+     * The routing table with overrides applied, and the residency policy
+     * @description Every route carries the gateway's residency policy (`CW_LLM_RESIDENCY`): under
+     *     `india_only` a call to any real model is refused with 503 `llm-residency-unavailable`.
+     */
     get: operations["models_v1_llm_gateway_models_get"];
     put?: never;
     post?: never;
@@ -335,6 +339,8 @@ export type components = {
       primary: string;
       /** Reasoning Effort */
       reasoning_effort: string | null;
+      /** @description The gateway's residency policy, the same on every route (ADR-020) */
+      residency: components["schemas"]["ResidencyOut"];
       /** Sort */
       sort: string | null;
       /**
@@ -401,6 +407,21 @@ export type components = {
       /** Status */
       status: string;
     };
+    /** ResidencyOut */
+    ResidencyOut: {
+      /** @description CW_LLM_RESIDENCY: global lets the masked text reach models outside India, with zero data retention asked for; india_only refuses every call to a real model with 503 llm-residency-unavailable, since no routed model runs inference in India */
+      policy: components["schemas"]["ResidencyPolicy"];
+      /**
+       * Real Models Allowed
+       * @description False under india_only: only fake/... models, which the gateway serves in process, answer
+       */
+      real_models_allowed: boolean;
+    };
+    /**
+     * ResidencyPolicy
+     * @enum {string}
+     */
+    ResidencyPolicy: "global" | "india_only";
     /** UsageOut */
     UsageOut: {
       /** Alarmed */

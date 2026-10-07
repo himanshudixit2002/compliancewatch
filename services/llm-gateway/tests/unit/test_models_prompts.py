@@ -44,6 +44,7 @@ def test_extraction_route_carries_the_gateway_filters(client: TestClient) -> Non
         "reasoning_effort": "none",
         "timeout_seconds": 120.0,
         "source": "default",
+        "residency": {"policy": "global", "real_models_allowed": True},
     }
 
 
@@ -59,6 +60,7 @@ def test_smoke_route_is_the_fake_without_a_fallback(client: TestClient) -> None:
         "reasoning_effort": None,
         "timeout_seconds": 5.0,
         "source": "default",
+        "residency": {"policy": "global", "real_models_allowed": True},
     }
 
 

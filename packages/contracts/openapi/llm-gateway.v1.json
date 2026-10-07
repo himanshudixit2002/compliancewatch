@@ -433,6 +433,10 @@
             ],
             "title": "Reasoning Effort"
           },
+          "residency": {
+            "$ref": "#/components/schemas/ResidencyOut",
+            "description": "The gateway's residency policy, the same on every route (ADR-020)"
+          },
           "sort": {
             "anyOf": [
               {
@@ -466,7 +470,8 @@
           "sort",
           "reasoning_effort",
           "timeout_seconds",
-          "source"
+          "source",
+          "residency"
         ],
         "title": "ModelRouteOut",
         "type": "object"
@@ -611,6 +616,33 @@
         ],
         "title": "ReadyResponse",
         "type": "object"
+      },
+      "ResidencyOut": {
+        "properties": {
+          "policy": {
+            "$ref": "#/components/schemas/ResidencyPolicy",
+            "description": "CW_LLM_RESIDENCY: global lets the masked text reach models outside India, with zero data retention asked for; india_only refuses every call to a real model with 503 llm-residency-unavailable, since no routed model runs inference in India"
+          },
+          "real_models_allowed": {
+            "description": "False under india_only: only fake/... models, which the gateway serves in process, answer",
+            "title": "Real Models Allowed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "policy",
+          "real_models_allowed"
+        ],
+        "title": "ResidencyOut",
+        "type": "object"
+      },
+      "ResidencyPolicy": {
+        "enum": [
+          "global",
+          "india_only"
+        ],
+        "title": "ResidencyPolicy",
+        "type": "string"
       },
       "UsageOut": {
         "properties": {
@@ -1022,6 +1054,7 @@
     },
     "/v1/llm-gateway/models": {
       "get": {
+        "description": "Every route carries the gateway's residency policy (`CW_LLM_RESIDENCY`): under\n`india_only` a call to any real model is refused with 503 `llm-residency-unavailable`.",
         "operationId": "models_v1_llm_gateway_models_get",
         "responses": {
           "200": {
@@ -1064,7 +1097,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "The routing table with overrides applied",
+        "summary": "The routing table with overrides applied, and the residency policy",
         "tags": [
           "llm-gateway"
         ]

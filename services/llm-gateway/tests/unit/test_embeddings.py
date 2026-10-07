@@ -226,6 +226,7 @@ def test_models_lists_the_retrieval_route_without_a_fallback(client: TestClient)
         "reasoning_effort": None,
         "timeout_seconds": 15.0,
         "source": "default",
+        "residency": {"policy": "global", "real_models_allowed": True},
     }
 
 
