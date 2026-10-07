@@ -4,7 +4,14 @@
 import { api, ApiError } from "./api.js";
 import { add, cx, formatAgo, formatDuration, h, put, stepLabel, uid } from "./dom.js";
 import { icon } from "./icons.js";
-import { buttonLabel, checkoutWarnings, explainFailure, runProgress, SAFETY } from "./model.js";
+import {
+  buttonLabel,
+  checkoutWarnings,
+  cleanupWords,
+  explainFailure,
+  runProgress,
+  SAFETY,
+} from "./model.js";
 import * as store from "./store.js";
 import {
   announce,
@@ -524,13 +531,17 @@ export function cancelRun(run) {
 }
 
 async function askCancel(run) {
+  const cleanup = cleanupWords(run);
+  const many = (run.cleanup ?? []).length > 1;
   const choice = await openDialog({
     title: `Cancel "${run.title}"?`,
     tone: "warning",
     iconName: "stop",
     build: () => [
       h("p", {
-        text: "The step running now is stopped, with everything it started, and the steps after it do not run. What already finished stays as it is.",
+        text: cleanup
+          ? `The step running now is stopped, with everything it started, and the steps after it do not run, except ${cleanup}, which always ${many ? "run" : "runs"} last so that nothing is left running. What already finished stays as it is.`
+          : "The step running now is stopped, with everything it started, and the steps after it do not run. What already finished stays as it is.",
       }),
     ],
     actions: [
@@ -622,10 +633,13 @@ export function notifyRunFinished(run) {
     return;
   }
   if (run.state === "cancelled") {
+    const cleanup = cleanupWords(run);
     toast({
       level: "info",
       title: `${run.title}: cancelled`,
-      body: "The running step was stopped.",
+      body: cleanup
+        ? `The running step was stopped, then ${cleanup} ran, so nothing is left running.`
+        : "The running step was stopped.",
     });
     return;
   }

@@ -417,6 +417,12 @@ export const RECIPES = [
         go: "#/checks",
       },
       {
+        text: "If you changed the web app or a service it uses, click through the web app.",
+        detail:
+          "A robot browser clicks through every page on a separate, temporary copy of the services with throwaway data, which stops when the check ends. Your own data and running app are never touched. About 10 to 15 minutes.",
+        do: { action: "gate:web-e2e" },
+      },
+      {
         text: "For a bigger change, run every CI check in order.",
         detail:
           "It needs Docker, takes much longer and carries on past a failure, then lists each result.",
@@ -576,6 +582,10 @@ export const GLOSSARY = [
     "Tenant",
     "One customer account: a business or a CA firm. A tenant never sees another tenant's data.",
   ],
+  [
+    "Test copy",
+    "A separate, temporary copy of the ten services with throwaway data, for the web app's browser tests. Click through the web app starts it and stops it when the check ends.",
+  ],
   ["Topic", "A named stream of events in the queue, such as obligation.created."],
   [
     "UI-only stack",
@@ -618,6 +628,23 @@ export const TROUBLE = [
     why: "Another program, perhaps a second copy of the project, listens on a port this needs.",
     fix: "Processes lists every port with the program on it. Stop it there if it belongs to this checkout; otherwise quit that program, or change the port in .env.",
     go: "#/processes",
+  },
+  {
+    title: "Click through the web app says a port is in use",
+    why: "Its test copy needs ports 9401 to 9410 and 3410, and another program listens on one of them.",
+    fix: "Processes shows which program. What an earlier check left (for example after the app was quit during the check) is stopped by the next check on its own; stop anything else there, or wait for it, then check again.",
+    go: "#/processes",
+  },
+  {
+    title: "Click through the web app says there is no browser",
+    why: "Its robot browser is Playwright's own Chromium, which is not downloaded on this Mac, and Google Chrome is not installed either.",
+    fix: "Download the test browser (about 150 MB; it asks first), or install Google Chrome, then check again.",
+    action: "make:web-e2e-install",
+  },
+  {
+    title: "Click through the web app says browser tests are running",
+    why: "Another session (another control window, or Claude's build agent) runs the web check or the web app's browser tests in this checkout, and the runs share their results folder.",
+    fix: "Wait for them to finish, then check again.",
   },
   {
     title: "The web app does not open",
@@ -720,6 +747,10 @@ export const NEVER = [
   {
     title: "Delete data without asking",
     text: "Reset and Restore ask first, say what they delete and offer a backup.",
+  },
+  {
+    title: "Test against your own data",
+    text: "The web app's browser tests run on a separate test copy with throwaway data, never on your own services, web app or database. Click through the web app starts the copy and stops it; make web-e2e on its own is never run from here.",
   },
   {
     title: "Run two changes at once",

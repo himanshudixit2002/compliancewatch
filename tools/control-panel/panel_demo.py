@@ -824,7 +824,86 @@ def step_lines(label: str) -> Out:
         ]
     if label.startswith("make dev-backup") or label == "back up the database first":
         return [("pg_dump compliancewatch into var/backups", None), ("47.9 MB written", "ok")]
+    if label in WEB_CHECK_LINES:
+        return WEB_CHECK_LINES[label]()
     return [(f"{label}: working…", None), (f"{label}: done", "ok")]
+
+
+CHECK_PIDS: Final = {name: 47201 + index for index, name in enumerate(core.SERVICES)}
+_CHECK_PORTS: Final = core.web_check_ports()
+_CHECK_SPAN: Final = f"{_CHECK_PORTS[0]} to {_CHECK_PORTS[-2]} and {_CHECK_PORTS[-1]}"
+
+
+def _check_ready() -> Out:
+    return [
+        (
+            "Playwright's own Chromium is not downloaded here, so the browser tests use your "
+            "installed Google Chrome",
+            None,
+        ),
+        ("no test copy is running", None),
+        (f"ports {_CHECK_SPAN} are free", "ok"),
+    ]
+
+
+def _check_start() -> Out:
+    lines: list[tuple[str, str | None]] = [
+        (
+            f"web stack: services on {_CHECK_PORTS[0]}-{_CHECK_PORTS[-2]}, memory stores, billing "
+            "provider none, rulebook publishing on",
+            None,
+        )
+    ]
+    lines += [
+        (f"  {name}  {core.web_check_url(name)}  (log {core.WEB_CHECK_DIR}/{name}.log)", None)
+        for name in core.SERVICES
+    ]
+    lines.append(("Next: make web-stack-wait, then make web-seed", None))
+    return lines
+
+
+def _check_wait() -> Out:
+    return [(f"  {name} healthy on {core.web_check_url(name)}", "ok") for name in core.SERVICES]
+
+
+def _check_seed() -> Out:
+    return [
+        ("seeding tenant 5b9e0c3a-6f1d-4e2a-9c47-2d8f0a1b7e63 (owner synthetic)", None),
+        ("identity      4 consents recorded", None),
+        ("profile       Acme Traders Private Limited, GSTIN 29ABCDE1234F1Z5 pre-filled", None),
+        ("notification  WhatsApp preference set; opt-in confirmation recorded", None),
+        ("rulebook      CBIC notification 01/2026 recorded with its clauses", None),
+        (f"state         ../../{core.WEB_CHECK_SEED}", "ok"),
+    ]
+
+
+def _check_click() -> Out:
+    return [
+        (f"web app built into apps/web/{core.WEB_CHECK_DIST_DIR}", None),
+        ("   ▲ Next.js 16.3.8 (Turbopack)", None),
+        (" ✓ Compiled successfully in 51s", "ok"),
+        ("Running 212 tests using 5 workers", None),
+        ("  ✓  [chromium] e2e/home.spec.ts: the home page names the product (1.4s)", None),
+        ("  ✓  [chromium] e2e/sign-in.spec.ts: an owner signs in (2.2s)", None),
+        ("  ✓  [chromium] e2e/a11y.spec.ts: every registered page passes axe (38.1s)", None),
+        ("  ✓  [chromium] e2e/admin-sources.spec.ts: an upload lands on its source (3.9s)", None),
+        ("  212 passed (4.8m)", "ok"),
+    ]
+
+
+def _check_stop() -> Out:
+    return [(f"  {name} stopped (pid {CHECK_PIDS[name]})", None) for name in core.SERVICES]
+
+
+WEB_CHECK_LINES: Final[Mapping[str, Callable[[], Out]]] = {
+    "check that the test copy can start": _check_ready,
+    "start a separate test copy of the services": _check_start,
+    "wait until the test copy answers": _check_wait,
+    "add made-up demo data to the test copy": _check_seed,
+    "build the web app and click through it in a robot browser": _check_click,
+    "stop the test copy": _check_stop,
+}
+"""What Click through the web app prints in the demo, by step."""
 
 
 def scripted_failure(label: str, world: World) -> bool:
@@ -840,7 +919,9 @@ def scripted_failure(label: str, world: World) -> bool:
 
 class DemoRunner:
     """Plays a plan's steps with made-up output; cancel stops it at the next line. A failure
-    armed through ``POST /api/demo/state`` replaces one step's output and outcome."""
+    armed through ``POST /api/demo/state`` replaces one step's output and outcome. A clean-up step
+    (``always``) plays after a failure or a cancel too, as the real runner runs it; a cancel only
+    hurries it along."""
 
     def __init__(
         self,
@@ -860,6 +941,7 @@ class DemoRunner:
         self._plan: core.Plan | None = None
         self._thread: threading.Thread | None = None
         self._action = ""
+        self._cleaning = False
 
     @property
     def busy(self) -> bool:
@@ -900,7 +982,10 @@ class DemoRunner:
     def cancel(self) -> bool:
         with self._lock:
             running = self._plan is not None
+            cleaning = self._cleaning
         self.cancel_event.set()
+        if running and cleaning:
+            self._line("Cancel: the clean-up step finishes first, so nothing is left running", None)
         return running
 
     def _line(self, text: str, tag: str | None) -> None:
@@ -925,16 +1010,21 @@ class DemoRunner:
     def _work(self, plan: core.Plan, action: str) -> None:
         results: list[core.StepResult] = []
         failed = False
+        cancelled = False  # a cancel stopped a step or kept one from running
+        unclean = False  # a clean-up step failed
         with self.world.lock:
             pace = self.pace / self.world.speed
         self.emit(core.Begin(self.name, plan))
         try:
             for index, step in enumerate(plan.steps):
-                if self.cancel_event.is_set() or failed:
+                if (self.cancel_event.is_set() or failed) and not step.always:
                     state: core.StepState = "cancelled" if self.cancel_event.is_set() else "skipped"
+                    cancelled = cancelled or state == "cancelled"
                     results.append(core.StepResult(step.label, state, 0.0))
                     self.emit(core.StepUpdate(self.name, plan, index, step.label, state, 0.0))
                     continue
+                with self._lock:
+                    self._cleaning = step.always
                 self._line(f"\n▸ {step.label}", "step")
                 self.emit(core.StepUpdate(self.name, plan, index, step.label, "running", 0.0))
                 started = time.monotonic()
@@ -945,12 +1035,16 @@ class DemoRunner:
                     else self._step_output(step.label)
                 )
                 for text, tag in output:
-                    if self.cancel_event.wait(pace):
+                    # a cancel stops a step at its next line; a clean-up step still plays out
+                    if self.cancel_event.wait(pace) and not step.always:
                         break
                     self._line(text, tag)
+                with self._lock:
+                    self._cleaning = False
                 seconds = time.monotonic() - started
-                if self.cancel_event.is_set():
+                if self.cancel_event.is_set() and not step.always:
                     state = "cancelled"
+                    cancelled = True
                 elif armed is not None and armed.state == "timeout":
                     state = "timeout"
                     failed = True
@@ -968,9 +1062,10 @@ class DemoRunner:
                     self._line(f"✗ {step.label} failed after {core.format_seconds(seconds)}", "err")
                 else:
                     state = "ok"
+                unclean = unclean or (step.always and state in ("failed", "timeout"))
                 results.append(core.StepResult(step.label, state, seconds))
                 self.emit(core.StepUpdate(self.name, plan, index, step.label, state, seconds))
-            cancelled = self.cancel_event.is_set()
+            cancelled = cancelled and not unclean
             if cancelled:
                 self._line(f"■ {plan.title} cancelled", "err")
             elif failed:
@@ -981,14 +1076,9 @@ class DemoRunner:
         finally:
             with self._lock:
                 self._plan = None
+                self._cleaning = False
             self.emit(
-                core.End(
-                    self.name,
-                    plan,
-                    not failed and not self.cancel_event.is_set(),
-                    self.cancel_event.is_set(),
-                    tuple(results),
-                )
+                core.End(self.name, plan, not failed and not cancelled, cancelled, tuple(results))
             )
 
     def _apply(self, title: str) -> None:

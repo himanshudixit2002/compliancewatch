@@ -111,6 +111,7 @@ def pipeline_worker(env: tuple[tuple[str, str], ...] = ()) -> core.Cmd:
         (core.make("product-check", env=(("ARGS", "--destructive"),)), "passes --destructive"),
         (core.make("product-check", env=(("ARGS", "--json"),)), "carries ARGS"),
         (core.make("dev", env=(("MAKEFLAGS", "-- ARGS=x"),)), "carries MAKEFLAGS"),
+        (core.make("web-e2e", env=(("E2E_ALLOW_POSTGRES", "1"),)), "carries E2E_ALLOW_POSTGRES"),
         (core.Cmd("nothing", ()), "no program"),
         (core.Call("stop", lambda ctx: True, (("bash", "-c", "kill 1"),)), "runs bash"),
         (core.Call("down", lambda ctx: True, (("make", "dev-reset"),)), "without a confirm"),
@@ -292,6 +293,135 @@ def test_the_ci_gates_run_in_ci_s_order_and_keep_going(plans: core.Plans) -> Non
         "TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE": "/var/run/docker.sock"
     }
     assert steps["eval"] == ("make", "eval", "EVAL_PROFILE=ci")
+
+
+CHECK_VARIABLES = ("STORE=memory", "WEB_STACK_DIR=var/web-stack-check", "SERVICE_PORT_BASE=9400")
+CHECK_URLS = {
+    "CW_WEB_IDENTITY_URL": "http://localhost:9401",
+    "CW_WEB_PROFILE_URL": "http://localhost:9402",
+    "CW_WEB_RULEBOOK_URL": "http://localhost:9403",
+    "CW_WEB_APPLICABILITY_ENGINE_URL": "http://localhost:9404",
+    "CW_WEB_OBLIGATION_URL": "http://localhost:9405",
+    "CW_WEB_NOTIFICATION_URL": "http://localhost:9406",
+    "CW_WEB_QA_URL": "http://localhost:9407",
+    "CW_WEB_LLM_GATEWAY_URL": "http://localhost:9408",
+    "CW_WEB_EVAL_URL": "http://localhost:9409",
+    "CW_WEB_PIPELINE_URL": "http://localhost:9410",
+}
+
+
+def test_the_web_check_runs_on_a_test_copy_of_its_own(plans: core.Plans) -> None:
+    plan = plans.web_check()
+    assert plan.gates
+    assert plan.confirm is None  # safe: it touches nothing of the person's
+    assert not plan.keep_going
+    assert [step.label for step in plan.steps] == [
+        "check that the test copy can start",
+        "start a separate test copy of the services",
+        "wait until the test copy answers",
+        "add made-up demo data to the test copy",
+        "build the web app and click through it in a robot browser",
+        "stop the test copy",
+    ]
+    down = ("make", "web-stack-down", *CHECK_VARIABLES)
+    commands = [core.step_commands(step) for step in plan.steps]
+    assert commands == [
+        (*core.scan_commands(), down),
+        (("make", "web-stack", *CHECK_VARIABLES),),
+        (("make", "web-stack-wait", *CHECK_VARIABLES, "WEB_STACK_WAIT_SECONDS=180"),),
+        (("make", "web-seed", *CHECK_VARIABLES),),
+        (("make", "web-e2e", *CHECK_VARIABLES, "WEB_PORT=3410"),),
+        (*core.scan_commands(), down),
+    ]
+    ready, start, wait, seed, click, stop = plan.steps
+    # the clean-up stops the test copy after a failure or a cancel too; the browser tests stop
+    # with SIGINT first, so Playwright stops the web app it started
+    assert [step.always for step in plan.steps] == [False] * 5 + [True]
+    assert [step.interrupt for step in plan.steps] == [False] * 4 + [True, False]
+    assert isinstance(ready, core.Call)
+    assert isinstance(click, core.Call)
+    assert isinstance(stop, core.Call)
+    assert all(step.timeout for step in plan.steps)
+    assert wait.timeout is not None
+    assert wait.timeout >= 180
+    services = dict(start.env)
+    assert services["CW_DATABASE_URL"] == "postgresql+psycopg://cw:cw@127.0.0.1:1/compliancewatch"
+    assert services["CW_TEMPORAL_ADDRESS"] == "127.0.0.1:1"
+    assert services["CW_KAFKA_BOOTSTRAP"] == "127.0.0.1:1"
+    assert services["CW_PIPELINE_RAW_STORE"] == "memory"
+    assert services["CW_LLM_PROVIDER"] == "fake"
+    assert services["CW_IDENTITY_URL"] == "http://localhost:9401"
+    assert services["CW_EVAL_GATEWAY_URL"] == "http://localhost:9408"
+    assert services["CW_WEB_BASE_URL"] == "http://localhost:3410"
+    # the services read .env themselves and skip an empty value: every override is set
+    assert all(value for value in services.values())
+    for step in (seed, click):
+        web = dict(step.env)
+        assert {key: web[key] for key in CHECK_URLS} == CHECK_URLS
+        assert web["CW_WEB_SEED_STATE_PATH"] == "../../var/web-stack-check/seed.json"
+        assert web["WEB_DIST_DIR"] == ".next/web-check"
+    assert core.plan_problems(plan) == []
+
+
+def test_the_test_copy_s_ports_clash_with_nothing_known() -> None:
+    ports = core.web_check_ports()
+    assert ports == (*range(9401, 9411), 3410)
+    known = {
+        *range(8000, 8011),  # the person's services, the product's public listener
+        8080,
+        8081,  # the product
+        3000,  # next dev
+        3400,
+        3401,  # the product's web app, make product-e2e
+        *range(9201, 9211),
+        3200,  # a second clone (docs/onboarding/local-dev.md)
+        3217,  # a build agent's second clone
+        *core.PORT_DEFAULTS.values(),
+    }
+    assert not set(ports) & known
+    # never the folders of the services and the seed of Start everything
+    assert Path(core.WEB_CHECK_DIR) != Path("var/web-stack")
+    assert Path(core.WEB_CHECK_SEED) != Path("var/seed/last.json")
+    assert core.WEB_CHECK_SEED.startswith(core.WEB_CHECK_DIR + "/")
+
+
+def test_no_plan_runs_the_browser_tests_without_a_test_copy_of_their_own(
+    plans: core.Plans,
+) -> None:
+    seen = 0
+    for plan in plans.all_plans():
+        for step in plan.steps:
+            for argv in core.step_commands(step):
+                if argv[:1] != ("make",):
+                    continue
+                if "web-e2e" in argv[1:]:
+                    seen += 1
+                    assert set(CHECK_VARIABLES) | {"WEB_PORT=3410"} <= set(argv), plan.title
+                    env = dict(step.env)
+                    assert env.get("WEB_DIST_DIR") == ".next/web-check", plan.title
+                    assert {key: env.get(key) for key in CHECK_URLS} == CHECK_URLS, plan.title
+                if "WEB_STACK_DIR=var/web-stack-check" in argv:
+                    assert set(CHECK_VARIABLES) <= set(argv), (plan.title, argv)
+    assert seen  # gate(web-e2e) is among all_plans
+
+
+def test_the_web_e2e_gate_is_the_web_check(plans: core.Plans) -> None:
+    gate = next(gate for gate in core.GATES if gate.target == "web-e2e")
+    assert [step.label for step in plans.gate(gate).steps] == [
+        step.label for step in plans.web_check().steps
+    ]
+
+
+def test_no_ci_gate_reaches_the_services_of_the_person_s_stack(plans: core.Plans) -> None:
+    reaching = {"web-e2e", "web-stack", "web-seed", "product-e2e", "product-check", "product-seed"}
+    for checks in (CHECKS, [*CHECKS, "web-e2e"]):
+        sequence = [gate.target for gate in core.ci_sequence(checks)]
+        assert not set(sequence) & reaching
+        assert "web-e2e" not in sequence
+    targets = [cmd[1] for step in plans.gates_in_order().steps for cmd in core.step_commands(step)]
+    assert not set(targets) & reaching
+    eval_step = next(step for step in plans.gates_in_order().steps if step.label == "eval (ci)")
+    assert core.step_commands(eval_step) == (("make", "eval", "EVAL_PROFILE=ci"),)
 
 
 def test_the_ci_gates_leave_out_a_target_the_makefile_no_longer_has(tmp_path: Path) -> None:

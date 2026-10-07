@@ -100,6 +100,15 @@ but `e2e/product`, against the memory stack (`make web-e2e` and the `web-e2e` jo
 (below), which depends on nothing. The config turns `web.publish_actions`, `web.admin_rulebook_writes` and `web.qa_enabled` on for the
 run. Outside CI it reuses a
 server already listening on that port. On CI it retries once and writes the HTML report.
+
+The `chromium` and `product` projects drive Playwright's own Chromium, which `make
+web-e2e-install` downloads once per machine and CI installs. `CW_E2E_BROWSER_CHANNEL` names an
+installed browser to drive instead, by its Playwright channel: `chrome` for Google Chrome,
+`msedge` for Microsoft Edge. Unset or empty, nothing changes, so CI keeps the downloaded
+Chromium. ComplianceWatch Control sets `chrome` for its web check when Playwright's Chromium for
+the checkout's Playwright version is not downloaded and Google Chrome is installed
+(`docs/onboarding/control-panel.md`).
+
 `e2e/fixtures.ts` extends `test` with `checkA11y(selector?)`, which runs `AxeBuilder` on the page
 (or one selector) and fails on any finding of impact `serious` or `critical` (moderate and minor
 findings are the unit level's business), and with `signIn(persona)`: the personas (`OWNER`,
@@ -245,6 +254,7 @@ make web-stack && make web-stack-wait           # every service on SERVICE_PORT_
 make web-seed                                   # the demo tenant and the recorded notification
 make web-stack-logs SERVICE=rulebook            # one service's log (every log without SERVICE)
 make web-e2e                                    # build, then Playwright on WEB_PORT from .env
+CW_E2E_BROWSER_CHANNEL=chrome make web-e2e      # the same in the installed Google Chrome
 make web-stack-down                             # stop the services (memory stores forget their rows)
 pnpm --filter web exec playwright test e2e/home.spec.ts        # one spec (needs a built app)
 pnpm --filter web exec playwright test -g "skip link"          # tests whose title matches
@@ -265,8 +275,10 @@ GSTIN lookup, the billing provider `none` (`BILLING=memory` starts subscriptions
 a manual demo; give `make web-e2e` the same `BILLING` and the billing spec expects that state),
 the KAG layer off, and the rulebook publishing with the write and review tokens from `.env` or
 the placeholders `local-write-token` and `local-review-token`, starting with the seed calendar's
-draft rule versions (memory store, `CW_RULEBOOK_SEED_ON_START`), so a fresh clone and CI see the
-same states (`docs/onboarding/local-dev.md`, "Running a second clone", has the ports). The
+draft rule versions (memory store, `CW_RULEBOOK_SEED_ON_START`), and every address one service
+has of another on the stack's own ports, so a fresh clone and CI see the same states and a stack
+on another `SERVICE_PORT_BASE` never calls one on 8001 to 8010
+(`docs/onboarding/local-dev.md`, "Running a second clone", has the ports). The
 Playwright config gives `next start` the same two tokens and turns `web.publish_actions` on.
 No page on `main` calls a service yet, so the suite passes without the stack apart from the
 seeded-tenant test, which is skipped; with `make web-stack && make web-stack-wait && make

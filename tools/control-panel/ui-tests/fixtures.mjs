@@ -178,7 +178,14 @@ const STEPS = {
   "gate:sast": ["sast"],
   "gate:deps-scan": ["deps-scan"],
   "gate:web-screens-check": ["web-screens-check"],
-  "gate:web-e2e": ["web-e2e"],
+  "gate:web-e2e": [
+    "check that the test copy can start",
+    "start a separate test copy of the services",
+    "wait until the test copy answers",
+    "add made-up demo data to the test copy",
+    "build the web app and click through it in a robot browser",
+    "stop the test copy",
+  ],
   "gate:ci-lint": ["ci-lint"],
   "crawl-report": ["make crawl-report"],
   "flags-check": ["make flags-check"],
@@ -252,7 +259,8 @@ const COMMANDS = {
   "gate:sast": "make sast",
   "gate:deps-scan": "make deps-scan",
   "gate:web-screens-check": "make web-screens-check",
-  "gate:web-e2e": "make web-e2e",
+  "gate:web-e2e":
+    "make web-stack-down STORE=memory WEB_STACK_DIR=var/web-stack-check SERVICE_PORT_BASE=9400\nmake web-stack STORE=memory WEB_STACK_DIR=var/web-stack-check SERVICE_PORT_BASE=9400\nmake web-stack-wait STORE=memory WEB_STACK_DIR=var/web-stack-check SERVICE_PORT_BASE=9400 WEB_STACK_WAIT_SECONDS=180\nmake web-seed STORE=memory WEB_STACK_DIR=var/web-stack-check SERVICE_PORT_BASE=9400\nmake web-e2e STORE=memory WEB_STACK_DIR=var/web-stack-check SERVICE_PORT_BASE=9400 WEB_PORT=3410\nmake web-stack-down STORE=memory WEB_STACK_DIR=var/web-stack-check SERVICE_PORT_BASE=9400",
   "gate:ci-lint": "make ci-lint",
   "crawl-report": "make crawl-report",
   "flags-check": "make flags-check",
@@ -287,7 +295,7 @@ function curated(spec) {
   };
 }
 
-function gate(target, [title, summary, duration]) {
+function gate(target, [title, summary, duration, what]) {
   const rewrites = target === "contracts-check";
   return {
     id: `gate:${target}`,
@@ -298,7 +306,7 @@ function gate(target, [title, summary, duration]) {
     safety: rewrites ? "changes-data" : "safe",
     button: "Check",
     confirm: rewrites ? "The generated clients are rewritten in the checkout." : "",
-    what_happens: [
+    what_happens: what ?? [
       `Runs make ${target === "eval" ? "eval EVAL_PROFILE=ci" : target} and shows whether it passed.`,
       rewrites
         ? "It rewrites the generated clients before it compares them; they show as changed files when they were out of date."

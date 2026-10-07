@@ -47,6 +47,7 @@ RUN_KEYS = {
     "seconds",
     "current_step",
     "steps",
+    "cleanup",
     "error",
 }
 
@@ -144,9 +145,11 @@ def test_a_safe_action_runs_at_once_and_streams_its_steps(served: Served) -> Non
         "title",
         "kind",
         "steps",
+        "cleanup",
         "started_at",
         "params",
     }
+    assert started.data["cleanup"] == []
     output = stream.until("run.output")
     assert output.data["lines"][0]["text"].startswith("▸ ")
     finished = stream.until("run.finished")
@@ -492,7 +495,48 @@ def test_the_summary_is_plain_english() -> None:
         ),
         ("the gateway refused the request: 429", "failed"),
         ("error: changed since the question: 2 processes were left alone", "changed"),
+        ("error: port 9403 is in use: pid 5555, http.server 9403", "port-in-use"),
+        ("error: port 3410 is in use: something started there", "port-in-use"),
+        (
+            "error: browser tests are already running in this checkout: pid 403, playwright test",
+            "busy",
+        ),
+        ("error: the web check is already running in this checkout: pid 700, make", "busy"),
+        (
+            "error: there is no browser for the tests: Playwright's own Chromium is not",
+            "no-browser",
+        ),
+        (
+            "error: the web app's Playwright is not installed (apps/web/node_modules)",
+            "missing-tool",
+        ),
     ],
 )
 def test_a_failure_is_named_by_what_went_wrong(line: str, code: str) -> None:
     assert server.classify_failure(["▸ a step", line], timed_out=False)["code"] == code
+
+
+def test_without_a_browser_the_web_check_offers_the_download_which_asks_first() -> None:
+    line = "error: there is no browser for the tests: Playwright's own Chromium is not here"
+    error = server.classify_failure(["▸ check that the test copy can start", line], False)
+    assert error["action"] == "make:web-e2e-install"
+    assert error["message"] == "There is no browser for the browser tests"
+    assert "about 150 MB; it asks first" in error["fix"]
+    missing = "error: the web app's Playwright is not installed (apps/web/node_modules): install"
+    assert server.classify_failure([missing], False)["action"] == "make:ts-install"
+
+
+def test_the_web_check_s_clean_up_lines_do_not_hide_why_it_stopped() -> None:
+    lines = [
+        "▸ check that the test copy can start",
+        "no test copy is running",
+        "error: port 9403 is in use: pid 5555, http.server 9403",
+        "error: the test copy needs ports 9401 to 9410 and 3410 free, and never uses yours; stop "
+        "what holds them, then try again",
+        "✗ check that the test copy can start failed after 0 s — stopped here",
+        "▸ stop the test copy",
+        "no test copy is running",
+        "✗ click through the web app failed",
+    ]
+    error = server.classify_failure(lines, timed_out=False)
+    assert (error["code"], error["message"]) == ("port-in-use", "A port it needs is already in use")
