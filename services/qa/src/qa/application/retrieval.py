@@ -3,7 +3,9 @@ fused by reciprocal rank, then the answerer.
 
 The question is embedded through the gateway and searched with the model that served the
 vector, ``k=8``, in the fused order: there is no reranker. When embedding fails or its budget is
-used up, the search runs on full text alone and the span says so. A hit the rulebook marks
+used up, the search runs on full text alone and the span says so; a refusal under the residency
+policy (``ModelResidencyRefusedError``) ends the question instead, since the answer's call would
+be refused too. A hit the rulebook marks
 ``out_of_force`` (the rule versions citing its clause were published, and none is in force on
 the question's date) is dropped and counted on the span; a clause no version cites stays,
 filtered by its document's date only. No hit means ``not_covered`` (``no_evidence``).

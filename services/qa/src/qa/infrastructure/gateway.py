@@ -14,6 +14,11 @@ Once ``CW_SERVICE_CLIENT_SECRET`` is set every call carries the qa service's own
 the tenant header also needs tenant:act. A token the identity service could not issue fails the
 call the same way: ``GatewayError`` for a completion, ``DependencyUnavailableError`` for an
 embedding.
+
+A call the gateway refuses under its residency policy (a 503 of problem type
+``llm-residency-unavailable``) is ``ModelResidencyRefusedError``, completion or embedding: no
+other layer can answer without a model and the same call gets the same answer, so the question
+ends at once and nothing asks the gateway again.
 """
 
 from collections.abc import Mapping
@@ -27,7 +32,13 @@ from domain_kernel.vectors import EMBEDDING_DIMS
 from py_common.auth import ServiceTokenUnavailableError
 from qa.domain.errors import DependencyUnavailableError, GatewayError
 from qa.domain.records import QueryEmbedding
-from qa.infrastructure.http import JsonHttp, budget_exceeded, http_client, reading
+from qa.infrastructure.http import (
+    JsonHttp,
+    budget_exceeded,
+    http_client,
+    reading,
+    residency_refused,
+)
 
 COMPLETIONS_PATH: Final = "/v1/llm-gateway/completions"
 EMBEDDINGS_PATH: Final = "/v1/llm-gateway/embeddings"
@@ -74,6 +85,9 @@ class GatewayProvider:
             raise GatewayError(f"no service token: {exc}") from exc
         if response.status_code == 429:
             raise budget_exceeded(SERVICE, response)
+        refused = residency_refused(SERVICE, response)
+        if refused is not None:
+            raise refused
         if response.status_code != 200:
             raise GatewayError(f"{response.status_code}: {response.text[:500]}")
         try:

@@ -1,7 +1,7 @@
 """The rule extraction's activities: the model asked once more when its answer is not a
 candidate, the answer written once with its rule.candidate.created, an extraction stored before
-never asked about again, a used-up budget handed to the workflow, and the gateway's budget
-problem read as such.
+never asked about again, a used-up budget handed to the workflow, the gateway's budget problem
+read as such, and its residency refusal never retried by an activity that calls it.
 
 The document is a synthetic notification registered in a memory rulebook; the model is a list of
 answers given in turn."""
@@ -20,6 +20,7 @@ from domain_kernel.documents import Clause, DocumentType, ParsedDocument, clause
 from domain_kernel.ids import DocumentId
 from domain_kernel.llm import CompletionRequest
 from ontology import load as load_ontology
+from pipeline.application.activities import RESIDENCY_ERROR
 from pipeline.application.extraction import (
     BUDGET_ERROR,
     RETRY_TEMPERATURE,
@@ -31,7 +32,8 @@ from pipeline.application.extraction import (
     StoreExtraction,
 )
 from pipeline.application.extractor import LlmRuleExtractor
-from pipeline.domain.errors import ModelBudgetExhaustedError
+from pipeline.application.knowledge_activities import EmbedClauses, ProposeRelations
+from pipeline.domain.errors import ModelBudgetExhaustedError, ModelResidencyRefusedError
 from pipeline.domain.events import RuleCandidateCreated
 from pipeline.domain.extraction import candidate_id_for
 from pipeline.domain.knowledge import DocumentRecord
@@ -39,7 +41,13 @@ from pipeline.domain.prompt import PromptText
 from pipeline.domain.raw_documents import DocumentStatus, RawDocumentRecord
 from pipeline.domain.sources import Source
 from pipeline.infrastructure.adapters import SOURCES, source_id_for
-from pipeline.infrastructure.gateway import BUDGET_PROBLEM, GatewayError, GatewayProvider
+from pipeline.infrastructure.gateway import (
+    BUDGET_PROBLEM,
+    RESIDENCY_PROBLEM,
+    GatewayEmbedder,
+    GatewayError,
+    GatewayProvider,
+)
 from pipeline.infrastructure.memory import MemoryStore
 from pipeline.testing import AnswersInTurn, MemoryRulebook
 
@@ -215,6 +223,18 @@ async def test_a_used_up_budget_fails_the_attempt_for_the_workflow_to_wait() -> 
     assert world.store.extractions == {}
 
 
+async def test_a_residency_refusal_fails_the_attempt_and_nothing_retries_it() -> None:
+    """Each retry would book another refusal in the gateway's ledger for the same answer."""
+    world = World(ModelResidencyRefusedError("refused under the residency policy"))
+    with pytest.raises(ModelResidencyRefusedError) as raised:
+        await world.extract.run(world.request())
+    assert type(raised.value).__name__ == RESIDENCY_ERROR
+    assert len(world.model.requests) == 1, "the stage does not ask again"
+    assert world.store.extractions == {}
+    for activity in (ExtractRules, ProposeRelations, EmbedClauses):
+        assert RESIDENCY_ERROR in (activity.retry_policy.non_retryable_error_types or [])
+
+
 async def test_with_the_extraction_off_nothing_is_asked_or_written() -> None:
     world = World(enabled=False)
     answer = await world.extract.run(world.request())
@@ -261,14 +281,32 @@ def test_the_gateways_budget_problem_is_a_budget_error_with_its_retry_after() ->
     assert without.value.retry_after_seconds is None
 
 
+def test_the_gateways_residency_problem_is_a_refusal_no_one_retries() -> None:
+    problem = {
+        "type": RESIDENCY_PROBLEM,
+        "title": "LLM unavailable under the residency policy",
+        "status": 503,
+        "detail": "CW_LLM_RESIDENCY=india_only keeps text in India, and 'x/y' on 'vercel' runs",
+    }
+    refused = httpx2.Response(503, json=problem)
+    with pytest.raises(ModelResidencyRefusedError, match="keeps text in India"):
+        gateway(refused).complete(completion())
+    transport = httpx2.MockTransport(lambda _: refused)
+    embedder = GatewayEmbedder(client=httpx2.Client(transport=transport, base_url="http://gw"))
+    with pytest.raises(ModelResidencyRefusedError, match="residency policy"):
+        embedder.embed(["Section 7."])
+
+
 @pytest.mark.parametrize(
     "response",
     [
         httpx2.Response(429, json={"type": "urn:compliancewatch:problem:rate-limited"}),
         httpx2.Response(429, text="slow down"),
         httpx2.Response(503, json={"type": BUDGET_PROBLEM}),
+        httpx2.Response(500, json={"type": RESIDENCY_PROBLEM}),
+        httpx2.Response(503, text="unavailable"),
     ],
-    ids=["another-problem", "no-problem", "not-a-429"],
+    ids=["another-problem", "no-problem", "not-a-429", "not-a-503", "no-residency-problem"],
 )
 def test_any_other_refusal_stays_a_gateway_error(response: httpx2.Response) -> None:
     with pytest.raises(GatewayError):

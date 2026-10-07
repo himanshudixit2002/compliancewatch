@@ -4,8 +4,9 @@ The schema of the call closes every choice, including the rule keys and regulato
 the question's date. A plan that fails ``parse_plan`` gets one retry that lists the problems;
 after that the question falls back (``plan_invalid``). A gateway failure falls back too
 (``planner_unavailable``), and an empty plan hands the question to hybrid search
-(``planner_deferred``). A used-up budget (``ModelBudgetExceededError``) is not caught: the
-answer's call would be refused as well.
+(``planner_deferred``). A used-up budget (``ModelBudgetExceededError``) and a refusal under the
+residency policy (``ModelResidencyRefusedError``) are not caught: the answer's call would be
+refused as well.
 """
 
 from collections.abc import Mapping

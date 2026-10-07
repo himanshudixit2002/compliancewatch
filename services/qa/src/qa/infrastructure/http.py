@@ -2,10 +2,12 @@
 
 A 404 is ``None``: the thing does not exist, and the caller decides what that means. A 429 is
 the llm-gateway refusing a model call because a budget is used up (no other upstream answers
-429): ``ModelBudgetExceededError``, with its ``Retry-After``. Anything else that is not a
-success is ``DependencyUnavailableError`` with the service, the status and the start of the
-body: a transport error, a 5xx, a refusal, or an answer that is not JSON or
-not the shape the reader expects. Retrying is the caller's choice; a question fails fast.
+429): ``ModelBudgetExceededError``, with its ``Retry-After``. A 503 of the gateway's problem type
+``llm-residency-unavailable`` is its residency policy refusing the call:
+``ModelResidencyRefusedError``, which ends the question. Anything else that is not a success is
+``DependencyUnavailableError`` with the service, the status and the start of the body: a
+transport error, a 5xx, a refusal, or an answer that is not JSON or not the shape the reader
+expects. Retrying is the caller's choice; a question fails fast.
 Tests pass their own ``httpx2.Client`` (a ``MockTransport`` or a FastAPI ``TestClient``).
 
 Every request carries the qa service's own access token once ``CW_SERVICE_CLIENT_SECRET`` is set
@@ -20,10 +22,17 @@ from typing import Any, Final
 
 import httpx2
 
+from domain_kernel.errors import PROBLEM_TYPE_PREFIX
 from py_common.auth import ServiceTokenUnavailableError
-from qa.domain.errors import DependencyUnavailableError, ModelBudgetExceededError
+from qa.domain.errors import (
+    DependencyUnavailableError,
+    ModelBudgetExceededError,
+    ModelResidencyRefusedError,
+)
 
 DETAIL_CHARS: Final = 300
+RESIDENCY_PROBLEM: Final = PROBLEM_TYPE_PREFIX + "llm-residency-unavailable"
+"""The llm-gateway's problem type for a call its residency policy refuses."""
 
 type Params = Mapping[str, str | int]
 
@@ -78,6 +87,9 @@ class JsonHttp:
             return None
         if response.status_code == 429:
             raise budget_exceeded(self.service, response)
+        refused = residency_refused(self.service, response)
+        if refused is not None:
+            raise refused
         if not 200 <= response.status_code < 300:
             raise DependencyUnavailableError(
                 f"{self.service} answered {response.status_code}: {response.text[:DETAIL_CHARS]}"
@@ -104,6 +116,23 @@ def budget_exceeded(service: str, response: httpx2.Response) -> ModelBudgetExcee
     return ModelBudgetExceededError(
         f"{service} answered 429: {response.text[:DETAIL_CHARS]}",
         retry_after=response.headers.get("retry-after"),
+    )
+
+
+def residency_refused(service: str, response: httpx2.Response) -> ModelResidencyRefusedError | None:
+    """The refusal as ``ModelResidencyRefusedError`` when it is the gateway's residency problem
+    (a 503 of type ``RESIDENCY_PROBLEM``)."""
+    if response.status_code != 503:
+        return None
+    try:
+        problem = response.json()
+    except ValueError:
+        return None
+    if not isinstance(problem, dict) or problem.get("type") != RESIDENCY_PROBLEM:
+        return None
+    detail = str(problem.get("detail") or problem.get("title") or "")
+    return ModelResidencyRefusedError(
+        f"{service} refuses the call under its residency policy: {detail[:DETAIL_CHARS]}"
     )
 
 

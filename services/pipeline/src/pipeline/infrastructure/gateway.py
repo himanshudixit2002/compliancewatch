@@ -9,7 +9,10 @@ activities retry like any other failed call.
 
 A call the gateway refuses because a monthly budget is used up (a 429 whose problem type is
 ``BUDGET_PROBLEM``) is a ``ModelBudgetExhaustedError`` with the ``Retry-After`` the gateway sent,
-which the rule extraction waits out instead of failing; any other refusal is a ``GatewayError``.
+which the rule extraction waits out instead of failing. A call it refuses under its residency
+policy (a 503 whose problem type is ``RESIDENCY_PROBLEM``) is a ``ModelResidencyRefusedError``,
+which no activity retries, since the same call gets the same answer; any other refusal is a
+``GatewayError``.
 """
 
 from collections.abc import Mapping, Sequence
@@ -20,7 +23,7 @@ import httpx2
 from domain_kernel.errors import PROBLEM_TYPE_PREFIX
 from domain_kernel.llm import CompletionRequest, CompletionResponse
 from pipeline.domain.embedding import EmbeddingBatch
-from pipeline.domain.errors import ModelBudgetExhaustedError
+from pipeline.domain.errors import ModelBudgetExhaustedError, ModelResidencyRefusedError
 from py_common.auth import ServiceTokenUnavailableError
 
 COMPLETIONS_PATH = "/v1/llm-gateway/completions"
@@ -28,22 +31,33 @@ EMBEDDINGS_PATH = "/v1/llm-gateway/embeddings"
 RETRIEVAL = "retrieval"
 BUDGET_PROBLEM = PROBLEM_TYPE_PREFIX + "llm-budget-exceeded"
 """The gateway's problem type for a monthly budget used up (its ``BudgetExceededError``)."""
+RESIDENCY_PROBLEM = PROBLEM_TYPE_PREFIX + "llm-residency-unavailable"
+"""The gateway's problem type for a call its residency policy refuses
+(its ``ResidencyUnavailableError``)."""
 
 
 class GatewayError(RuntimeError):
     """The gateway refused or failed the call; the body is the problem detail."""
 
 
-def budget_exhausted(response: httpx2.Response) -> ModelBudgetExhaustedError | None:
-    """The refusal as ``ModelBudgetExhaustedError`` when it is the gateway's budget problem
-    (a 429 of type ``BUDGET_PROBLEM``), with its ``Retry-After`` in seconds when it sent one."""
-    if response.status_code != 429:
+def _problem(response: httpx2.Response, status: int, problem_type: str) -> dict[str, Any] | None:
+    """The response's problem when it has ``status`` and is of ``problem_type``."""
+    if response.status_code != status:
         return None
     try:
         problem = response.json()
     except ValueError:
         return None
-    if not isinstance(problem, dict) or problem.get("type") != BUDGET_PROBLEM:
+    if not isinstance(problem, dict) or problem.get("type") != problem_type:
+        return None
+    return problem
+
+
+def budget_exhausted(response: httpx2.Response) -> ModelBudgetExhaustedError | None:
+    """The refusal as ``ModelBudgetExhaustedError`` when it is the gateway's budget problem
+    (a 429 of type ``BUDGET_PROBLEM``), with its ``Retry-After`` in seconds when it sent one."""
+    problem = _problem(response, 429, BUDGET_PROBLEM)
+    if problem is None:
         return None
     retry_after: float | None = None
     header = response.headers.get("retry-after", "").strip()
@@ -52,6 +66,18 @@ def budget_exhausted(response: httpx2.Response) -> ModelBudgetExhaustedError | N
     detail = str(problem.get("detail") or problem.get("title") or "budget exceeded")
     return ModelBudgetExhaustedError(
         f"the llm-gateway's budget is used up: {detail[:300]}", retry_after_seconds=retry_after
+    )
+
+
+def residency_refused(response: httpx2.Response) -> ModelResidencyRefusedError | None:
+    """The refusal as ``ModelResidencyRefusedError`` when it is the gateway's residency problem
+    (a 503 of type ``RESIDENCY_PROBLEM``)."""
+    problem = _problem(response, 503, RESIDENCY_PROBLEM)
+    if problem is None:
+        return None
+    detail = str(problem.get("detail") or problem.get("title") or "residency policy")
+    return ModelResidencyRefusedError(
+        f"the llm-gateway refuses the call under its residency policy: {detail[:300]}"
     )
 
 
@@ -64,7 +90,8 @@ def _post(
     auth: httpx2.Auth | None,
 ) -> Any:
     """POST ``body`` and return the JSON of a 200; a budget used up is a
-    ``ModelBudgetExhaustedError``, anything else a ``GatewayError``."""
+    ``ModelBudgetExhaustedError``, a residency refusal a ``ModelResidencyRefusedError``, anything
+    else a ``GatewayError``."""
     headers = {"x-tenant-id": tenant_id} if tenant_id else {}
     try:
         response = client.post(
@@ -79,6 +106,9 @@ def _post(
         budget = budget_exhausted(response)
         if budget is not None:
             raise budget
+        residency = residency_refused(response)
+        if residency is not None:
+            raise residency
         raise GatewayError(f"{response.status_code}: {response.text[:500]}")
     return response.json()
 

@@ -6,7 +6,8 @@ retry that lists the problems, and a second failure is ``not_covered``
 (``citation_check_failed``). A model that says the evidence does not cover the question gives
 ``not_covered`` (``answerer_declined``). A gateway failure is ``DependencyUnavailableError``:
 the question cannot be answered or refused honestly without the model. A used-up budget stays
-``ModelBudgetExceededError``.
+``ModelBudgetExceededError``, and a refusal under the residency policy
+``ModelResidencyRefusedError``.
 """
 
 from typing import Final

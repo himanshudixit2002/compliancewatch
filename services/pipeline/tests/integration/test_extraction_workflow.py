@@ -7,7 +7,8 @@ scripted model that answers with the case's draft label (evals/golden/extraction
 nobody reviewed: it shows the plumbing, not the law). A synthetic circular among the
 notifications waits for a person's triage, and the triage's resolution continues it to its
 extraction. A statute and a press release are kept for reference, a portal manual is set aside.
-A used-up budget is waited out by the extraction workflow and asked about again. Each new
+A used-up budget is waited out by the extraction workflow and asked about again; a call the
+gateway's residency policy refuses fails the extraction at the first attempt. Each new
 history replays on the workflows; the histories recorded before these steps replay in
 tests/unit/test_workflow_replay.py."""
 
@@ -50,7 +51,7 @@ from pipeline.application.relations import LlmRelationExtractor, RelationStage
 from pipeline.application.sources import AdminAction
 from pipeline.application.tasks import ResolveTask
 from pipeline.domain.classification import Relevance, TriageDecision
-from pipeline.domain.errors import ModelBudgetExhaustedError
+from pipeline.domain.errors import ModelBudgetExhaustedError, ModelResidencyRefusedError
 from pipeline.domain.events import DocumentClassified, RuleCandidateCreated
 from pipeline.domain.knowledge import DocumentRecord
 from pipeline.domain.prompt import PromptText
@@ -520,3 +521,29 @@ async def test_with_no_wait_left_a_used_up_budget_fails_the_extraction(
     assert (len(model.requests), pipeline.candidates()) == (1, [])
     record = pipeline.store.documents[DocumentId(request.document_id)]
     assert record.status is DocumentStatus.CLASSIFIED, "it waits for a later extraction"
+
+
+async def test_a_residency_refusal_fails_the_extraction_at_the_first_attempt(
+    environment: WorkflowEnvironment,
+) -> None:
+    """Before, the activity retried it six times, up to ten minutes apart."""
+    model = AnswersInTurn(
+        *[ModelResidencyRefusedError("refused under the residency policy")] * 6,
+    )
+    pipeline = Pipeline(model)
+    request = registered_notification(pipeline)
+    async with pipeline.worker(environment):
+        handle = await environment.client.start_workflow(
+            ExtractRulesWorkflow.run,
+            request,
+            id=f"extract-{uuid.uuid4()}",
+            task_queue=pipeline.queue,
+        )
+        with pytest.raises(WorkflowFailureError):
+            await handle.result()
+        history = await handle.fetch_history()
+    assert (len(model.requests), pipeline.candidates()) == (1, [])
+    assert scheduled(history) == ["pipeline.extract_rules"]
+    record = pipeline.store.documents[DocumentId(request.document_id)]
+    assert record.status is DocumentStatus.CLASSIFIED, "it waits for the policy to allow it"
+    await replays(history)

@@ -864,7 +864,12 @@ A used-up budget does not fail the extraction: the gateway answers 429 with the 
 `llm-budget-exceeded` and `Retry-After` until the budget resets, which the gateway client reads
 as `ModelBudgetExhaustedError`; the activity hands it to the workflow without a retry, and the
 workflow sleeps on a durable timer for the `Retry-After`, kept between 15 minutes and 6 hours (a
-raised budget takes effect before the month ends), and asks again, at most 160 times. Any other
+raised budget takes effect before the month ends), and asks again, at most 160 times. A call the
+gateway's residency policy refuses (503 `llm-residency-unavailable`, under
+`CW_LLM_RESIDENCY=india_only`) is `ModelResidencyRefusedError`, which no activity that calls the
+gateway retries (the extraction, the relation proposal, the clause embedding): the same call gets
+the same answer, and each try would book another refusal in the gateway's ledger. It fails the
+child at once. Any other
 failure (a gateway or rulebook outage past six tries over some 15 minutes) fails the child; the
 document stays `classified` until a re-ingest of it (an upload of the same bytes, say) finds its
 classification and starts the extraction again, as a retry from the `extract` stage does

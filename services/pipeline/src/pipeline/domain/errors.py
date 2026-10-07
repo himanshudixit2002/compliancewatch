@@ -80,6 +80,14 @@ class ModelBudgetExhaustedError(Exception):
         self.retry_after_seconds = retry_after_seconds
 
 
+class ModelResidencyRefusedError(Exception):
+    """The llm-gateway refused a model call under its residency policy (its problem type
+    ``llm-residency-unavailable``, a 503): ``CW_LLM_RESIDENCY=india_only`` keeps text in India,
+    and the model runs outside it. The same call gets the same answer until the policy or the
+    routing changes, so no activity retries it: another attempt would only book another refusal
+    in the gateway's ledger."""
+
+
 class TranscriptInvalidError(DomainError, ValueError):
     """An analyst's transcript is not in the shape of the parsers' blocks, or gives clauses the
     rulebook would refuse; the message names each problem by its place."""
