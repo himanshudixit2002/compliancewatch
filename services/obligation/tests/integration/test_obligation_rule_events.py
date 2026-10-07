@@ -1,5 +1,6 @@
-"""Migration 0004 and the rule events on Postgres, through a role that owns nothing and is not a
-superuser, so row-level security holds as in a deployment. Needs Docker.
+"""Migration 0004 and the rule events on Postgres, through obligation's own role, cw_obligation,
+which owns nothing and is not a superuser, so row-level security holds as in a deployment. Needs
+Docker.
 
 - the cache table and the applied decisions migrate down and up, match the models, and pass the
   catalog lint (the cache exempt, the decisions under the tenant policy);
@@ -48,6 +49,7 @@ from obligation.infrastructure.repository import (
 )
 from obligation.settings import ObligationSettings
 from obligation.testing import FakeRuleVersionReader, ref_of, rule
+from py_common.db_roles import apply_roles, as_role
 from py_common.outbox import (
     ConsumerConfig,
     IdempotentConsumer,
@@ -63,8 +65,6 @@ IMAGE = "pgvector/pgvector:0.8.6-pg16"
 SCHEMA = "obligation"
 CACHE = "rule_version_ref"
 DECISION = "obligation_decision"
-APP_ROLE = "obligation_app"
-APP_PASSWORD = "app-role-for-tests"
 DECIDED_AT = datetime(2026, 10, 1, 4, 0, tzinfo=UTC)
 
 
@@ -75,15 +75,10 @@ def database_url() -> Iterator[str]:
         admin = create_engine(base_url, isolation_level="AUTOCOMMIT")
         with admin.connect() as connection:
             connection.execute(text(f"CREATE SCHEMA {SCHEMA}"))
-            connection.execute(text(f"CREATE ROLE {APP_ROLE} LOGIN PASSWORD '{APP_PASSWORD}'"))
-            connection.execute(text(f"GRANT USAGE ON SCHEMA {SCHEMA} TO {APP_ROLE}"))
-            connection.execute(
-                text(
-                    f"ALTER DEFAULT PRIVILEGES IN SCHEMA {SCHEMA} "
-                    f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {APP_ROLE}"
-                )
-            )
         admin.dispose()
+        # The service's own role, as a fresh dev volume has it before the migrations:
+        # the tables they create, again after a downgrade, reach it too.
+        apply_roles(base_url)
         yield f"{base_url}?options=-csearch_path%3D{SCHEMA}%2Cpublic"
 
 
@@ -105,7 +100,7 @@ def engine(database_url: str, alembic_config: Config) -> Iterator[Engine]:
 
 @pytest.fixture(scope="module")
 def app_url(database_url: str, engine: Engine) -> str:
-    return database_url.replace("test:test@", f"{APP_ROLE}:{APP_PASSWORD}@")
+    return as_role(database_url, SCHEMA)
 
 
 @pytest.fixture(scope="module")

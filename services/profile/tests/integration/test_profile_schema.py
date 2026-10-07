@@ -1,5 +1,6 @@
 """Migration 0001 on Postgres: four tenant tables with row-level security, the unit of work
-with the outbox, and the use cases end to end through a non-superuser role. Needs Docker."""
+with the outbox, and the use cases end to end through the profile's own role, cw_profile as
+infra/dev/postgres/roles.sql makes it, which is not a superuser. Needs Docker."""
 
 from collections.abc import Iterator
 from pathlib import Path
@@ -26,6 +27,7 @@ from profile_service.infrastructure.repository import (
     PostgresUnitOfWorkFactory,
 )
 from profile_service.testing import GSTIN_KARNATAKA
+from py_common.db_roles import apply_roles, as_role
 
 SERVICE_DIR = Path(__file__).resolve().parents[2]
 IMAGE = "pgvector/pgvector:0.8.6-pg16"
@@ -40,8 +42,6 @@ TABLES = {
     "idempotency_key",
     "alembic_version",
 }
-APP_ROLE = "profile_app"
-APP_PASSWORD = "app-role-for-tests"
 FY = FinancialYear(2025)
 
 
@@ -75,18 +75,8 @@ def engine(database_url: str, migrated: Config) -> Iterator[Engine]:
 
 @pytest.fixture(scope="module")
 def app_engine(database_url: str, migrated: Config) -> Iterator[Engine]:
-    admin = create_engine(database_url, isolation_level="AUTOCOMMIT")
-    with admin.connect() as connection:
-        connection.execute(text(f"CREATE ROLE {APP_ROLE} LOGIN PASSWORD '{APP_PASSWORD}'"))
-        connection.execute(text(f"GRANT USAGE ON SCHEMA {SCHEMA} TO {APP_ROLE}"))
-        connection.execute(
-            text(
-                "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA "
-                f"{SCHEMA} TO {APP_ROLE}"
-            )
-        )
-    admin.dispose()
-    engine = create_engine(database_url.replace("test:test@", f"{APP_ROLE}:{APP_PASSWORD}@"))
+    apply_roles(database_url)
+    engine = create_engine(as_role(database_url, SCHEMA))
     yield engine
     engine.dispose()
 

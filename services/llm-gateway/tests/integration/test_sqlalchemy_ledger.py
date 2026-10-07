@@ -2,7 +2,8 @@
 
 A module-scoped container is created once; the first migration runs against it exactly as
 ``make migrate`` does, with the schema on the connection's ``search_path`` and the
-``alembic_version`` table inside that schema.
+``alembic_version`` table inside that schema. The ledger writes and reads as the gateway's own
+role, ``cw_llm_gateway`` as infra/dev/postgres/roles.sql makes it, which is not a superuser.
 """
 
 from collections.abc import Iterator
@@ -26,6 +27,7 @@ from llm_gateway.domain.features import CallStatus, CostSource, Feature
 from llm_gateway.domain.ledger import LedgerEntry
 from llm_gateway.infrastructure.ledger.models import TABLE_COMMENT
 from llm_gateway.infrastructure.ledger.sqlalchemy import SqlAlchemyLedger
+from py_common.db_roles import apply_roles, as_role
 
 SERVICE_ROOT = Path(__file__).resolve().parents[2]
 ALEMBIC_INI = SERVICE_ROOT / "alembic.ini"
@@ -78,6 +80,7 @@ def database_url() -> Iterator[str]:
             patch.setenv("CW_DATABASE_URL", url)
             patch.setenv("CW_DB_SCHEMA", SCHEMA)
             command.upgrade(alembic_config(), "head")
+            apply_roles(url)
             yield url
 
 
@@ -90,10 +93,10 @@ def engine(database_url: str) -> Iterator[Engine]:
 
 @pytest.fixture
 def ledger(database_url: str, engine: Engine) -> SqlAlchemyLedger:
-    """A ledger over an empty table."""
+    """A ledger over an empty table, as the gateway's role."""
     with engine.begin() as connection:
         connection.execute(text("DELETE FROM cost_ledger"))
-    return SqlAlchemyLedger.from_url(database_url)
+    return SqlAlchemyLedger.from_url(as_role(database_url, SCHEMA))
 
 
 def entry(**changes: Any) -> LedgerEntry:

@@ -1,8 +1,8 @@
-"""The changes feed on Postgres, read by a role that owns nothing and is not a superuser, as the
-product's ``cw_app`` is: publications, a supersession, a withdrawal and a deadline change from
-the decision log, the deadline change's id the same as the domain derives it, and the pages,
-filters and order. The versions are published through the use cases as the database owner.
-Needs Docker."""
+"""The changes feed on Postgres, read by the rulebook's own role, ``cw_rulebook`` as
+infra/dev/postgres/roles.sql makes it, which owns nothing and is not a superuser:
+publications, a supersession, a withdrawal and a deadline change from the decision log, the
+deadline change's id the same as the domain derives it, and the pages, filters and order. The
+versions are published through the use cases as the database owner. Needs Docker."""
 
 import hashlib
 from collections import Counter
@@ -20,6 +20,7 @@ from testcontainers.community.postgres import PostgresContainer
 from domain_kernel.documents import Clause, DocumentType, clause_id_for, document_id_for
 from domain_kernel.ids import ClauseId, RuleId, RuleVersionId, SourceId, UserId
 from domain_kernel.knowledge import EntityType, RelationKind, RuleRelation
+from py_common.db_roles import apply_roles, as_role
 from rulebook.application.changes import ListChanges
 from rulebook.application.documents import RegisterDocument
 from rulebook.application.publication import (
@@ -40,8 +41,6 @@ pytestmark = pytest.mark.integration
 SERVICE_DIR = Path(__file__).resolve().parents[2]
 IMAGE = "pgvector/pgvector:0.8.6-pg16"
 SCHEMA = "rulebook"
-READER = "changes_reader"
-READER_PASSWORD = "reader-role-for-tests"
 NOW = datetime(2026, 10, 1, 4, 30, tzinfo=UTC)
 TEXT = (
     "The due date for furnishing the return in FORM GSTR-3B for the month of September, 2026 "
@@ -69,7 +68,6 @@ def database_url() -> Iterator[str]:
         admin = create_engine(base_url, isolation_level="AUTOCOMMIT")
         with admin.connect() as connection:
             connection.execute(text(f"CREATE SCHEMA {SCHEMA}"))
-            connection.execute(text(f"CREATE ROLE {READER} LOGIN PASSWORD '{READER_PASSWORD}'"))
         admin.dispose()
         yield f"{base_url}?options=-csearch_path%3D{SCHEMA}%2Cpublic"
 
@@ -80,10 +78,8 @@ def owner(database_url: str) -> Iterator[PostgresKnowledgeUnitOfWorkFactory]:
         env.setenv("CW_DATABASE_URL", database_url)
         env.setenv("CW_DB_SCHEMA", SCHEMA)
         command.upgrade(Config(str(SERVICE_DIR / "alembic.ini")), "head")
+    apply_roles(database_url)
     factory = PostgresKnowledgeUnitOfWorkFactory.from_url(database_url)
-    with factory.engine.begin() as connection:
-        connection.execute(text(f"GRANT USAGE ON SCHEMA {SCHEMA} TO {READER}"))
-        connection.execute(text(f"GRANT SELECT ON ALL TABLES IN SCHEMA {SCHEMA} TO {READER}"))
     yield factory
     factory.engine.dispose()
 
@@ -92,9 +88,7 @@ def owner(database_url: str) -> Iterator[PostgresKnowledgeUnitOfWorkFactory]:
 def reader(
     database_url: str, owner: PostgresKnowledgeUnitOfWorkFactory
 ) -> Iterator[PostgresKnowledgeUnitOfWorkFactory]:
-    factory = PostgresKnowledgeUnitOfWorkFactory.from_url(
-        database_url.replace("test:test@", f"{READER}:{READER_PASSWORD}@")
-    )
+    factory = PostgresKnowledgeUnitOfWorkFactory.from_url(as_role(database_url, SCHEMA))
     with factory.engine.connect() as connection:
         superuser = "SELECT rolsuper FROM pg_roles WHERE rolname = current_user"
         assert connection.execute(text(superuser)).scalar_one() is False

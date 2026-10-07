@@ -1,6 +1,7 @@
 """Migration 0001 on Postgres: the consent table, row-level security by tenant, the unit of
-work end to end as a plain database role, the history's own tenant filter where row-level
-security is bypassed; and migration 0004, which adds the web_settings source. Needs Docker."""
+work end to end as identity's own role (cw_identity, as infra/dev/postgres/roles.sql makes it),
+the history's own tenant filter where row-level security is bypassed; and migration 0004, which
+adds the web_settings source. Needs Docker."""
 
 from collections.abc import Iterator
 from pathlib import Path
@@ -16,12 +17,11 @@ from domain_kernel.ids import TenantId
 from identity.application.consents import ConsentStatus, RecordConsent
 from identity.domain.consent import ConsentPurpose, ConsentSource
 from identity.infrastructure.repository import PostgresUnitOfWorkFactory
+from py_common.db_roles import apply_roles, as_role
 
 SERVICE_DIR = Path(__file__).resolve().parents[2]
 IMAGE = "pgvector/pgvector:0.8.6-pg16"
 SCHEMA = "identity"
-APP_ROLE = "identity_app"
-APP_PASSWORD = "app-role-for-tests"
 
 
 @pytest.fixture(scope="module")
@@ -47,15 +47,8 @@ def migrated(database_url: str) -> Iterator[Config]:
 
 @pytest.fixture(scope="module")
 def app_engine(database_url: str, migrated: Config) -> Iterator[Engine]:
-    admin = create_engine(database_url, isolation_level="AUTOCOMMIT")
-    with admin.connect() as connection:
-        connection.execute(text(f"CREATE ROLE {APP_ROLE} LOGIN PASSWORD '{APP_PASSWORD}'"))
-        connection.execute(text(f"GRANT USAGE ON SCHEMA {SCHEMA} TO {APP_ROLE}"))
-        connection.execute(
-            text(f"GRANT SELECT, INSERT ON ALL TABLES IN SCHEMA {SCHEMA} TO {APP_ROLE}")
-        )
-    admin.dispose()
-    engine = create_engine(database_url.replace("test:test@", f"{APP_ROLE}:{APP_PASSWORD}@"))
+    apply_roles(database_url)
+    engine = create_engine(as_role(database_url, SCHEMA))
     yield engine
     engine.dispose()
 

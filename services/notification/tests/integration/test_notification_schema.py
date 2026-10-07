@@ -5,7 +5,8 @@ dispatching a batch and a digest, the retention sweep, and the outbox; migration
 adds the web_settings source; and migration 0003, the idempotency keys of the bulk route
 (``test_bulk_notifications.py`` runs the route). Needs Docker.
 
-The store runs as a plain database role, not the container's superuser: a superuser bypasses
+The store runs as the notification service's own role, cw_notification as
+infra/dev/postgres/roles.sql makes it, not the container's superuser: a superuser bypasses
 row-level security whatever the table says, so the service's runtime role must never be one.
 Each test uses its own tenants, and the tests that claim work use their own years and remove
 what they leave, because a claim sees every tenant's due work.
@@ -72,6 +73,7 @@ from notification.domain.routing import ObligationNotice
 from notification.infrastructure.repository import PostgresUnitOfWorkFactory, SqlAlchemyUnitOfWork
 from notification.infrastructure.work_index import PostgresWorkIndex, claim_rows
 from notification.testing import NOON_IST, FakeChannel, FakeRuleVersionReader
+from py_common.db_roles import apply_roles, as_role
 from py_common.events import EventMessage, to_message
 from py_common.outbox import (
     ConsumerConfig,
@@ -99,8 +101,6 @@ TABLES = {
     "processed_event",
     "alembic_version",
 }
-APP_ROLE = "notification_app"
-APP_PASSWORD = "app-role-for-tests"
 GROUP = "notification.obligations"
 LEASE = timedelta(seconds=60)
 
@@ -135,19 +135,10 @@ def engine(database_url: str, migrated: Config) -> Iterator[Engine]:
 
 @pytest.fixture(scope="module")
 def app_engine(database_url: str, migrated: Config) -> Iterator[Engine]:
-    """An engine for a role that owns nothing and is not a superuser, so the policies apply."""
-    admin = create_engine(database_url, isolation_level="AUTOCOMMIT")
-    with admin.connect() as connection:
-        connection.execute(text(f"CREATE ROLE {APP_ROLE} LOGIN PASSWORD '{APP_PASSWORD}'"))
-        connection.execute(text(f"GRANT USAGE ON SCHEMA {SCHEMA} TO {APP_ROLE}"))
-        connection.execute(
-            text(
-                "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA "
-                f"{SCHEMA} TO {APP_ROLE}"
-            )
-        )
-    admin.dispose()
-    url = database_url.replace("test:test@", f"{APP_ROLE}:{APP_PASSWORD}@")
+    """An engine for cw_notification, which owns nothing and is not a superuser, so the policies
+    apply."""
+    apply_roles(database_url)
+    url = as_role(database_url, SCHEMA)
     engine = create_engine(url, pool_size=10)
     yield engine
     engine.dispose()

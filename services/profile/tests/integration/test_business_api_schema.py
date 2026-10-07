@@ -1,7 +1,7 @@
-"""Migration 0003 and the business API on Postgres through a plain role, so the forced row-level
-security applies: the idempotency_key table and its policies, the business list paged by
-(name, id) per tenant, an update that rolls back as a whole, and a replayed create. Needs
-Docker."""
+"""Migration 0003 and the business API on Postgres through the profile's own role, cw_profile as
+infra/dev/postgres/roles.sql makes it, so the forced row-level security applies: the
+idempotency_key table and its policies, the business list paged by (name, id) per tenant, an
+update that rolls back as a whole, and a replayed create. Needs Docker."""
 
 from collections.abc import Iterator
 from pathlib import Path
@@ -32,12 +32,11 @@ from profile_service.infrastructure.repository import PostgresUnitOfWorkFactory
 from profile_service.main import build_app
 from profile_service.settings import ProfileSettings
 from profile_service.testing import GSTIN_DELHI, GSTIN_KARNATAKA, FixedFlags
+from py_common.db_roles import apply_roles, as_role
 
 SERVICE_DIR = Path(__file__).resolve().parents[2]
 IMAGE = "pgvector/pgvector:0.8.6-pg16"
 SCHEMA = "profile"
-APP_ROLE = "profile_business_app"
-APP_PASSWORD = "business-role-for-tests"
 NAME_INDEX = "ix_profile_node_tenant_level_name"
 PANS = ("AAAAA1111A", "BBBBB2222B", "CCCCC3333C", "DDDDD4444D")
 
@@ -72,18 +71,8 @@ def engine(database_url: str, migrated: Config) -> Iterator[Engine]:
 
 @pytest.fixture(scope="module")
 def app_url(database_url: str, migrated: Config) -> str:
-    admin = create_engine(database_url, isolation_level="AUTOCOMMIT")
-    with admin.connect() as connection:
-        connection.execute(text(f"CREATE ROLE {APP_ROLE} LOGIN PASSWORD '{APP_PASSWORD}'"))
-        connection.execute(text(f"GRANT USAGE ON SCHEMA {SCHEMA} TO {APP_ROLE}"))
-        connection.execute(
-            text(
-                "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA "
-                f"{SCHEMA} TO {APP_ROLE}"
-            )
-        )
-    admin.dispose()
-    return database_url.replace("test:test@", f"{APP_ROLE}:{APP_PASSWORD}@")
+    apply_roles(database_url)
+    return as_role(database_url, SCHEMA)
 
 
 @pytest.fixture(scope="module")
@@ -228,7 +217,7 @@ def test_an_update_rolls_back_every_node(factory: PostgresUnitOfWorkFactory) -> 
             text("SELECT count(*) FROM profile_version WHERE node_id = :id"),
             {"id": business.id.value},
         ).scalar_one()
-    assert versions == 0, "the plain role sees no row without a tenant"
+    assert versions == 0, "cw_profile sees no row without a tenant"
 
 
 def test_a_create_is_replayed_from_postgres(app_url: str) -> None:

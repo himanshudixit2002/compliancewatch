@@ -1,8 +1,9 @@
 """Migration 0001 on Postgres: the tables, row-level security by tenant, the append-only guard,
 the unit of work with the outbox, and the use cases end to end. Needs Docker.
 
-The use cases run as a plain database role, not the container's superuser: a superuser bypasses
-row-level security whatever the table says, so the service's runtime role must never be one.
+The use cases run as the engine's own role, cw_applicability as infra/dev/postgres/roles.sql makes
+it, not the container's superuser: a superuser bypasses row-level security whatever the table
+says, so the service's runtime role must never be one.
 """
 
 from collections.abc import Iterator
@@ -30,6 +31,7 @@ from applicability_engine.testing import (
     rule_version,
 )
 from domain_kernel.predicates import Applicability
+from py_common.db_roles import apply_roles, as_role
 
 pytestmark = pytest.mark.integration
 
@@ -48,8 +50,6 @@ TABLES = {
     "fanout_run",
     "fanout_hold",
 }
-APP_ROLE = "applicability_app"
-APP_PASSWORD = "app-role-for-tests"
 REGULAR = {"attribute": "registration_type", "operator": "eq", "value": "regular"}
 FREE_TEXT = {"attribute": "business_category", "free_text": "Runs a restaurant in a hotel"}
 
@@ -84,19 +84,10 @@ def engine(database_url: str, migrated: Config) -> Iterator[Engine]:
 
 @pytest.fixture(scope="module")
 def app_engine(database_url: str, migrated: Config) -> Iterator[Engine]:
-    """An engine for a role that owns nothing and is not a superuser, so the policy applies."""
-    admin = create_engine(database_url, isolation_level="AUTOCOMMIT")
-    with admin.connect() as connection:
-        connection.execute(text(f"CREATE ROLE {APP_ROLE} LOGIN PASSWORD '{APP_PASSWORD}'"))
-        connection.execute(text(f"GRANT USAGE ON SCHEMA {SCHEMA} TO {APP_ROLE}"))
-        connection.execute(
-            text(
-                "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA "
-                f"{SCHEMA} TO {APP_ROLE}"
-            )
-        )
-    admin.dispose()
-    url = database_url.replace("test:test@", f"{APP_ROLE}:{APP_PASSWORD}@")
+    """An engine for cw_applicability, which owns nothing and is not a superuser, so the policy
+    applies."""
+    apply_roles(database_url)
+    url = as_role(database_url, SCHEMA)
     engine = create_engine(url)
     yield engine
     engine.dispose()

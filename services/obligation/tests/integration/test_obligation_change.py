@@ -1,9 +1,9 @@
 """Migration 0002 on Postgres: the obligation_change table, its append-only trigger, row-level
-security through a plain role, and the change row committing or rolling back with the outbox
-row. Needs Docker.
+security through obligation's own role, and the change row committing or rolling back with the
+outbox row. Needs Docker.
 
-The use cases run as a role that owns nothing and is not a superuser: a superuser bypasses
-row-level security whatever the table says.
+The use cases run as cw_obligation, as infra/dev/postgres/roles.sql makes it: it owns nothing and
+is not a superuser, and a superuser bypasses row-level security whatever the table says.
 """
 
 import importlib
@@ -39,13 +39,12 @@ from obligation.domain.history import ChangeKind, change_from_event
 from obligation.infrastructure.models import Base
 from obligation.infrastructure.repository import PostgresUnitOfWorkFactory
 from obligation.testing import rule
+from py_common.db_roles import apply_roles, as_role
 
 SERVICE_DIR = Path(__file__).resolve().parents[2]
 IMAGE = "pgvector/pgvector:0.8.6-pg16"
 SCHEMA = "obligation"
 TABLE = "obligation_change"
-APP_ROLE = "obligation_app"
-APP_PASSWORD = "app-role-for-tests"
 RESTRICT_VIOLATION = "23001"
 AS_OF = date(2026, 9, 28)
 
@@ -57,16 +56,10 @@ def database_url() -> Iterator[str]:
         admin = create_engine(base_url, isolation_level="AUTOCOMMIT")
         with admin.connect() as connection:
             connection.execute(text(f"CREATE SCHEMA {SCHEMA}"))
-            connection.execute(text(f"CREATE ROLE {APP_ROLE} LOGIN PASSWORD '{APP_PASSWORD}'"))
-            connection.execute(text(f"GRANT USAGE ON SCHEMA {SCHEMA} TO {APP_ROLE}"))
-            # Tables the migrations create later, again after a downgrade, reach the role too.
-            connection.execute(
-                text(
-                    f"ALTER DEFAULT PRIVILEGES IN SCHEMA {SCHEMA} "
-                    f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {APP_ROLE}"
-                )
-            )
         admin.dispose()
+        # The service's own role, as a fresh dev volume has it before the migrations:
+        # the tables they create, again after a downgrade, reach it too.
+        apply_roles(base_url)
         yield f"{base_url}?options=-csearch_path%3D{SCHEMA}%2Cpublic"
 
 
@@ -88,7 +81,7 @@ def engine(database_url: str, alembic_config: Config) -> Iterator[Engine]:
 
 @pytest.fixture(scope="module")
 def app_engine(database_url: str, engine: Engine) -> Iterator[Engine]:
-    engine = create_engine(database_url.replace("test:test@", f"{APP_ROLE}:{APP_PASSWORD}@"))
+    engine = create_engine(as_role(database_url, SCHEMA))
     yield engine
     engine.dispose()
 
