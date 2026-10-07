@@ -467,18 +467,21 @@ describe("DecidePanel", () => {
     expect(returnButton).toHaveProperty("disabled", false);
     await user.click(returnButton);
     await user.click(
-      within(screen.getByRole("dialog", { name: "Return the version for rework?" })).getByRole(
-        "button",
-        { name: "Return" },
-      ),
+      within(
+        await screen.findByRole("dialog", { name: "Return the version for rework?" }),
+      ).getByRole("button", { name: "Return" }),
     );
     await waitFor(() => expect(action).toHaveBeenCalledTimes(1));
+    // The answer re-renders the panel; the next steps wait for it rather than racing it.
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Return the version for rework?" })).toBeNull(),
+    );
     const reject = screen.getByRole("button", { name: "Reject" });
     await user.type(notes[1] as HTMLElement, "Example why");
     expect(reject).toHaveProperty("disabled", true);
     await user.selectOptions(screen.getByLabelText(/^Why the candidate is rejected/), "duplicate");
     await user.click(reject);
-    const dialog = screen.getByRole("dialog", { name: "Reject this task?" });
+    const dialog = await screen.findByRole("dialog", { name: "Reject this task?" });
     expect(dialog.textContent).toContain("rejects the candidate");
     await user.click(within(dialog).getByRole("button", { name: "Reject" }));
     await waitFor(() => expect(action).toHaveBeenCalledTimes(2));

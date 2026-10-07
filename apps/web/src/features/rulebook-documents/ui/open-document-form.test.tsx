@@ -66,7 +66,10 @@ describe("DocumentsOpenView", () => {
     await user.type(screen.getByLabelText(/Document id or sha256/), "x");
     await user.click(screen.getByRole("button", { name: "Open the document" }));
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("req-example-3"));
-    expect(container.contains(document.activeElement)).toBe(true);
-    expect(document.activeElement?.contains(screen.getByRole("alert"))).toBe(true);
+    // Focus moves in an effect after the problem renders, so the check waits for it.
+    await waitFor(() => {
+      expect(container.contains(document.activeElement)).toBe(true);
+      expect(document.activeElement?.contains(screen.getByRole("alert"))).toBe(true);
+    });
   });
 });
