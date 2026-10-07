@@ -252,6 +252,7 @@ export function VersionView({
       <WorkflowPanel
         action={stepAction}
         steps={view.steps}
+        reserved={view.reserved}
         access={view.access}
         version={version.version}
         highImpact={version.highImpact}

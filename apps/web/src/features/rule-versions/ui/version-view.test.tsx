@@ -82,6 +82,7 @@ function pageView(overrides: Partial<VersionPageView> = {}): VersionPageView {
       },
     },
     steps: ["submit"],
+    reserved: [],
     access: { allowed: true },
     canCite: true,
     graphHref: graphHref(EXAMPLE_VERSION_ID),

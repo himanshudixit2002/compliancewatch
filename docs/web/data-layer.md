@@ -759,8 +759,11 @@ component handles one.
   method of the port answers that refusal without a request, and `rulebookWriteAccess(ctx)` tells
   a form which one applies. `rulebookWorkflow(ctx)` and `rulebookWorkflowAccess(ctx)` do the same
   for the rule version page (citations, submit, return, approve, publish, withdraw) behind
-  `web.publish_actions`. `decided_by` and `actor_id` in each body are the session's user id, and an
-  approval never carries `synthetic` (D-043). A rulebook 401
+  `web.publish_actions`. Approving, publishing and withdrawing a version, and approving a review
+  task, also need a reviewer's or an admin's role: either port answers any other session
+  `web-reviewer-role-required` without a request, whichever action calls it (D-061).
+  `decided_by` and `actor_id` in each body are the session's user id, and an approval never
+  carries `synthetic` (D-043). A rulebook 401
   or 503 about either token is reworded to name the variable to set and the side that needs it,
   never its value. `make web-stack` gives the rulebook the placeholder `local-review-token`, and
   `make web-e2e` and the e2e config give the web app the same; under `next dev` the web app needs

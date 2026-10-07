@@ -685,7 +685,10 @@ rather than guessing. The acting analyst is the session's user, set by `server/a
 as `decided_by` is for the review decisions, and an approval never carries `synthetic`, which only
 the local product's demo tool sends. Citations and every step sit behind `web.publish_actions` and
 the review token, checked in that order after the role, as the decisions sit behind
-`web.admin_rulebook_writes`. A citation refusal comes back with every failure the rulebook listed,
+`web.admin_rulebook_writes`. Submitting, returning and citing are every regulatory role's;
+approving, publishing and withdrawing are a reviewer's or an admin's (`admin.review.approve`,
+`admin.publish`, D-061): the panel offers them only to those roles and names them for anyone
+else, and `takeStep` checks the role again before any request. A citation refusal comes back with every failure the rulebook listed,
 put on its row only when no other row cites the same clause, since the rulebook's failure lines
 name the clause but not the quote. Consequences: a status list costs one read per rule it walks; a
 chip with few versions may walk many rules for one page; when the version read gains the
@@ -1108,7 +1111,12 @@ from a reviewer's. The role table says "reviewer: approves and publishes". Settl
 reviewers and admins read the queue, a task and the stats, claim a task, draft a version from a
 candidate, edit the draft, return and reject it, and open the seed tasks (capability
 `admin.review`); approving is the reviewer's or the admin's (`admin.review.approve`), offered only
-to them on the page and checked again in the action before any request. Every step goes through
+to them on the page and checked again in the action before any request. The rule version's page,
+where the workbench sends an approved version to be published, follows the same rule (D-043):
+approving, publishing and withdrawing are offered only to a reviewer or an admin
+(`admin.review.approve`, `admin.publish`) and named for anyone else, `takeStep` checks the role
+before any request, and `server/api/rulebook-write.ts` refuses those steps to any other session
+too, whichever action sends them; submitting, returning and citing stay every regulatory role's. Every step goes through
 `rulebookWrites` in `server/api/rulebook-write.ts`, behind `web.admin_rulebook_writes` and the
 review token like the entity and relation decisions, with the session's user as `actor_id`.
 Drafting and editing are the claimant's alone (the rulebook's rule); deciding needs no claim, so a

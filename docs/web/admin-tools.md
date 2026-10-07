@@ -208,16 +208,19 @@ four open mappings as stored at the foot.
   number (read for the purpose), and a link to the graph.
 - **The publish workflow.** The steps the version's status allows, as the rulebook's routes state
   them: submit a draft (optionally as high impact, which a later submission keeps), approve or
-  return a version in review, publish or return an approved one, withdraw a published one. Each
+  return a version in review, publish or return an approved one, withdraw a published one.
+  Submitting and returning are every regulatory role's; approving, publishing and withdrawing are a
+  reviewer's or an admin's (`admin.review.approve`, `admin.publish`, D-043): an analyst is not
+  offered them, the panel names them instead, and the action refuses them before any request. Each
   opens a dialog that says what the rulebook records; return and withdraw ask for a reason of ten
   characters or more (`ReasonDialog`), the others take an optional note (`ConfirmDialog`). The
   acting analyst is the session's user, filled in by `server/api/rulebook-write.ts`, never a form
   field, and an approval is never sent as synthetic. The panel says what the step did and lists the
   round's approvers from the rulebook's answer ("1 of 2 approvals in this round. It needs a second
-  approver: a different analyst.", the signed-in analyst named); every refusal (the same analyst
-  approving twice, citations missing or unverified, an overlap, a relation that cannot take effect,
-  publishing turned off) is shown under the step with the rulebook's title, detail and correlation
-  id. On success the page renders again in the new status.
+  approver: a different reviewer or admin.", the signed-in reviewer named); every refusal (the same
+  reviewer approving twice, citations missing or unverified, an overlap, a relation that cannot
+  take effect, publishing turned off) is shown under the step with the rulebook's title, detail and
+  correlation id. On success the page renders again in the new status.
 - Citations and steps are sent only with `web.publish_actions` on for the session's tenant and
   `CW_WEB_RULEBOOK_REVIEW_TOKEN` set; otherwise the page shows the refusal (which names the flag or
   the variable) and offers nothing. The rulebook's version read does not carry the round's

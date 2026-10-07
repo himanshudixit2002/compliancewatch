@@ -21,7 +21,7 @@ import {
   unknownClauses,
 } from "./model/citations-form";
 import { versionHref } from "./model/version-list";
-import { parseStepForm, stepResult } from "./model/workflow";
+import { mayTake, parseStepForm, reservedStepRefusal, stepResult } from "./model/workflow";
 import { citationField, type CitationsResult } from "./ui/citations-shared";
 import type { StepResult } from "./ui/workflow-shared";
 
@@ -118,9 +118,11 @@ export async function saveCitations(
 
 /**
  * One step of the publish workflow: the gate again, the step and its note (a reason for return
- * and withdraw), then the rulebook, with the session's user as the actor and never a synthetic
- * approval. Any refusal comes back with the rulebook's problem for the panel to show next to the
- * step; on success the page renders again in the version's new status.
+ * and withdraw), the role the step needs (approving, publishing and withdrawing are a reviewer's
+ * or an admin's, D-043; the rulebook's shared review token would take them from any analyst),
+ * then the rulebook, with the session's user as the actor and never a synthetic approval. Any
+ * refusal comes back with the rulebook's problem for the panel to show next to the step; on
+ * success the page renders again in the version's new status.
  */
 export async function takeStep(
   ruleVersionId: string,
@@ -131,6 +133,7 @@ export async function takeStep(
   if (!isHexUuid(ruleVersionId)) return invalidVersion();
   const parsed = parseStepForm(formData);
   if (!parsed.ok) return { status: "error", fieldErrors: parsed.fieldErrors };
+  if (!mayTake(session, parsed.step)) return actionFailure(reservedStepRefusal(parsed.step));
   const id = ruleVersionId.toLowerCase();
   const workflow = await rulebookWorkflow({ session });
   const result =

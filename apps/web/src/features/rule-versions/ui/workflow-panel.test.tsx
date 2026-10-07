@@ -11,6 +11,7 @@ function renderPanel(action: TakeStepAction, props: Partial<WorkflowPanelProps> 
     <WorkflowPanel
       action={action}
       steps={["submit"]}
+      reserved={[]}
       access={{ allowed: true }}
       version={1}
       highImpact={false}
@@ -86,7 +87,7 @@ describe("WorkflowPanel", () => {
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Approve" }));
     await waitFor(() => expect(screen.getByText("Example analyst (you)")).toBeDefined());
     expect(screen.getByRole("status").textContent).toContain(
-      "1 of 2 approvals in this round. It needs a second approver: a different analyst.",
+      "1 of 2 approvals in this round. It needs a second approver: a different reviewer or admin.",
     );
     await user.click(screen.getByRole("button", { name: "Approve" }));
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Approve" }));
@@ -144,6 +145,7 @@ describe("WorkflowPanel", () => {
       <WorkflowPanel
         action={vi.fn<TakeStepAction>()}
         steps={[]}
+        reserved={[]}
         access={{ allowed: true }}
         version={2}
         highImpact={false}
@@ -152,6 +154,21 @@ describe("WorkflowPanel", () => {
       />,
     );
     expect(screen.getByText(/No further step/)).toBeDefined();
+  });
+
+  it("names the steps left to a reviewer or an admin and offers none of them", async () => {
+    const { container } = renderPanel(vi.fn<TakeStepAction>(), {
+      steps: ["return"],
+      reserved: ["approve"],
+    });
+    expect(container.querySelector("[data-slot='workflow-reserved']")?.textContent).toBe(
+      "Approving, publishing and withdrawing are a reviewer's or an admin's. Not offered to you here: Approve.",
+    );
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Return to draft" })).toBeDefined();
+    expect(await runAxe(container)).toHaveNoViolations();
+    renderPanel(vi.fn<TakeStepAction>(), { steps: [], reserved: ["withdraw"] });
+    expect(screen.queryByText(/No further step/)).toBeNull();
   });
 
   it("shows a check of the step form as a message under the step", async () => {

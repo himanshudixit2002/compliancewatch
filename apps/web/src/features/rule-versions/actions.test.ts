@@ -289,7 +289,7 @@ describe("takeStep", () => {
   });
 
   it("sends approve, publish, return and withdraw to their routes, never a synthetic approval", async () => {
-    await signedInAs();
+    await signedInAs({ roles: ["reviewer"] });
     const fake = fakeFetch([
       { method: "POST", path: `${VERSION}/approve`, body: lifecycleDto() },
       { method: "POST", path: `${VERSION}/publish`, body: publicationDto() },
@@ -317,6 +317,39 @@ describe("takeStep", () => {
     ]);
   });
 
+  it("refuses an analyst's approval, publication and withdrawal before any request", async () => {
+    await signedInAs();
+    const fake = fakeFetch([
+      { method: "POST", path: `${VERSION}/return`, body: lifecycleDto({ status: "draft" }) },
+    ]);
+    vi.stubGlobal("fetch", fake.fetchImpl);
+    expect(await takeStep(EXAMPLE_VERSION_ID, IDLE, form({ step: "approve" }))).toEqual({
+      status: "error",
+      formErrors: ["Approve is a reviewer's or an admin's step: nothing was sent."],
+    });
+    expect(await takeStep(EXAMPLE_VERSION_ID, IDLE, form({ step: "publish" }))).toEqual({
+      status: "error",
+      formErrors: ["Publish is a reviewer's or an admin's step: nothing was sent."],
+    });
+    expect(
+      await takeStep(
+        EXAMPLE_VERSION_ID,
+        IDLE,
+        form({ step: "withdraw", note: "Example reason text" }),
+      ),
+    ).toMatchObject({ status: "error", formErrors: [expect.stringMatching(/^Withdraw is a/)] });
+    expect(fake.requests).toHaveLength(0);
+    // Returning stays every regulatory role's step.
+    expect(
+      await takeStep(
+        EXAMPLE_VERSION_ID,
+        IDLE,
+        form({ step: "return", note: "Example reason text" }),
+      ),
+    ).toMatchObject({ status: "ok" });
+    expect(fake.requests.map((request) => request.pathname)).toEqual([`${VERSION}/return`]);
+  });
+
   it("refuses a return without a reason and an unknown step before any request", async () => {
     await signedInAs();
     const fake = fakeFetch([]);
@@ -338,7 +371,7 @@ describe("takeStep", () => {
   });
 
   it("returns the rulebook's guard with its title and detail", async () => {
-    await signedInAs();
+    await signedInAs({ roles: ["admin"] });
     const fake = fakeFetch([
       {
         method: "POST",
