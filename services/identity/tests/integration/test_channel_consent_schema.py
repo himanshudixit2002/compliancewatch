@@ -1,7 +1,8 @@
 """Migration 0002 on Postgres: the channel_consent table, its append-only trigger, the partial
-unique index on the message id, and the repository through a plain role. Needs Docker.
+unique index on the message id, and the repository through identity's own role. Needs Docker.
 
-The role owns nothing and is not a superuser, as the service's own role would be.
+The role is ``cw_identity`` as infra/dev/postgres/roles.sql makes it, given to the database before
+the migrations as on a fresh dev volume: it owns nothing and is not a superuser.
 """
 
 import importlib
@@ -25,13 +26,12 @@ from identity.domain.channel_consent import ChannelConsentRecord, ConsentChannel
 from identity.domain.consent import ConsentPurpose, ConsentSource
 from identity.infrastructure.models import Base
 from identity.infrastructure.repository import PostgresUnitOfWorkFactory
+from py_common.db_roles import apply_roles, as_role
 
 SERVICE_DIR = Path(__file__).resolve().parents[2]
 IMAGE = "pgvector/pgvector:0.8.6-pg16"
 SCHEMA = "identity"
 TABLE = "channel_consent"
-APP_ROLE = "identity_channel_app"
-APP_PASSWORD = "app-role-for-tests"
 RESTRICT_VIOLATION = "23001"
 NUMBER = "919876543210"
 NOTICE = "whatsapp-consent 0.1-draft"
@@ -47,16 +47,9 @@ def database_url() -> Iterator[str]:
         admin = create_engine(base_url, isolation_level="AUTOCOMMIT")
         with admin.connect() as connection:
             connection.execute(text(f"CREATE SCHEMA {SCHEMA}"))
-            connection.execute(text(f"CREATE ROLE {APP_ROLE} LOGIN PASSWORD '{APP_PASSWORD}'"))
-            connection.execute(text(f"GRANT USAGE ON SCHEMA {SCHEMA} TO {APP_ROLE}"))
-            # Tables the migrations create later, again after a downgrade, reach the role too.
-            connection.execute(
-                text(
-                    f"ALTER DEFAULT PRIVILEGES IN SCHEMA {SCHEMA} "
-                    f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {APP_ROLE}"
-                )
-            )
         admin.dispose()
+        # Tables the migrations create later, again after a downgrade, reach the role too.
+        apply_roles(base_url)
         yield f"{base_url}?options=-csearch_path%3D{SCHEMA}%2Cpublic"
 
 
@@ -78,7 +71,7 @@ def engine(database_url: str, alembic_config: Config) -> Iterator[Engine]:
 
 @pytest.fixture(scope="module")
 def app_engine(database_url: str, engine: Engine) -> Iterator[Engine]:
-    engine = create_engine(database_url.replace("test:test@", f"{APP_ROLE}:{APP_PASSWORD}@"))
+    engine = create_engine(as_role(database_url, SCHEMA))
     yield engine
     engine.dispose()
 

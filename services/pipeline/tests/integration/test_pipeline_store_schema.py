@@ -5,9 +5,10 @@ queries (every source's runs and documents, the extraction backlog, a person's r
 outbox's dead rows and their requeue), the catalog lint, and a downgrade back to nothing. Needs
 Docker.
 
-The repositories run as a plain database role with the grants infra/dev/postgres/50-app-role.sql
-gives the product's cw_app: it owns nothing and is not a superuser. ``audit.event`` is made as
-identity's migration makes it (``py_common.audit.testing.install_audit_table``).
+The repositories run as the pipeline's own role, cw_pipeline as infra/dev/postgres/roles.sql makes
+it: it owns nothing, is not a superuser, and may only add rows to the audit log, which the
+owner's engine reads back. ``audit.event`` is made as identity's migration makes it
+(``py_common.audit.testing.install_audit_table``).
 """
 
 import hashlib
@@ -22,7 +23,7 @@ from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
-from sqlalchemy import Engine, create_engine, inspect, make_url, text
+from sqlalchemy import Engine, create_engine, inspect, text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.pool import NullPool
 from testcontainers.community.postgres import PostgresContainer
@@ -54,6 +55,7 @@ from pipeline.infrastructure.adapters import RegistryAdapterTypes
 from pipeline.infrastructure.models import Base
 from pipeline.infrastructure.repository import PostgresUnitOfWorkFactory
 from py_common.audit.testing import install_audit_table, read_audit_entries
+from py_common.db_roles import apply_roles, as_role
 
 SERVICE_DIR = Path(__file__).resolve().parents[2]
 IMAGE = "pgvector/pgvector:0.8.6-pg16"
@@ -68,8 +70,6 @@ STORE_TABLES = {
     "document_retry",
 }
 TABLES = {*STORE_TABLES, "outbox_event", "alembic_version"}
-APP_ROLE = "pipeline_app"
-APP_PASSWORD = "app-role-for-tests"
 NOW = datetime(2026, 10, 6, 4, 30, tzinfo=UTC)
 DEFINITION = SourceDefinition(
     key="cbic_notifications",
@@ -90,20 +90,12 @@ def database_url() -> Iterator[str]:
         with admin.connect() as connection:
             connection.execute(text(f"CREATE SCHEMA {SCHEMA}"))
             connection.execute(text("CREATE SCHEMA audit"))
-            connection.execute(
-                text(f"CREATE ROLE {APP_ROLE} LOGIN PASSWORD '{APP_PASSWORD}' NOSUPERUSER")
-            )
-            for schema in (SCHEMA, "audit"):
-                connection.execute(text(f"GRANT USAGE ON SCHEMA {schema} TO {APP_ROLE}"))
-                connection.execute(
-                    text(
-                        f"ALTER DEFAULT PRIVILEGES IN SCHEMA {schema} "
-                        f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {APP_ROLE}"
-                    )
-                )
         with admin.begin() as connection:
             install_audit_table(connection)
         admin.dispose()
+        # The pipeline's own role, as a fresh dev volume has it before the migrations: the
+        # tables they create reach it too.
+        apply_roles(base_url)
         yield f"{base_url}?options=-csearch_path%3D{SCHEMA}%2Cpublic"
 
 
@@ -126,7 +118,7 @@ def engine(database_url: str, migrated: Config) -> Iterator[Engine]:
 
 @pytest.fixture(scope="module")
 def units(database_url: str, migrated: Config) -> Iterator[PostgresUnitOfWorkFactory]:
-    url = make_url(database_url).set(username=APP_ROLE, password=APP_PASSWORD)
+    url = as_role(database_url, SCHEMA)
     factory = PostgresUnitOfWorkFactory(create_engine(url, poolclass=NullPool))
     yield factory
     factory.engine.dispose()

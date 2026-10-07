@@ -1,5 +1,6 @@
-"""The public list of a business's obligations on Postgres, through a role that owns nothing and
-is not a superuser, so row-level security holds as in a deployment. Needs Docker.
+"""The public list of a business's obligations on Postgres, through obligation's own role,
+cw_obligation, which owns nothing and is not a superuser, so row-level security holds as in a
+deployment. Needs Docker.
 
 - pages of one follow one another in the order of due date (none last) and id, the order a single
   page has, ties broken by id;
@@ -37,14 +38,13 @@ from obligation.testing import (
     ref_of,
     rule,
 )
+from py_common.db_roles import apply_roles, as_role
 
 pytestmark = pytest.mark.integration
 
 SERVICE_DIR = Path(__file__).resolve().parents[2]
 IMAGE = "pgvector/pgvector:0.8.6-pg16"
 SCHEMA = "obligation"
-APP_ROLE = "obligation_list_app"
-APP_PASSWORD = "list-role-for-tests"
 TENANT_A = TenantId(UUID("0a0a0a0a-0000-4000-8000-0000000000a1"))
 TENANT_B = TenantId(UUID("0b0b0b0b-0000-4000-8000-0000000000b1"))
 BUSINESS = BusinessId(UUID(int=0xB1))
@@ -62,15 +62,10 @@ def database_url() -> Iterator[str]:
         admin = create_engine(base_url, isolation_level="AUTOCOMMIT")
         with admin.connect() as connection:
             connection.execute(text(f"CREATE SCHEMA {SCHEMA}"))
-            connection.execute(text(f"CREATE ROLE {APP_ROLE} LOGIN PASSWORD '{APP_PASSWORD}'"))
-            connection.execute(text(f"GRANT USAGE ON SCHEMA {SCHEMA} TO {APP_ROLE}"))
-            connection.execute(
-                text(
-                    f"ALTER DEFAULT PRIVILEGES IN SCHEMA {SCHEMA} "
-                    f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {APP_ROLE}"
-                )
-            )
         admin.dispose()
+        # The service's own role, as a fresh dev volume has it before the migrations:
+        # the tables they create, again after a downgrade, reach it too.
+        apply_roles(base_url)
         yield f"{base_url}?options=-csearch_path%3D{SCHEMA}%2Cpublic"
 
 
@@ -80,7 +75,7 @@ def app_url(database_url: str) -> str:
         env.setenv("CW_DATABASE_URL", database_url)
         env.setenv("CW_DB_SCHEMA", SCHEMA)
         command.upgrade(Config(str(SERVICE_DIR / "alembic.ini")), "head")
-    return database_url.replace("test:test@", f"{APP_ROLE}:{APP_PASSWORD}@")
+    return as_role(database_url, SCHEMA)
 
 
 @pytest.fixture(scope="module")

@@ -21,7 +21,12 @@ Anything else on the public listener, and any path no service owns, is a 404
 - **Registry** (`cw_mvp.registry`): one entry per `services/` directory with its schema,
   settings class, `build_app`, worker components, URL settings and the routes that call other
   services. Each service gets its own settings: the shared `CW_*` settings, its schema
-  first on the `search_path`, and every URL of another service at `CW_MVP_INTERNAL_URL`.
+  first on the `search_path`, and every URL of another service at `CW_MVP_INTERNAL_URL`. Every
+  hosted service connects with the one `CW_DATABASE_URL`, so the process runs as one role with
+  every service schema (`cw_app` locally, `infra/dev/postgres/50-app-role.sql`). The separate
+  processes of `make run` connect as each service's own role, `cw_<schema>`
+  (`infra/dev/postgres/roles.sql`); doing the same here needs a URL per service in the registry,
+  one pool each, which is deploy work for package M5-2.
 - **Exposure** (`cw_mvp.exposure`): every route's class, public, admin or internal. A route
   without one is not served publicly, and the unit tests fail until it has one.
 - **Tokens**: identity is built first. Every other service verifies callers with identity's

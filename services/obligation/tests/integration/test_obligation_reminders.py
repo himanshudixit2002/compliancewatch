@@ -1,9 +1,10 @@
 """Migration 0003 on Postgres: the reminder record and the tenant directory under row-level
-security through a plain role, the open-due query, the reminder sweep publishing through the
-outbox once per threshold, and the decision consumer committing with its inbox row. Needs Docker.
+security through obligation's own role, the open-due query, the reminder sweep publishing
+through the outbox once per threshold, and the decision consumer committing with its inbox row.
+Needs Docker.
 
-The use cases run as a role that owns nothing and is not a superuser: a superuser bypasses
-row-level security whatever the table says.
+The use cases run as cw_obligation, as infra/dev/postgres/roles.sql makes it: it owns nothing and
+is not a superuser, and a superuser bypasses row-level security whatever the table says.
 """
 
 import importlib
@@ -34,6 +35,7 @@ from obligation.application.reminders import SendDueReminders
 from obligation.infrastructure.models import Base
 from obligation.infrastructure.repository import PostgresTenantDirectory, PostgresUnitOfWorkFactory
 from obligation.testing import FakeRuleVersionReader, rule
+from py_common.db_roles import apply_roles, as_role
 from py_common.outbox import (
     ConsumerConfig,
     IdempotentConsumer,
@@ -49,8 +51,6 @@ IMAGE = "pgvector/pgvector:0.8.6-pg16"
 SCHEMA = "obligation"
 REMINDER = "obligation_reminder"
 DIRECTORY = "obligation_tenant"
-APP_ROLE = "obligation_app"
-APP_PASSWORD = "app-role-for-tests"
 AS_OF = date(2026, 10, 1)
 
 
@@ -65,15 +65,10 @@ def database_url() -> Iterator[str]:
         admin = create_engine(base_url, isolation_level="AUTOCOMMIT")
         with admin.connect() as connection:
             connection.execute(text(f"CREATE SCHEMA {SCHEMA}"))
-            connection.execute(text(f"CREATE ROLE {APP_ROLE} LOGIN PASSWORD '{APP_PASSWORD}'"))
-            connection.execute(text(f"GRANT USAGE ON SCHEMA {SCHEMA} TO {APP_ROLE}"))
-            connection.execute(
-                text(
-                    f"ALTER DEFAULT PRIVILEGES IN SCHEMA {SCHEMA} "
-                    f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {APP_ROLE}"
-                )
-            )
         admin.dispose()
+        # The service's own role, as a fresh dev volume has it before the migrations:
+        # the tables they create, again after a downgrade, reach it too.
+        apply_roles(base_url)
         yield f"{base_url}?options=-csearch_path%3D{SCHEMA}%2Cpublic"
 
 
@@ -95,7 +90,7 @@ def engine(database_url: str, alembic_config: Config) -> Iterator[Engine]:
 
 @pytest.fixture(scope="module")
 def app_engine(database_url: str, engine: Engine) -> Iterator[Engine]:
-    engine = create_engine(database_url.replace("test:test@", f"{APP_ROLE}:{APP_PASSWORD}@"))
+    engine = create_engine(as_role(database_url, SCHEMA))
     yield engine
     engine.dispose()
 

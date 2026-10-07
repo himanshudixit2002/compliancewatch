@@ -1,7 +1,10 @@
 """Migration 0003 and the seed repository on Postgres: draft versions are created, re-runs are
 idempotent, edits update drafts, versions that left draft stay untouched (a direct move to
 published is refused by the migration 0007 guard, so the test moves one to review). Needs
-Docker."""
+Docker.
+
+The seed runs as the rulebook's own role, ``cw_rulebook`` as infra/dev/postgres/roles.sql makes
+it, which is the role ``make seed SERVICE=rulebook`` connects as; the owner only migrates."""
 
 from collections.abc import Iterator
 from datetime import UTC, datetime
@@ -15,6 +18,7 @@ from sqlalchemy.orm import Session
 from testcontainers.community.postgres import PostgresContainer
 
 import ontology as ontology_package
+from py_common.db_roles import apply_roles, as_role
 from rulebook.application.seed_loader import load_calendar
 from rulebook.infrastructure.models import RuleRow, RuleVersionRow
 from rulebook.infrastructure.seed_repository import SqlAlchemySeedRepository
@@ -41,7 +45,8 @@ def engine(database_url: str) -> Iterator[Engine]:
         env.setenv("CW_DATABASE_URL", database_url)
         env.setenv("CW_DB_SCHEMA", SCHEMA)
         command.upgrade(Config(str(SERVICE_DIR / "alembic.ini")), "head")
-    engine = create_engine(database_url)
+    apply_roles(database_url)
+    engine = create_engine(as_role(database_url, SCHEMA))
     yield engine
     engine.dispose()
 

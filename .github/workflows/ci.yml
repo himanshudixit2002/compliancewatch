@@ -77,6 +77,7 @@ jobs:
               - 'infra/scripts/**' # the repository checks: ruff, mypy and their unit tests
               - '.trivyignore.yaml' # its unit test holds every entry to a statement and an expiry
               - 'packages/flags/**' # make flags-check: the registry against the settings modules
+              - 'infra/dev/postgres/**' # the service roles' files, which py-common's unit tests read
             typescript:
               - 'apps/**'
               - 'packages/ui/**'
@@ -199,11 +200,12 @@ jobs:
         env:
           CHANGED: ${{ steps.changed.outputs.any_files }}
         # Every directory holding tests/integration is a target. A change to a shared path runs all
-        # of them; otherwise a target runs when a changed file lies under its directory.
+        # of them (infra/dev/postgres too: the tests connect as the roles its roles.sql makes);
+        # otherwise a target runs when a changed file lies under its directory.
         run: |
           all=$(git ls-files '*/tests/integration/*.py' | sed 's#/tests/integration/.*##' | sort -u \
             | jq -Rcs 'split("\n") | map(select(length > 0))')
-          shared='^(packages/(py-common|domain-kernel|ontology)/|(pyproject\.toml|uv\.lock|\.python-version|conftest\.py|Makefile|\.github/workflows/ci\.yml)$)'
+          shared='^(packages/(py-common|domain-kernel|ontology)/|infra/dev/postgres/|(pyproject\.toml|uv\.lock|\.python-version|conftest\.py|Makefile|\.github/workflows/ci\.yml)$)'
           if jq -e --arg shared "$shared" 'any(.[]; test($shared))' <<< "$CHANGED" > /dev/null; then
             targets=$all
           else
@@ -489,6 +491,52 @@ jobs:
         run: docker compose --profile mvp run --rm mvp-release
       - name: Tenant tables have forced row-level security (migration lint, catalog rules)
         run: make migrations-catalog
+      # The services' own roles (infra/dev/postgres/roles.sql): the fresh volume got them before
+      # the release migrated, and make db-roles runs the file again, as make migrate and make dev
+      # do, which also takes back the writes on each alembic_version that the default privileges
+      # gave. Twice, since it must change nothing the second time. No cw_ role may be a superuser,
+      # bypass row-level security, write an alembic_version, create objects in public or its own
+      # schema, or be a member of another role, and each of the ten logs in with nothing but LOGIN.
+      - name: Service roles, none a superuser or bypassing row-level security (make db-roles)
+        run: |
+          make db-roles
+          make db-roles
+          sql() { docker compose exec -T postgres psql -U cw -d compliancewatch -v ON_ERROR_STOP=1 -Atc "$1"; }
+          bypass=$(sql "select coalesce(string_agg(rolname, ', '), '') from pg_roles where rolname like 'cw\_%' and (rolsuper or rolbypassrls)")
+          if [ -n "$bypass" ]; then
+            echo "::error::these roles are superusers or bypass row-level security: $bypass"; exit 1
+          fi
+          sql "select rolname, rolsuper, rolbypassrls, rolinherit, rolcreatedb, rolcreaterole from pg_roles where rolname like 'cw\_%' order by 1"
+          plain=$(sql "select count(*) from pg_roles where rolname in ('cw_identity', 'cw_profile', 'cw_rulebook', 'cw_applicability', 'cw_obligation', 'cw_notification', 'cw_qa', 'cw_llm_gateway', 'cw_eval', 'cw_pipeline') and rolcanlogin and not (rolinherit or rolcreatedb or rolcreaterole or rolreplication)")
+          test "$plain" = 10
+          writes=$(sql "select count(*) from pg_namespace n where case when to_regrole('cw_' || n.nspname) is null or to_regclass(format('%I.alembic_version', n.nspname)) is null then false else has_table_privilege('cw_' || n.nspname, format('%I.alembic_version', n.nspname), 'INSERT, UPDATE, DELETE, TRUNCATE') end")
+          test "$writes" = 0
+          creates=$(sql "select coalesce(string_agg(r.rolname || ' on ' || n.nspname, ', '), '') from pg_roles r join pg_namespace n on n.nspname in ('public', substr(r.rolname, 4)) where r.rolname like 'cw\_%' and has_schema_privilege(r.oid, n.oid, 'CREATE')")
+          if [ -n "$creates" ]; then
+            echo "::error::these roles may create objects in a schema: $creates"; exit 1
+          fi
+          members=$(sql "select coalesce(string_agg(m.rolname || ' in ' || g.rolname, ', '), '') from pg_auth_members a join pg_roles m on m.oid = a.member join pg_roles g on g.oid = a.roleid where m.rolname like 'cw\_%'")
+          if [ -n "$members" ]; then
+            echo "::error::these roles are members of other roles: $members"; exit 1
+          fi
+      # Each service started on its own as its own role: the UI-only stack on the Postgres store
+      # (make web-stack STORE=postgres connects each service as cw_<schema>) answers /ready on
+      # every port, and a tenant's read under row-level security answers 200; then it stops. On
+      # any failure, make web-stack-wait's included, the services' logs are printed first.
+      - name: Each service answers /ready as its own role (make web-stack STORE=postgres)
+        run: |
+          trap 'code=$?; if [ "$code" -ne 0 ]; then tail -n 40 var/web-stack/*.log || true; fi; make web-stack-down' EXIT
+          make web-stack STORE=postgres
+          make web-stack-wait
+          status=0
+          for port in $(seq 8001 8010); do
+            if ! curl -sf "http://localhost:$port/ready"; then echo "::error::/ready failed on $port"; status=1; fi
+            echo
+          done
+          tenant=00000000-0000-4000-8000-00000000c1a0
+          curl -sf -H "x-tenant-id: $tenant" http://localhost:8002/v1/businesses | jq -e '.items == []' || status=1
+          curl -sf -H "x-tenant-id: $tenant" http://localhost:8004/v1/applicability-engine/review-items | jq -e '.items == []' || status=1
+          exit "$status"
       # The product from the image on this stack: the app and the worker in containers with Kafka
       # and Temporal on (compose profile mvp), the seed calendar from the image, synthetic tenants
       # and the demo publication, then the check, over HTTP on 8000 and 8080 and in the database

@@ -24,6 +24,7 @@ src/py_common/
   pagination.py        # keyset pagination: Pagination (limit, cursor), encode/decode_cursor, Page[T], page_of
   app.py               # create_app(service_name, version, routers, problem_status, authenticator, ...); module_app for lazy main modules
   database.py          # create_pooled_engine: QueuePool sized by CW_DB_POOL_SIZE and CW_DB_MAX_OVERFLOW, pinged before use
+  db_roles.py          # the services' roles cw_<schema> (infra/dev/postgres/roles.sql): apply_roles, as_role for integration tests
   auth/                # verified identities; the package itself loads no FastAPI
     keys.py            # ES256 SigningKey, KeySet (first signs, all published), load_signing_keys
     tokens.py          # TokenIssuer, TokenVerifier (ES256 only), JwksUrlSource (1 h cache), StaticKeySource
@@ -461,8 +462,12 @@ what the table refuses.
   outside an id key. A masked row cannot show what a PAN, GSTIN, email or phone number changed
   from or to.
 
+Each service's database role (`infra/dev/postgres/roles.sql`, `cw_<schema>`) may only insert
+into the table, and only `cw_identity` may also read it; the writer needs nothing more, since it
+inserts without `RETURNING`.
+
 Not built yet: the read route `GET /v1/identity/audit`, the NDJSON export, pseudonymising rows on
-a tenant's erasure, the call sites in every service and database roles that may only insert.
+a tenant's erasure and the call sites in every service.
 
 ## Worker processes
 

@@ -248,8 +248,9 @@ Every service exposes `GET /health` (liveness) and `GET /ready` (readiness) from
 | Target | What it does |
 | --- | --- |
 | `make dev` / `dev-observability` / `dev-llm` / `dev-down` / `dev-reset` / `dev-logs` / `dev-ps` / `dev-psql` | Docker Compose dev stack (section 17); `dev-observability` adds Langfuse, the OpenTelemetry collector, Prometheus, Tempo and Grafana (http://localhost:3030), `dev-llm` builds and starts the fake LLM gateway container |
-| `make migrate [SERVICE=x]` | `alembic upgrade head` for every service (or one), each in its own schema |
-| `make run SERVICE=x [PORT=n]` | uvicorn with reload on the service's dev port; an explicit environment variable beats `.env` |
+| `make migrate [SERVICE=x]` | `alembic upgrade head` for every service (or one), each in its own schema, as the schemas' owner, then `make db-roles` |
+| `make db-roles` | Create or refresh each service's database role `cw_<schema>` (`infra/dev/postgres/roles.sql`) and its dev password on the running Postgres; `make dev`, `make migrate` and `make dev-restore` run it |
+| `make run SERVICE=x [PORT=n]` | uvicorn with reload on the service's dev port, as its database role `cw_<schema>` (`DB_ROLE=owner` for the owner); an explicit environment variable beats `.env` |
 | `make openapi SERVICE=x` | Export the service's OpenAPI spec to `packages/contracts/openapi/<x>.v1.json` (checked by a contract test) |
 | `make contracts` / `contracts-check` | Regenerate the event clients from `packages/contracts/events/schemas`; check the schemas and that the committed clients match |
 | `make relay SERVICE=x` | Run the outbox relay for one service's schema against the dev stack |

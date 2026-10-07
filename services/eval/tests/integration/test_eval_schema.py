@@ -1,5 +1,6 @@
 """Migration 0001 on Postgres: the tables, the unit of work with the outbox, the use cases end to
-end, and a downgrade back to nothing. Needs Docker."""
+end as the eval service's own role (``cw_eval`` as infra/dev/postgres/roles.sql makes it, not a
+superuser), and a downgrade back to nothing. Needs Docker."""
 
 from collections.abc import Iterator
 from pathlib import Path
@@ -16,6 +17,7 @@ from eval_service.domain.errors import EvalHarnessError
 from eval_service.domain.model import Profile, Suite
 from eval_service.infrastructure.repository import PostgresUnitOfWorkFactory
 from eval_service.testing import ScriptedRunner, TickingClock, gate
+from py_common.db_roles import apply_roles, as_role
 
 SERVICE_DIR = Path(__file__).resolve().parents[2]
 IMAGE = "pgvector/pgvector:0.8.6-pg16"
@@ -53,6 +55,14 @@ def engine(database_url: str, migrated: Config) -> Iterator[Engine]:
     engine.dispose()
 
 
+@pytest.fixture(scope="module")
+def role_engine(database_url: str, migrated: Config) -> Iterator[Engine]:
+    apply_roles(database_url)
+    engine = create_engine(as_role(database_url, SCHEMA))
+    yield engine
+    engine.dispose()
+
+
 def test_migration_creates_the_tables_without_tenant_columns(engine: Engine) -> None:
     inspector = inspect(engine)
     assert set(inspector.get_table_names(schema=SCHEMA)) == TABLES
@@ -61,8 +71,10 @@ def test_migration_creates_the_tables_without_tenant_columns(engine: Engine) -> 
         assert "tenant_id" not in columns, "eval runs are platform data"
 
 
-def test_runs_are_stored_with_drift_and_published_through_the_outbox(engine: Engine) -> None:
-    factory = PostgresUnitOfWorkFactory(engine)
+def test_runs_are_stored_with_drift_and_published_through_the_outbox(
+    engine: Engine, role_engine: Engine
+) -> None:
+    factory = PostgresUnitOfWorkFactory(role_engine)
     runner = ScriptedRunner(
         [gate(RECALL, 1.0), gate(PARSE, 1.0)], [gate(RECALL, 0.75), gate(PARSE, None)]
     )
@@ -94,8 +106,8 @@ def test_runs_are_stored_with_drift_and_published_through_the_outbox(engine: Eng
     assert rows[1].message["payload"]["previous_run_id"] == str(first.id)
 
 
-def test_a_harness_failure_writes_no_row(engine: Engine) -> None:
-    factory = PostgresUnitOfWorkFactory(engine)
+def test_a_harness_failure_writes_no_row(engine: Engine, role_engine: Engine) -> None:
+    factory = PostgresUnitOfWorkFactory(role_engine)
     with engine.connect() as connection:
         before: int = connection.execute(text("SELECT count(*) FROM eval_run")).scalar_one()
     with pytest.raises(EvalHarnessError):

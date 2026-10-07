@@ -80,7 +80,10 @@ describe("BusinessForm", () => {
       "Example business",
     );
     expect(screen.getByText("Check the fields marked below.")).toBeDefined();
-    expect(document.activeElement?.getAttribute("data-slot")).toBe("business-errors");
+    // Focus moves in an effect after the refusal renders, so a slow runner needs the wait.
+    await waitFor(() =>
+      expect(document.activeElement?.getAttribute("data-slot")).toBe("business-errors"),
+    );
     expect(await runAxe(container)).toHaveNoViolations();
   });
 
