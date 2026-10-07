@@ -6,7 +6,12 @@
 - ``india_only``: no text leaves India for a model call. A call reaches only a provider that runs
   in India, which today is the fake one alone, serving ``fake/...`` models in process; every other
   provider is refused with ``ResidencyUnavailableError`` (503 ``llm-residency-unavailable``)
-  before it is called (``infrastructure.providers.residency``).
+  before it is called (``infrastructure.providers.residency``), and Langfuse gets each call's
+  metadata only, no prompt or answer text.
+
+The policy covers model calls only. Under either value these still leave the process, for
+wherever their hosts run: Langfuse traces, log lines to the log collector (masked for the
+identifiers the patterns recognise) and OpenTelemetry spans (not masked).
 
 Which of the two the product runs under is the maintainer's decision, taken with counsel
 (ADR-020, Proposed).

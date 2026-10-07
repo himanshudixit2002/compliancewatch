@@ -22,8 +22,10 @@ What leaves:
   (`CW_AI_GATEWAY_ZERO_DATA_RETENTION`, which needs a paid plan). Masking is pattern matching:
   a name, an address or a detail written in a question's free text still leaves.
 - The traces of those calls go to Langfuse with the same masked text, wherever
-  `CW_LANGFUSE_HOST` points, and log lines go wherever the log collector sends them; both are
-  masked the same way.
+  `CW_LANGFUSE_HOST` points (under `india_only`, their metadata only). Log lines go wherever the
+  log collector sends them, masked for the identifiers the patterns recognise, and OpenTelemetry
+  spans to the collector at `CW_OTEL_ENDPOINT`, not masked. The residency policy governs the
+  model calls alone, not these.
 
 Everything else the product stores is planned for the Mumbai region (the data map; ADR-013 and
 ADR-014 apply the residency assumption of the guide's privacy section, section 16, to every

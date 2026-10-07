@@ -301,16 +301,11 @@ still reaches the model as written.
 
 No routed model runs inference in India: every real call sends the masked text abroad, to the
 hosts the route allows, with zero data retention asked for. `CW_LLM_RESIDENCY` says whether that
-may happen, and nothing else does. The gateway reads it once at start. It refuses to start with
-the variable set but empty, which every other setting would read as unset and here would mean
-`global`, and with `CW_FLAG_LLM_GATEWAY_RESIDENCY` set: the flag registry's entry
-`llm_gateway.residency` (owner ai-platform) is the setting's record and nothing reads the flag, so
-no flag provider can answer a policy the gateway is not running. `cw-mvp check-config` reports
-both:
+may happen:
 
 - `global`, the default, and what `make product` and the image run: it may, as described above.
-- `india_only`: no text leaves India. Once every provider is registered, the composition root
-  wraps each one that is not an adapter in India (`IN_INDIA` in
+- `india_only`: no text leaves India for a model call. Once every provider is registered, the
+  composition root wraps each one that is not an adapter in India (`IN_INDIA` in
   `infrastructure/providers/residency.py`, only the fake provider today) in
   `ResidencyBlockedProvider`, whatever it is and whatever name it is registered under: the
   Vercel provider, an adapter added later, the eval harness's completion provider. So no adapter
@@ -320,9 +315,23 @@ both:
   no fallback model is tried and the breaker does not count it. Langfuse gets no prompt, answer
   or error text of any call, only its metadata (names, ids, model, tokens, cost, masked counts).
   `fake/...` models, which the gateway serves in process, still answer, and with
-  `CW_LLM_PROVIDER=fake` every route does. Today that means `india_only` stops every real model call: rule extraction, judgement,
-  question answering and retrieval fail until a provider that runs inference in India is added
-  to `IN_INDIA` and wired behind the gateway.
+  `CW_LLM_PROVIDER=fake` every route does. Today that means `india_only` stops every real model
+  call: rule extraction, judgement, question answering and retrieval fail until a provider that
+  runs inference in India is added to `IN_INDIA` and wired behind the gateway. The pipeline, qa
+  and the eval harness never retry the refusal.
+
+The policy covers model calls only. Under `india_only` these still leave the process, to wherever
+their hosts run: the call's metadata to Langfuse (no prompt or answer text); the log lines, to the
+log collector, masked for the identifiers the patterns recognise; and OpenTelemetry spans, to the
+collector at `CW_OTEL_ENDPOINT`, which are not masked. Keeping those in India is the deployment's
+job (ADR-020).
+
+`CW_LLM_RESIDENCY` is the policy's one source, read once at start, and nothing else sets it. The
+gateway refuses to start with it set but empty, which every other setting would read as unset and
+here would mean `global`, and with `CW_FLAG_LLM_GATEWAY_RESIDENCY` set: the flag registry's entry
+`llm_gateway.residency` (owner ai-platform) is the setting's record and nothing reads the flag,
+so no flag provider can answer a policy the gateway is not running. `cw-mvp check-config` reports
+both.
 
 `GET /v1/llm-gateway/models` reports the policy on every route as
 `residency: {policy, real_models_allowed}`, and the `gateway_wired` line at start logs it.

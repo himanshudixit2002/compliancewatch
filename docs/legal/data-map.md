@@ -25,7 +25,7 @@ deletion pipeline that runs after `tenant.deletion.requested` (deadline 30 days)
 | Questions and answers | qa (not built) | Answer, improve, analyst review | Life of account + 30 days; anonymised eval cases indefinitely | Identifiers masked before any model call |
 | Notification record (recipient, address, occasion, template, dedupe key, state, attempts, error, dispatch and provider message ids; sent, delivered, read and failed times) and the values its message is filled with (business name, obligation title, dates, steps) | notification `notification`, with its `work_index` entry | Never send one occasion twice; delivery receipts; answer a dispute about a missed reminder | 2 years (guide section 9) [lawyer]; the message values emptied after 30 days once it has gone out or ended | Row-level security by tenant (`work_index` has none and holds only the tenant id, times and the provider message id). The rendered text is not stored. A daily sweep at 03:00 IST applies both periods. Replaces the 90-day sent log of the earlier draft; counsel to confirm |
 | Model call ledger (tenant id, feature, tokens, cost) | llm-gateway `llm_call` | Budgets and cost | 13 months | No prompt text |
-| Technical logs and traces | observability stack | Security and operations | 90 days (logs), 30 days (traces) | IP addresses in access logs; GSTINs, PANs, Aadhaar numbers, phone numbers and email addresses masked on every log line |
+| Technical logs and traces | observability stack | Security and operations | 90 days (logs), 30 days (traces) | IP addresses in access logs; GSTINs, PANs, Aadhaar numbers, phone numbers and email addresses masked on every log line where the patterns recognise them (a name, an address or free text is not masked); trace spans are not masked |
 | Billing customer and subscription ids | identity (billing, behind a flag) | Charging for the service | Life of account + 8 years for tax records [lawyer] | Card data never touches us; the payment provider holds it |
 
 Data residency: the design assumes the Mumbai region (ap-south-1) for every store; Meta and
@@ -36,8 +36,9 @@ provider.
 Cross-border model processing (Draft - to be reviewed by a lawyer): every call the llm-gateway
 makes to a real model sends text outside India, since no model it routes to runs inference in
 India. The text is regulator documents and, for an answer, the user's question with its evidence,
-with GSTINs, PANs, Aadhaar numbers, phone numbers and email addresses masked first; a name or
-another detail in a question's free text is not. The providers are asked to retain nothing (zero
-data retention), and the traces of the calls hold the same masked text.
-`CW_LLM_RESIDENCY=india_only` stops every such call; whether the product runs that way, or keeps
-the calls and says so, is open (ADR-020).
+with GSTINs, PANs, Aadhaar numbers, phone numbers and email addresses masked first where the
+patterns recognise them; a name or another detail in a question's free text is not. The providers
+are asked to retain nothing (zero data retention), and the traces of the calls hold the same masked
+text. `CW_LLM_RESIDENCY=india_only` stops every such call and keeps the text out of the traces;
+log lines and trace spans still go wherever their collectors run. Whether the product runs that
+way, or keeps the calls and says so, is open (ADR-020).
