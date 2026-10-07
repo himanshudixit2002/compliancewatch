@@ -1295,6 +1295,8 @@
   "ruleVersion.spec.unreadable": "A part of the condition this page cannot read, as stored:",
   "ruleVersion.spec.ontologyMissing": "The ontology could not be read, so the values below are shown as stored, without their labels or meanings.",
   "ruleVersion.spec.none": "The version states no condition yet.",
+  "ruleVersion.spec.emptyAllOf": "Nothing is listed here, so this group holds for every business.",
+  "ruleVersion.spec.emptyAnyOf": "Nothing is listed here, so this group holds for no business.",
   "ruleVersion.step.submit": "Submit for review",
   "ruleVersion.step.approve": "Approve",
   "ruleVersion.step.publish": "Publish",

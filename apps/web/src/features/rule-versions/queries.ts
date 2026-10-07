@@ -7,9 +7,9 @@ import type { ClientContext } from "@/server/api/services";
 import { getOntology } from "@/server/ontology";
 import { ok, type Result } from "@/server/result";
 import { hrefFor, screenById } from "@/shared/config/screens";
+import { describeSpecification } from "@/shared/ui/specification";
 import { ruleVersionsGateway } from "./gateway";
 import { listHref, type VersionListFilter } from "./model/list-filter";
-import { describeSpecification } from "./model/specification";
 import {
   PAGE_SIZE,
   RULE_BATCH,

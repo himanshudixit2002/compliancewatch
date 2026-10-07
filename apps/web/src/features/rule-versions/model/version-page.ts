@@ -3,8 +3,8 @@ import type { Citation, RuleVersion, WorkflowStep } from "@/entities/rule-versio
 import { hrefFor, screenById } from "@/shared/config/screens";
 import { withQuery } from "@/shared/lib/url";
 import type { ServiceErrorLike } from "@/shared/ui/service-error";
+import type { SpecLine } from "@/shared/ui/specification";
 import type { AccessView } from "../ui/workflow-shared";
-import type { SpecLine } from "./specification";
 import { versionHref } from "./version-list";
 
 /**
