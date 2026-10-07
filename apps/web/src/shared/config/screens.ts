@@ -129,6 +129,8 @@ const REVIEW_RELATIONS = uses("rulebook", "GET", "/v1/rulebook/review/relations"
 /** The public API's list of one profile node's obligations, a page at a time. */
 const BUSINESS_OBLIGATIONS = uses("obligation", "GET", "/v1/businesses/{business_id}/obligations");
 const CHANGES = uses("rulebook", "GET", "/v1/changes");
+/** The audit trail in the caller's scope: a tenant's own, or the platform's for the regulatory team. */
+const AUDIT_TRAIL = uses("identity", "GET", "/v1/identity/audit");
 const CHANGE_IMPACT = uses("applicability-engine", "GET", "/v1/changes/{rule_version_id}/impact");
 /** py-common's liveness and readiness routes, which every committed spec carries. */
 const PROBES: readonly RouteRef[] = SERVICES_WITH_SPECS.flatMap((service) => [
@@ -1069,9 +1071,9 @@ const SCREEN_LIST = [
     section: "owner",
     roles: ["owner", "ca_admin", "compliance_lead"],
     tenantKinds: BUSINESS_TENANTS,
-    uses: [],
+    uses: [AUDIT_TRAIL],
     awaits: [servicesTrack("WP17", "identity", "GET", "/v1/identity/audit")],
-    status: "waiting",
+    status: "ready",
     e2e: [],
     guideRef: "10 GET /v1/audit; F11",
     nav: { group: "settings", order: 7 },
@@ -1866,9 +1868,9 @@ const SCREEN_LIST = [
     section: "admin",
     roles: REGULATORY,
     tenantKinds: ["internal"],
-    uses: [],
+    uses: [AUDIT_TRAIL],
     awaits: [servicesTrack("WP17", "identity", "GET", "/v1/identity/audit")],
-    status: "waiting",
+    status: "ready",
     e2e: [],
     guideRef: "15, 16; G36",
     nav: { group: "operations", order: 8 },

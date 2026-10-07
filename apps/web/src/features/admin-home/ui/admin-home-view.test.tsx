@@ -62,7 +62,9 @@ describe("AdminHomeView", () => {
     expect(pipeline?.textContent).toContain("Available");
     expect(team?.textContent).toContain("Ready to build");
     const audit = container.querySelector("[data-tool='admin.audit']");
-    expect(audit?.textContent).toContain("Waiting for a backend");
+    expect(audit?.textContent).toContain("Ready to build");
+    const tenants = container.querySelector("[data-tool='admin.tenants']");
+    expect(tenants?.textContent).toContain("Waiting for a backend");
     // axe over every tool group is page sized and slow in jsdom on CI runners, so it checks one
     // group's table here; e2e/admin-home.spec.ts runs AxeBuilder over the whole /admin page.
     const engine = container.querySelector<HTMLElement>("[data-group='engine']");
