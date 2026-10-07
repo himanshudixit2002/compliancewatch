@@ -1,5 +1,5 @@
 """The identity service's unit of work: consents, tenants, users, the subject index, service
-clients, the events and the audit entries, in one transaction.
+clients, the billing ledger, the events and the audit entries, in one transaction.
 
 ``UnitOfWorkFactory(tenant_id)`` opens a transaction for one tenant: row-level security admits
 that tenant's rows only (and, on the tenant table, the tenant itself). ``tenant_id=None`` opens
@@ -14,6 +14,7 @@ from typing import Protocol
 from domain_kernel.audit import AuditSink
 from domain_kernel.events import DomainEvent
 from domain_kernel.ids import TenantId, UserId
+from identity.domain.billing import BillingRepository
 from identity.domain.consent import ConsentRepository
 from identity.domain.service_clients import ServiceClientRepository
 from identity.domain.tenancy import SubjectEntry, Tenant, User
@@ -77,6 +78,11 @@ class UnitOfWork(Protocol):
 
     @property
     def service_clients(self) -> ServiceClientRepository: ...
+
+    @property
+    def billing(self) -> BillingRepository:
+        """The tenant's billing ledger; with no tenant it holds nothing and refuses writes."""
+        ...
 
     @property
     def events(self) -> EventSink: ...

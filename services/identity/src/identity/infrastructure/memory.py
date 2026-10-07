@@ -1,14 +1,14 @@
 """In-memory stores: tests, demos and the app before Postgres.
 
 ``MemoryStore`` holds consents, tenants, users, the subject index, service clients, the
-published events and the audit log (``audit``, masked as ``audit.event`` keeps it). A unit of
-work keeps what it did only when it ends without an error, as a Postgres transaction would, and
-it mirrors row-level security: it sees the rows of its own tenant, none when it has no tenant,
-and refuses to write another tenant's rows (an audit entry of no tenant is allowed). A unit
-works on a copy of the store, so units run one at a time (a store-level lock held from open to
-commit or rollback): two overlapping requests, of one tenant or of two, cannot both start from
-the same copy and lose each other's writes. ``MemoryChannelStore`` does the same for channel
-consents.
+billing ledger (``billing``), the published events and the audit log (``audit``, masked as
+``audit.event`` keeps it). A unit of work keeps what it did only when it ends without an
+error, as a Postgres transaction would, and it mirrors row-level security: it sees the rows of
+its own tenant, none when it has no tenant, and refuses to write another tenant's rows (an audit
+entry of no tenant is allowed). A unit works on a copy of the store, so units run one at a time
+(a store-level lock held from open to commit or rollback): two overlapping requests, of one
+tenant or of two, cannot both start from the same copy and lose each other's writes.
+``MemoryChannelStore`` does the same for channel consents.
 """
 
 import threading
@@ -20,6 +20,7 @@ from domain_kernel.audit import AuditEntry
 from domain_kernel.events import DomainEvent
 from domain_kernel.ids import TenantId, UserId
 from identity.domain.audit import AuditQuery, AuditScope, newest_first_key, readable
+from identity.domain.billing import Customer, StoredBillingEvent, Subscription
 from identity.domain.channel_consent import (
     ChannelConsentRecord,
     ChannelUnitOfWork,
@@ -140,6 +141,63 @@ class MemoryServiceClientRepository:
         return [self._clients[client_id] for client_id in sorted(self._clients)]
 
 
+class MemoryBillingLedger:
+    """What ``MemoryStore.billing`` holds: every tenant's customers, subscriptions and events."""
+
+    def __init__(self) -> None:
+        self.customers: dict[TenantId, tuple[Customer, str, datetime]] = {}
+        self.subscriptions: dict[str, Subscription] = {}
+        self.events: list[StoredBillingEvent] = []
+
+    def copy(self) -> "MemoryBillingLedger":
+        other = MemoryBillingLedger()
+        other.customers = dict(self.customers)
+        other.subscriptions = dict(self.subscriptions)
+        other.events = list(self.events)
+        return other
+
+
+class MemoryBillingRepository:
+    def __init__(self, ledger: MemoryBillingLedger, tenant_id: TenantId | None) -> None:
+        self._ledger = ledger
+        self._tenant = tenant_id
+
+    def customer(self) -> Customer | None:
+        found = None if self._tenant is None else self._ledger.customers.get(self._tenant)
+        return None if found is None else found[0]
+
+    def add_customer(self, customer: Customer, *, provider: str, at: datetime) -> None:
+        _require_tenant(self._tenant, customer.tenant_id)
+        if customer.tenant_id in self._ledger.customers:
+            raise RowSecurityViolationError(f"tenant {customer.tenant_id} has a customer already")
+        self._ledger.customers[customer.tenant_id] = (customer, provider, at)
+
+    def subscription(self, provider_subscription_id: str) -> Subscription | None:
+        found = self._ledger.subscriptions.get(provider_subscription_id)
+        return found if found is not None and found.tenant_id == self._tenant else None
+
+    def subscriptions(self) -> list[Subscription]:
+        mine = [s for s in self._ledger.subscriptions.values() if s.tenant_id == self._tenant]
+        return sorted(mine, key=lambda s: (s.started_at, s.provider_subscription_id), reverse=True)
+
+    def save_subscription(self, subscription: Subscription) -> None:
+        _require_tenant(self._tenant, subscription.tenant_id)
+        held = self._ledger.subscriptions.get(subscription.provider_subscription_id)
+        if held is not None and held.tenant_id != subscription.tenant_id:
+            raise RowSecurityViolationError("the subscription id belongs to another tenant")
+        self._ledger.subscriptions[subscription.provider_subscription_id] = subscription
+
+    def append_event(self, event: StoredBillingEvent) -> bool:
+        _require_tenant(self._tenant, event.tenant_id)
+        if any(
+            held.tenant_id == event.tenant_id and held.body_sha256 == event.body_sha256
+            for held in self._ledger.events
+        ):
+            return False
+        self._ledger.events.append(event)
+        return True
+
+
 class MemorySink:
     def __init__(self) -> None:
         self.pending: list[DomainEvent] = []
@@ -155,11 +213,13 @@ class MemoryUnitOfWork:
         self._users = dict(store.users)
         self._subjects = dict(store.subjects)
         self._clients = dict(store.service_clients)
+        self._billing = store.billing.copy()
         self.consents = MemoryConsentRepository(self._records, tenant_id)
         self.tenants = MemoryTenantRepository(self._tenants, tenant_id)
         self.users = MemoryUserRepository(self._users, tenant_id)
         self.subjects = MemorySubjectIndex(self._subjects)
         self.service_clients = MemoryServiceClientRepository(self._clients)
+        self.billing = MemoryBillingRepository(self._billing, tenant_id)
         self.events = MemorySink()
         self.audit = MemoryAuditSink(store.audit, tenant_id=tenant_id)
 
@@ -173,6 +233,7 @@ class MemoryUnitOfWork:
         store.subjects.update(self._subjects)
         store.service_clients.clear()
         store.service_clients.update(self._clients)
+        store.billing = self._billing
         store.events.extend(self.events.pending)
         self.audit.commit()
 
@@ -184,6 +245,7 @@ class MemoryStore:
         self.users: dict[UserId, User] = {}
         self.subjects: dict[tuple[str, str], SubjectEntry] = {}
         self.service_clients: dict[str, ServiceClient] = {}
+        self.billing = MemoryBillingLedger()
         self.events: list[DomainEvent] = []
         self.audit: list[AuditEntry] = []
         self._lock = threading.Lock()
