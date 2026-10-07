@@ -41,8 +41,14 @@ def _settings(**overrides: Any) -> RulebookSettings:
     return rulebook_settings(rulebook_store="postgres", **overrides)
 
 
-def test_with_publishing_off_there_is_nothing_to_run() -> None:
-    assert worker.components(_settings()).is_empty
+def test_with_publishing_and_intake_off_only_the_erasure_consumer_runs() -> None:
+    components = worker.components(_settings())
+    (erasure,) = components.consumers
+    assert (erasure.group_id, erasure.topics) == (
+        "rulebook.erasure",
+        ("tenant.deletion.requested",),
+    )
+    assert components.periodic == ()
 
 
 def test_the_worker_refuses_the_memory_store() -> None:
@@ -171,14 +177,15 @@ def record(
 
 def test_with_its_flag_on_the_worker_consumes_rule_candidates() -> None:
     components = worker.components(_settings(rulebook_candidate_intake_enabled=True))
-    (consumer,) = components.consumers
+    consumer, erasure = components.consumers
+    assert erasure.group_id == "rulebook.erasure"
     assert (consumer.group_id, consumer.topics) == (
         "rulebook.rule-candidates",
         ("rule.candidate.created",),
     )
     assert consumer.dead_letter_topics() == (DLQ,)
     assert components.periodic == (), "publishing stays off"
-    assert worker.components(_settings()).consumers == ()
+    assert [c.group_id for c in worker.components(_settings()).consumers] == ["rulebook.erasure"]
 
 
 async def test_a_candidate_event_becomes_a_candidate_and_its_task_once(inbox: Engine) -> None:
