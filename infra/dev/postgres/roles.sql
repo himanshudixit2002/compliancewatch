@@ -148,10 +148,19 @@ $roles$;
 -- data_request_directory, and nothing else; nobody logs in as it.
 --
 -- The owner running this file creates the function as the role: a superuser can, and a
--- deployment's owner (CREATEROLE, not a superuser) is made a member WITH INHERIT FALSE, SET TRUE,
--- so it may act as the role here but never holds its reads. The role gets CREATE on identity only
--- while the function is (re)made. Until identity's migration 0010 has made data_request, the role
--- is created and the rest skipped with a notice.
+-- deployment's owner (CREATEROLE, not a superuser) is made a member WITH INHERIT FALSE, SET TRUE.
+-- It does not inherit the role's reads, but it may SET ROLE to it and then read every tenant's
+-- requests through the policy, as the runbook's first step does. That is acceptable: the owner
+-- owns identity's tables and could switch their row-level security off anyway. The role makes
+-- the function, takes EXECUTE from PUBLIC and grants it to the callers while it still acts as the
+-- function's owner: a non-superuser owner back in its own role holds neither the function nor a
+-- grant option on it, so a REVOKE or GRANT it ran would only warn and change nothing. The role
+-- gets CREATE on identity only while the function is (re)made. Until identity's migration 0010
+-- has made data_request, the role is created and the rest skipped with a notice.
+--
+-- The function counts the open requests of each kind (neither completed nor, once offered and
+-- past the deadline, expired) and the overdue ones: never answered (received) and past the
+-- deadline (identity.domain.data_requests).
 DO $directory$
 DECLARE
   directory_role CONSTANT text := 'cw_identity_directory';
@@ -179,6 +188,9 @@ BEGIN
     END IF;
     IF found_role.rolinherit THEN
       EXECUTE format('ALTER ROLE %I NOINHERIT', directory_role);
+    END IF;
+    IF found_role.rolcreatedb OR found_role.rolcreaterole OR found_role.rolreplication THEN
+      EXECUTE format('ALTER ROLE %I NOCREATEDB NOCREATEROLE NOREPLICATION', directory_role);
     END IF;
   END IF;
 
@@ -221,14 +233,13 @@ BEGIN
     AS $body$
       SELECT r.kind::text,
              count(*),
-             count(*) FILTER (WHERE r.deadline_at < now())
+             count(*) FILTER (WHERE r.status = 'received' AND r.deadline_at < now())
         FROM identity.data_request AS r
-       WHERE r.status <> 'completed'
+       WHERE r.status = 'received' AND r.deadline_at < now()
+          OR r.status <> 'completed' AND r.deadline_at >= now()
        GROUP BY r.kind
     $body$
   $function$;
-  EXECUTE format('SET LOCAL ROLE %I', owner_name);
-  EXECUTE format('REVOKE CREATE ON SCHEMA identity FROM %I', directory_role);
   EXECUTE 'REVOKE ALL ON FUNCTION identity.data_requests_open() FROM PUBLIC';
   FOREACH caller IN ARRAY callers LOOP
     IF EXISTS (SELECT FROM pg_roles WHERE rolname = caller) THEN
@@ -237,5 +248,7 @@ BEGIN
       );
     END IF;
   END LOOP;
+  EXECUTE format('SET LOCAL ROLE %I', owner_name);
+  EXECUTE format('REVOKE CREATE ON SCHEMA identity FROM %I', directory_role);
 END
 $directory$;
