@@ -144,6 +144,9 @@ scripts/seed/       the demo-tenant seed (pnpm --filter web seed, make web-seed)
                     from the contracts; lib.mts the demo facts, arguments and fixture checks; report.mts the
                     summary and var/seed/last.json; fixtures/rulebook/ the recorded notification (README,
                     record.py)
+scripts/stack-guard/  the end-to-end suite's guard (pnpm --filter web e2e:guard, run by make web-e2e and by
+                    the chromium project's stack-guard setup): it refuses services that answer and are not
+                    the memory stack make web-stack recorded, unless E2E_ALLOW_POSTGRES=1
 e2e/                fixtures.ts (the axe check failing on serious or critical, the personas signed in through
                     the fake form, the seed-state reader, the stack's service URLs) and one spec per live page, plus a11y.spec.ts over
                     every registered page; product/ holds the real-data journeys the product project runs
@@ -153,8 +156,9 @@ e2e/                fixtures.ts (the axe check failing on serious or critical, t
 next.config.ts      typed routes, security headers; eslint.config.mjs: Next flat config plus repo rules
 vitest.config.mts   jsdom, Testing Library, 80% coverage floor (route files and proxy.ts are covered by e2e)
 playwright.config.ts  Playwright against `next start` on PORT with CW_WEB_ENV=test, the fake provider and a fixed
-                    session secret; chromium only; two projects: chromium (the memory stack) and product
-                    (e2e/product against make product, CW_E2E_PRODUCT_URL)
+                    session secret; chromium only; three projects: chromium (the memory stack), the
+                    stack-guard setup it depends on, and product (e2e/product against make product,
+                    CW_E2E_PRODUCT_URL)
 .env.example        every CW_WEB_* variable the app reads, with its default; copy to .env.local
 ```
 
@@ -226,7 +230,9 @@ them) run after `make web-stack`, `make web-stack-wait` and `make web-seed` and 
 without the seed state;
 `make web-e2e` points the app at the stack's ports. Once per
 machine: `make web-e2e-install` (downloads Chromium; the package has no install script). Then
-`make web-e2e` builds the app and runs the suite on `WEB_PORT` from the root `.env` (3000 unless
+`make web-e2e` checks that the services are the memory stack `make web-stack` recorded (the specs
+stage synthetic data, which a Postgres store would keep for good; `E2E_ALLOW_POSTGRES=1` runs
+anyway), builds the app and runs the suite on `WEB_PORT` from the root `.env` (3000 unless
 changed; the config starts `next start` there with `CW_WEB_ENV=test`, the fake provider and a
 fixed session secret, or reuses a server already on it outside CI). Every live page entry in
 the registry names its spec files under `e2e`, and the registry test checks they exist.

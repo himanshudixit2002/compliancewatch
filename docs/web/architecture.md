@@ -166,6 +166,8 @@ apps/web/
                                onRequestError: one JSON line per server error
   scripts/screens-doc.mts      generates docs/web/screens.md; --check and --audit modes
   scripts/seed/                the demo-tenant seed over the services' HTTP APIs (make web-seed)
+  scripts/stack-guard/         the e2e suite's guard against services backed by Postgres (make web-e2e, and
+                               the chromium project's stack-guard setup)
   e2e/                         Playwright specs and the axe fixture
 ```
 
