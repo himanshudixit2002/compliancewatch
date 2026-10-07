@@ -21,6 +21,8 @@ MAX_KIND_CHARS = 64
 MAX_PROVIDER_ID_CHARS = 64
 
 STATUS_BY_EVENT = {
+    # Razorpay's halted (it stopped retrying the charge) is past due too: the plan is kept only
+    # for the past-due grace (identity.domain.billing.DEFAULT_PAST_DUE_GRACE).
     "subscription.activated": SubscriptionStatus.ACTIVE,
     "subscription.charged": SubscriptionStatus.ACTIVE,
     "subscription.pending": SubscriptionStatus.PAST_DUE,
@@ -73,9 +75,10 @@ class MemoryBillingProvider:
 
 def parse_subscription_event(body: bytes, now: datetime) -> BillingEvent:
     """Razorpay's webhook shape: ``event``, ``created_at`` and ``payload.subscription.entity``
-    with its ``id``, ``quantity`` and the ``notes`` this service set when it created the
-    subscription (``tenant_id`` and ``plan_key``). A field that is missing or of the wrong shape
-    is left out; a body that is not JSON is an event with no kind."""
+    with its ``id``, ``customer_id``, ``quantity`` and the ``notes`` this service set when it
+    created the subscription (``tenant_id`` and ``plan_key``). A field that is missing or of the
+    wrong shape is left out; a body that is not JSON is an event with no kind. The quantity is
+    taken as sent; the use case keeps it within its bounds."""
     try:
         data: object = json.loads(body)
     except ValueError:
@@ -91,6 +94,7 @@ def parse_subscription_event(body: bytes, now: datetime) -> BillingEvent:
         else now
     )
     subscription_id = entity.get("id")
+    customer_id = entity.get("customer_id")
     quantity = entity.get("quantity")
     plan_key = notes.get("plan_key")
     return BillingEvent(
@@ -108,6 +112,11 @@ def parse_subscription_event(body: bytes, now: datetime) -> BillingEvent:
         quantity=(
             quantity
             if isinstance(quantity, int) and not isinstance(quantity, bool) and quantity >= 1
+            else None
+        ),
+        customer_id=(
+            customer_id
+            if isinstance(customer_id, str) and 0 < len(customer_id) <= MAX_PROVIDER_ID_CHARS
             else None
         ),
     )

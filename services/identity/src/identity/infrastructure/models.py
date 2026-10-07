@@ -64,6 +64,8 @@ INTERNAL_TENANT_INDEX: Final[str] = "ux_tenant_internal"
 SUBSCRIPTION_STATUSES: Final[tuple[str, ...]] = tuple(s.value for s in SubscriptionStatus)
 BILLING_EVENT_DIGEST: Final[str] = "uq_billing_event_body"
 PROVIDER_ID_CHARS: Final = 64
+START_KEY_CHARS: Final = 128
+"""py_common.idempotency's longest key."""
 
 
 def sql_in_list(column: str, values: tuple[str, ...]) -> str:
@@ -307,6 +309,33 @@ class BillingSubscriptionRow(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     checkout_url: Mapped[str] = mapped_column(Text(), nullable=False, server_default="")
+    last_event_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    past_due_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class BillingStartRow(Base):
+    __tablename__ = "billing_start"
+    __table_args__ = (
+        PrimaryKeyConstraint("tenant_id", "idempotency_key", name="pk_billing_start"),
+        CheckConstraint("quantity >= 1", name="ck_billing_start_quantity"),
+        {
+            "comment": (
+                "Subscription starts by Idempotency-Key, recorded before the provider is called; "
+                "row-level security by tenant_id"
+            )
+        },
+    )
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(Uuid())
+    idempotency_key: Mapped[str] = mapped_column(String(length=START_KEY_CHARS))
+    plan_key: Mapped[str] = mapped_column(String(length=64), nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    provider_subscription_id: Mapped[str | None] = mapped_column(
+        String(length=PROVIDER_ID_CHARS), nullable=True
+    )
+    checkout_url: Mapped[str] = mapped_column(Text(), nullable=False, server_default="")
+    recorded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class BillingEventRow(Base):

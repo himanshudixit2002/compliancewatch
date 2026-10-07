@@ -1,7 +1,8 @@
 """What a tenant's plan entitles it to: how many GSTIN registrations and seats it may have.
 
 ``entitlements_for(subscription, plans, free)`` is the plan of the tenant's current subscription
-(``billing.current_subscription``: the newest active or past-due one) times its quantity, or the
+(``billing.current_subscription``: the newest active one, or past-due one within the grace)
+times its quantity, or the
 free allowance when there is none or its plan is no longer offered. The internal tenant has no
 limits (``internal_entitlements``). ``enforced`` says whether the
 services refuse what goes over the limits (the flag ``identity.plan_limits`` for the tenant);

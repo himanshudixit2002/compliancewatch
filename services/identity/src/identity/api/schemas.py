@@ -236,7 +236,12 @@ class WebhookOut(BaseModel):
     provider_subscription_id: str
     status: str | None
     ignored: bool = Field(
-        default=False, description="The webhook names no tenant, so nothing was recorded"
+        default=False,
+        description=(
+            "Nothing changed: the webhook names no tenant, or a subscription the tenant does "
+            "not hold and may not adopt, or it is older than the last event applied, or follows "
+            "a cancellation"
+        ),
     )
     duplicate: bool = Field(
         default=False, description="The same body was received before; nothing changed"

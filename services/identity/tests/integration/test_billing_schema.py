@@ -1,6 +1,6 @@
-"""Migration 0008 on Postgres: the billing ledger and the idempotency keys, under forced
-row-level security, written by the use cases through identity's own role and the product's
-role. Needs Docker.
+"""Migrations 0008 and 0009 on Postgres: the billing ledger, its subscription starts and the
+idempotency keys, under forced row-level security, written by the use cases through identity's
+own role and the product's role. Needs Docker.
 
 The roles are ``cw_identity`` as infra/dev/postgres/roles.sql makes it, given to the database
 before the migrations as on a fresh dev volume, and ``cw_app`` with the grants
@@ -12,6 +12,7 @@ import hashlib
 import importlib
 import json
 from collections.abc import Iterator
+from contextlib import AbstractContextManager
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,8 +31,17 @@ from testcontainers.community.postgres import PostgresContainer
 from domain_kernel.ids import TenantId
 from identity.application.billing import ReceiveBillingWebhook, StartSubscription
 from identity.application.entitlements import ReadEntitlements
-from identity.domain.billing import PLANS, StoredBillingEvent, SubscriptionStatus
+from identity.domain.billing import (
+    PLANS,
+    Customer,
+    StoredBillingEvent,
+    Subscription,
+    SubscriptionStatus,
+)
 from identity.domain.entitlements import Limits
+from identity.domain.errors import SubscriptionStartPendingError
+from identity.domain.repository import UnitOfWork
+from identity.domain.tenancy import Tenant, TenantKind
 from identity.infrastructure.billing.memory import MemoryBillingProvider
 from identity.infrastructure.flags import StaticFlags
 from identity.infrastructure.models import Base
@@ -43,7 +53,7 @@ from py_common.idempotency.sqlalchemy import SqlAlchemyIdempotencyStore
 SERVICE_DIR = Path(__file__).resolve().parents[2]
 IMAGE = "pgvector/pgvector:0.8.6-pg16"
 SCHEMA = "identity"
-NEW_TABLES = ("billing_customer", "billing_subscription", "billing_event")
+NEW_TABLES = ("billing_customer", "billing_subscription", "billing_event", "billing_start")
 NOW = datetime(2000, 6, 1, 9, 0, tzinfo=UTC)
 FREE = Limits(registrations=1, seats=1)
 APP_ROLE = "cw_app"
@@ -109,20 +119,28 @@ def tables(engine: Engine) -> set[str]:
     return set(inspect(engine).get_table_names(schema=SCHEMA))
 
 
-def webhook(tenant: TenantId, subscription_id: str, kind: str = "subscription.activated") -> bytes:
+def webhook(
+    tenant: TenantId,
+    subscription_id: str,
+    kind: str = "subscription.activated",
+    *,
+    customer_id: str = "",
+    created_at: int = 959_850_000,
+) -> bytes:
     return json.dumps(
         {
             "event": kind,
-            "created_at": 959_850_000,
+            "created_at": created_at,
             "payload": {
                 "subscription": {
                     "entity": {
                         "id": subscription_id,
+                        "customer_id": customer_id,
                         "quantity": 2,
                         "notes": {"tenant_id": str(tenant), "plan_key": "owner_monthly"},
                     }
                 },
-                "payment": {"entity": {"email": "owner@example.com"}},
+                "payment": {"entity": {"id": "pay_1", "email": "owner@example.com"}},
             },
         }
     ).encode()
@@ -158,7 +176,7 @@ def test_the_catalog_lint_accepts_the_tables_without_exemptions(engine: Engine) 
             if t.schema == SCHEMA and t.name in (*NEW_TABLES, "idempotency_key")
         ]
     config = lint.load_config()
-    assert len(catalog) == 4
+    assert len(catalog) == 5
     for table in catalog:
         assert config.exemption_for(table.qualified) is None
         assert (table.row_security, table.force_row_security) == (True, True)
@@ -173,8 +191,12 @@ def test_the_use_cases_keep_the_ledger_under_each_role(engine: Engine, role_engi
     provider = MemoryBillingProvider(clock=lambda: NOW)
     tenant, other = TenantId.new(), TenantId.new()
     start = StartSubscription(provider, factory, clock=lambda: NOW)
-    started = start.run(tenant, "owner_monthly", email="owner@example.com", name="Example")
-    again = start.run(tenant, "ca_seat_monthly", email="owner@example.com", name="Example")
+    started = start.run(
+        tenant, "owner_monthly", key=str(uuid4()), email="owner@example.com", name="Example"
+    )
+    again = start.run(
+        tenant, "ca_seat_monthly", key=str(uuid4()), email="owner@example.com", name="Example"
+    )
     assert len(provider.customers) == 1, "the stored customer is reused"
     receive = ReceiveBillingWebhook(provider, factory, clock=lambda: NOW)
     body = webhook(tenant, started.provider_subscription_id)
@@ -202,7 +224,90 @@ def test_the_use_cases_keep_the_ledger_under_each_role(engine: Engine, role_engi
             text("SELECT set_config('app.tenant_id', :tenant, true)"), {"tenant": str(tenant)}
         )
         raw = connection.execute(text("SELECT raw_event FROM billing_event")).scalar_one()
-    assert raw["payload"]["payment"]["entity"]["email"] == "[EMAIL]"
+    assert raw["payload"]["payment"]["entity"] == {"id": "pay_1"}, "the projection only"
+
+
+def add_tenant(factory: PostgresUnitOfWorkFactory, tenant: TenantId) -> None:
+    with factory(tenant) as uow:
+        uow.tenants.add(Tenant(tenant, TenantKind.BUSINESS, "Example Traders", NOW))
+
+
+def test_a_webhook_of_another_tenant_is_unmatched_and_moves_nothing(
+    engine: Engine, role_engine: Engine
+) -> None:
+    """m1 and M4: tenant B's signed webhook naming tenant A's subscription id answers ignored,
+    not 500, under each role and under the owner, which row-level security does not hold; A's
+    row keeps its tenant and status."""
+    provider = MemoryBillingProvider(clock=lambda: NOW)
+    holder, other = TenantId.new(), TenantId.new()
+    sid = f"sub_held_{uuid4().hex[:8]}"
+    factory = PostgresUnitOfWorkFactory(role_engine)
+    for tenant, customer in ((holder, "cust_holder"), (other, "cust_other")):
+        add_tenant(factory, tenant)
+        with factory(tenant) as uow:
+            uow.billing.add_customer(
+                Customer(tenant, f"{customer}_{sid}", "owner@example.com", "Example"),
+                provider="memory",
+                at=NOW,
+            )
+    with factory(holder) as uow:
+        assert uow.billing.add_subscription(
+            Subscription(holder, "owner_monthly", sid, SubscriptionStatus.CREATED, NOW)
+        )
+    for offset, runner in enumerate((role_engine, engine)):
+        receive = ReceiveBillingWebhook(provider, PostgresUnitOfWorkFactory(runner))
+        body = webhook(other, sid, customer_id=f"cust_other_{sid}", created_at=959_850_000 + offset)
+        assert receive.run(body, provider.sign(body)).ignored
+    with factory(holder) as uow:
+        held = uow.billing.subscription(sid)
+    assert held is not None
+    assert (held.tenant_id, held.status) == (holder, SubscriptionStatus.CREATED)
+    with factory(other) as uow:
+        assert uow.billing.subscription(sid) is None
+
+
+def test_starts_hold_their_key_and_keep_one_customer(role_engine: Engine) -> None:
+    """M1 and m2 on Postgres: a recorded start without the provider's answer is pending for its
+    key; a second customer of the tenant and a second row of a subscription insert nothing."""
+    factory = PostgresUnitOfWorkFactory(role_engine)
+    tenant = TenantId.new()
+    customer = Customer(tenant, f"cust_{uuid4().hex[:8]}", "owner@example.com", "Example")
+    with factory(tenant) as uow:
+        assert uow.billing.add_customer(customer, provider="memory", at=NOW)
+        assert not uow.billing.add_customer(
+            Customer(tenant, "cust_second", "owner@example.com", "Example"),
+            provider="memory",
+            at=NOW,
+        )
+        assert uow.billing.customer() == customer
+        sid = f"sub_{uuid4().hex[:8]}"
+        row = Subscription(
+            tenant, "owner_monthly", sid, SubscriptionStatus.ACTIVE, NOW, updated_at=NOW
+        )
+        assert uow.billing.add_subscription(row)
+        assert not uow.billing.add_subscription(
+            Subscription(tenant, "owner_monthly", sid, SubscriptionStatus.CREATED, NOW)
+        )
+        assert uow.billing.subscription(sid) == row
+
+    provider = MemoryBillingProvider(clock=lambda: NOW)
+    calls = 0
+
+    def failing_second(tenant_id: TenantId | None) -> AbstractContextManager[UnitOfWork]:
+        nonlocal calls
+        calls += 1
+        if calls == 2:  # the provider's answer cannot be noted
+            raise RuntimeError("the database is down")
+        return factory(tenant_id)
+
+    key = str(uuid4())
+    start = StartSubscription(provider, failing_second, clock=lambda: NOW)
+    with pytest.raises(RuntimeError):
+        start.run(tenant, "owner_monthly", key=key, email="owner@example.com", name="Example")
+    with pytest.raises(SubscriptionStartPendingError):
+        start.run(tenant, "owner_monthly", key=key, email="owner@example.com", name="Example")
+    assert len(provider.subscriptions) == 1
+    assert len(provider.customers) == 0, "the stored customer was used"
 
 
 def test_events_are_append_only_and_unique_per_body(role_engine: Engine) -> None:
@@ -262,6 +367,10 @@ def test_the_subscription_route_keys_live_under_the_tenant(role_engine: Engine) 
 def test_downgrade_drops_the_ledger_and_upgrade_restores_it(
     alembic_config: Config, engine: Engine
 ) -> None:
+    command.downgrade(alembic_config, "0008")
+    assert "billing_start" not in tables(engine)
+    columns = {c["name"] for c in inspect(engine).get_columns("billing_subscription", SCHEMA)}
+    assert not {"last_event_at", "past_due_since"} & columns
     command.downgrade(alembic_config, "0007")
     assert not (set(NEW_TABLES) | {"idempotency_key"}) & tables(engine)
     with engine.connect() as connection:

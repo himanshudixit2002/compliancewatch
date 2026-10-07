@@ -9,13 +9,19 @@ A plan's ``limits`` are what one unit of its quantity allows: ``registrations`` 
 registrations the tenant may hold) and ``seats`` (active users); None is no limit. The values
 are placeholders too, decided by the maintainer with the pricing (G34).
 
-The ledger (``BillingRepository``) keeps a tenant's provider customer, its subscriptions and
-every verified webhook it received, append-only, in the unit of work's transaction.
+The ledger (``BillingRepository``) keeps a tenant's provider customer, its subscriptions, the
+starts it asked the provider for (``StartAttempt``, one per Idempotency-Key) and every verified
+webhook it received, append-only, in the unit of work's transaction.
+
+A subscription past due (the provider retries the charge, or has given up: Razorpay's ``halted``)
+keeps its plan for a grace period after it turned past due (``CW_PLAN_PAST_DUE_GRACE_DAYS``,
+14 days, a placeholder the maintainer decides), then gives the free allowance. A cancelled
+subscription is final: no later webhook makes it active again.
 """
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Final, Protocol
 from uuid import UUID
@@ -30,6 +36,14 @@ SEATS: Final = "seats"
 """Active users a tenant may have."""
 LIMIT_KEYS: Final[tuple[str, ...]] = (REGISTRATIONS, SEATS)
 MAX_QUANTITY: Final = 1000
+"""The most units of a plan one subscription may have; ``CW_PLAN_MAX_QUANTITY`` may lower it."""
+DEFAULT_PAST_DUE_GRACE: Final = timedelta(days=14)
+"""How long a past-due subscription keeps its plan (placeholder, decided by the maintainer)."""
+
+
+def clamp_quantity(value: int, maximum: int = MAX_QUANTITY) -> int:
+    """``value`` within 1..``maximum``: what a request or a webhook may ask for."""
+    return max(1, min(value, maximum))
 
 
 class BillingPeriod(StrEnum):
@@ -97,9 +111,15 @@ class SubscriptionStatus(StrEnum):
 
 
 PAID_STATUSES: Final = frozenset({SubscriptionStatus.ACTIVE, SubscriptionStatus.PAST_DUE})
-"""The statuses whose plan a tenant is entitled to. A subscription past due keeps its plan while
-the provider retries the charge (a placeholder grace the maintainer decides); created (checkout
-not finished) and cancelled ones give the free allowance."""
+"""The statuses whose plan a tenant may be entitled to: active, and past due within the grace
+(``Subscription.entitled``); created (checkout not finished) and cancelled ones give the free
+allowance."""
+
+
+class BillingProviderRefusedError(RuntimeError):
+    """The provider refused a call, or it was never sent: nothing was created there, so the
+    start may be tried again under the same Idempotency-Key. Any other failure of a provider
+    call (a timeout, a 5xx) may have created something, and the key stays taken."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +141,11 @@ class Subscription:
     quantity: int = 1
     updated_at: datetime | None = None
     """When the ledger last changed it; None until it is stored."""
+    last_event_at: datetime | None = None
+    """When the newest webhook applied to it happened (the provider's time); an older one that
+    arrives later is ignored. None until a webhook applied."""
+    past_due_since: datetime | None = None
+    """When it turned past due; None while it is not past due."""
 
     def __post_init__(self) -> None:
         require_instance(self.tenant_id, TenantId, "tenant_id")
@@ -129,13 +154,25 @@ class Subscription:
         require_instance(self.status, SubscriptionStatus, "status")
         require_aware(self.started_at, "started_at")
         require_quantity(self.quantity)
-        if self.updated_at is not None:
-            require_aware(self.updated_at, "updated_at")
+        for name in ("updated_at", "last_event_at", "past_due_since"):
+            value = getattr(self, name)
+            if value is not None:
+                require_aware(value, name)
 
     @property
     def paid(self) -> bool:
-        """Whether the tenant is entitled to the plan (``PAID_STATUSES``)."""
+        """Whether its status can entitle the tenant to the plan (``PAID_STATUSES``)."""
         return self.status in PAID_STATUSES
+
+    def entitled(self, now: datetime, past_due_grace: timedelta = DEFAULT_PAST_DUE_GRACE) -> bool:
+        """Whether the tenant is entitled to the plan at ``now``: active, or past due for less
+        than ``past_due_grace``."""
+        if self.status is SubscriptionStatus.ACTIVE:
+            return True
+        if self.status is not SubscriptionStatus.PAST_DUE:
+            return False
+        since = self.past_due_since or self.updated_at or self.started_at
+        return now - since < past_due_grace
 
 
 def require_quantity(value: object) -> int:
@@ -156,13 +193,17 @@ class BillingEvent:
     tenant_id: TenantId | None = None
     plan_key: str | None = None
     quantity: int | None = None
+    customer_id: str | None = None
+    """The provider's customer the subscription belongs to, when the payload names it."""
 
 
 @dataclass(frozen=True, slots=True)
 class StoredBillingEvent:
-    """A verified webhook as the ledger keeps it: ``raw_event`` is the payload with personal
-    identifiers masked, and ``body_sha256`` the digest of the body as received, which makes a
-    redelivery of the same body a duplicate."""
+    """A verified webhook as the ledger keeps it: ``raw_event`` is a projection of the payload on
+    an allowlist of fields (ids, kind, status, plan, quantity, times, amounts and currency;
+    ``application.billing.projected_payload``), masked for personal identifiers, never the body
+    itself; ``body_sha256`` is the digest of the body as received, which makes a redelivery of
+    the same body a duplicate."""
 
     id: UUID
     tenant_id: TenantId
@@ -182,6 +223,31 @@ class StoredBillingEvent:
             raise InvariantViolationError("body_sha256 is a SHA-256 in 64 hex digits")
 
 
+@dataclass(frozen=True, slots=True)
+class StartAttempt:
+    """A subscription start the tenant asked for under one Idempotency-Key, recorded before the
+    provider is called. ``provider_subscription_id`` is None until the provider has answered;
+    a start found without it is still running, or failed where the provider may have created
+    the subscription, and is never sent to the provider again."""
+
+    tenant_id: TenantId
+    key: str
+    plan_key: str
+    quantity: int
+    created_at: datetime
+    provider_subscription_id: str | None = None
+    checkout_url: str = ""
+    recorded_at: datetime | None = None
+    """When the provider's answer was recorded."""
+
+    def __post_init__(self) -> None:
+        require_instance(self.tenant_id, TenantId, "tenant_id")
+        require_text(self.key, "key")
+        require_text(self.plan_key, "plan_key")
+        require_quantity(self.quantity)
+        require_aware(self.created_at, "created_at")
+
+
 class BillingRepository(Protocol):
     """The billing ledger of the unit of work's tenant."""
 
@@ -189,7 +255,9 @@ class BillingRepository(Protocol):
         """The tenant's provider customer, None before its first subscription."""
         ...
 
-    def add_customer(self, customer: Customer, *, provider: str, at: datetime) -> None: ...
+    def add_customer(self, customer: Customer, *, provider: str, at: datetime) -> bool:
+        """Store the tenant's customer; False, and nothing stored, when it has one already."""
+        ...
 
     def subscription(self, provider_subscription_id: str) -> Subscription | None:
         """The tenant's subscription with this provider id; None for another tenant's."""
@@ -199,8 +267,32 @@ class BillingRepository(Protocol):
         """The tenant's subscriptions, newest first."""
         ...
 
-    def save_subscription(self, subscription: Subscription) -> None:
-        """Insert ``subscription`` or store its changed status, quantity and ``updated_at``."""
+    def add_subscription(self, subscription: Subscription) -> bool:
+        """Insert ``subscription``; False, and nothing written, when a subscription with its
+        provider id exists already, the tenant's own or another tenant's."""
+        ...
+
+    def update_subscription(self, subscription: Subscription) -> None:
+        """Store the changed status, quantity and times of the tenant's own ``subscription``;
+        a row of another tenant is never touched."""
+        ...
+
+    def start_attempt(self, key: str) -> StartAttempt | None:
+        """The tenant's start under this Idempotency-Key, if any."""
+        ...
+
+    def claim_start(self, attempt: StartAttempt) -> bool:
+        """Record ``attempt``; False, and nothing written, when its key is taken already."""
+        ...
+
+    def record_started(
+        self, key: str, *, provider_subscription_id: str, checkout_url: str, at: datetime
+    ) -> None:
+        """Note the provider's subscription on the start under ``key``."""
+        ...
+
+    def release_start(self, key: str) -> None:
+        """Forget the start under ``key``, when the provider created nothing for it."""
         ...
 
     def append_event(self, event: StoredBillingEvent) -> bool:
@@ -209,9 +301,15 @@ class BillingRepository(Protocol):
         ...
 
 
-def current_subscription(subscriptions: list[Subscription]) -> Subscription | None:
-    """The subscription that decides a tenant's plan: the newest paid one, else None."""
-    paid = [subscription for subscription in subscriptions if subscription.paid]
+def current_subscription(
+    subscriptions: list[Subscription],
+    *,
+    now: datetime,
+    past_due_grace: timedelta = DEFAULT_PAST_DUE_GRACE,
+) -> Subscription | None:
+    """The subscription that decides a tenant's plan at ``now``: the newest one it is entitled
+    to (``Subscription.entitled``), else None."""
+    paid = [s for s in subscriptions if s.entitled(now, past_due_grace)]
     return max(paid, key=lambda s: (s.started_at, s.provider_subscription_id), default=None)
 
 

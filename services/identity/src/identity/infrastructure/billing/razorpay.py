@@ -22,6 +22,7 @@ from domain_kernel.ids import TenantId
 from identity.domain.billing import (
     BillingEvent,
     BillingPeriod,
+    BillingProviderRefusedError,
     Customer,
     Plan,
     Subscription,
@@ -33,7 +34,11 @@ BASE_URL = "https://api.razorpay.com/v1"
 
 
 class RazorpayError(RuntimeError):
-    """Razorpay refused or failed a call; the body is its error object."""
+    """Razorpay failed a call; the body is its error object. It may have created something."""
+
+
+class RazorpayRefusedError(RazorpayError, BillingProviderRefusedError):
+    """Razorpay refused the call (4xx), or it was never sent: nothing was created."""
 
 
 class RazorpayBillingProvider:
@@ -65,7 +70,7 @@ class RazorpayBillingProvider:
     ) -> Subscription:
         plan_id = self._plan_ids.get(plan.key)
         if plan_id is None:
-            raise RazorpayError(f"no Razorpay plan id configured for {plan.key}")
+            raise RazorpayRefusedError(f"no Razorpay plan id configured for {plan.key}")
         data = self._post(
             "/subscriptions", subscription_body(customer, plan, plan_id, quantity=quantity)
         )
@@ -90,8 +95,15 @@ class RazorpayBillingProvider:
         self._client.close()
 
     def _post(self, path: str, body: Mapping[str, object]) -> Mapping[str, object]:
-        response = self._client.post(path, json=body)
-        if response.status_code >= 400:
+        """A connection that was never made, or a 4xx, created nothing
+        (``RazorpayRefusedError``); a timeout or a 5xx may have (``RazorpayError``)."""
+        try:
+            response = self._client.post(path, json=body)
+        except httpx2.ConnectError as exc:
+            raise RazorpayRefusedError(f"could not connect: {type(exc).__name__}") from exc
+        if 400 <= response.status_code < 500:
+            raise RazorpayRefusedError(f"{response.status_code}: {response.text[:300]}")
+        if response.status_code >= 500:
             raise RazorpayError(f"{response.status_code}: {response.text[:300]}")
         data = response.json()
         if not isinstance(data, Mapping):

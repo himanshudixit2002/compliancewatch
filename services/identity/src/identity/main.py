@@ -70,6 +70,7 @@ from identity.domain.errors import (
     ServiceClientInvalidError,
     SessionRevokedError,
     SubjectRegisteredError,
+    SubscriptionStartPendingError,
     TenantInactiveError,
     TenantNotFoundError,
     TenantRequiredError,
@@ -132,6 +133,7 @@ PROBLEM_STATUS: dict[type[DomainError], int] = {
     TenantNotFoundError: 404,
     InternalTenantExistsError: 409,
     SeatLimitReachedError: 402,
+    SubscriptionStartPendingError: 409,
 }
 
 log = get_logger(__name__)
@@ -213,6 +215,8 @@ def wire(settings: IdentitySettings, *, flags: FeatureFlags | None = None) -> Wi
 
     billing = billing_provider(settings)
     free = Limits(registrations=settings.plan_free_registrations, seats=settings.plan_free_seats)
+    grace = timedelta(days=settings.plan_past_due_grace_days)
+    max_quantity = settings.plan_max_quantity
     keys = signing_keys(settings)
     minter = IssuerMinter(
         TokenIssuer(keys, issuer=settings.auth_issuer, audience=settings.auth_audience)
@@ -232,10 +236,12 @@ def wire(settings: IdentitySettings, *, flags: FeatureFlags | None = None) -> Wi
         record_channel_consent=RecordChannelConsent(channel_unit_of_work),
         channel_consent_status=ChannelConsentStatus(channel_unit_of_work),
         billing_enabled=billing is not None,
-        start_subscription=None if billing is None else StartSubscription(billing, unit_of_work),
+        start_subscription=None
+        if billing is None
+        else StartSubscription(billing, unit_of_work, max_quantity=max_quantity),
         receive_billing_webhook=None
         if billing is None
-        else ReceiveBillingWebhook(billing, unit_of_work),
+        else ReceiveBillingWebhook(billing, unit_of_work, max_quantity=max_quantity),
         keys=keys,
         provider=provider,
         dev_provider=dev_provider,
@@ -247,11 +253,13 @@ def wire(settings: IdentitySettings, *, flags: FeatureFlags | None = None) -> Wi
         current_user=CurrentUser(unit_of_work),
         list_users=ListUsers(unit_of_work),
         read_membership=ReadMembership(unit_of_work),
-        invite_user=InviteUser(unit_of_work, provider, seats=SeatCheck(PLANS, free, flags)),
+        invite_user=InviteUser(
+            unit_of_work, provider, seats=SeatCheck(PLANS, free, flags, past_due_grace=grace)
+        ),
         change_roles=ChangeRoles(unit_of_work),
         disable_user=DisableUser(unit_of_work),
         read_audit_trail=ReadAuditTrail(audit_reader, unit_of_work),
-        read_entitlements=ReadEntitlements(unit_of_work, PLANS, free, flags),
+        read_entitlements=ReadEntitlements(unit_of_work, PLANS, free, flags, past_due_grace=grace),
         idempotency=idempotency,
     )
 

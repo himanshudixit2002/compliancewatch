@@ -14,13 +14,14 @@ tenant or of two, cannot both start from the same copy and lose each other's wri
 import threading
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager
+from dataclasses import replace
 from datetime import datetime
 
 from domain_kernel.audit import AuditEntry
 from domain_kernel.events import DomainEvent
 from domain_kernel.ids import TenantId, UserId
 from identity.domain.audit import AuditQuery, AuditScope, newest_first_key, readable
-from identity.domain.billing import Customer, StoredBillingEvent, Subscription
+from identity.domain.billing import Customer, StartAttempt, StoredBillingEvent, Subscription
 from identity.domain.channel_consent import (
     ChannelConsentRecord,
     ChannelUnitOfWork,
@@ -148,12 +149,14 @@ class MemoryBillingLedger:
         self.customers: dict[TenantId, tuple[Customer, str, datetime]] = {}
         self.subscriptions: dict[str, Subscription] = {}
         self.events: list[StoredBillingEvent] = []
+        self.starts: dict[tuple[TenantId, str], StartAttempt] = {}
 
     def copy(self) -> "MemoryBillingLedger":
         other = MemoryBillingLedger()
         other.customers = dict(self.customers)
         other.subscriptions = dict(self.subscriptions)
         other.events = list(self.events)
+        other.starts = dict(self.starts)
         return other
 
 
@@ -166,11 +169,12 @@ class MemoryBillingRepository:
         found = None if self._tenant is None else self._ledger.customers.get(self._tenant)
         return None if found is None else found[0]
 
-    def add_customer(self, customer: Customer, *, provider: str, at: datetime) -> None:
+    def add_customer(self, customer: Customer, *, provider: str, at: datetime) -> bool:
         _require_tenant(self._tenant, customer.tenant_id)
         if customer.tenant_id in self._ledger.customers:
-            raise RowSecurityViolationError(f"tenant {customer.tenant_id} has a customer already")
+            return False
         self._ledger.customers[customer.tenant_id] = (customer, provider, at)
+        return True
 
     def subscription(self, provider_subscription_id: str) -> Subscription | None:
         found = self._ledger.subscriptions.get(provider_subscription_id)
@@ -180,12 +184,44 @@ class MemoryBillingRepository:
         mine = [s for s in self._ledger.subscriptions.values() if s.tenant_id == self._tenant]
         return sorted(mine, key=lambda s: (s.started_at, s.provider_subscription_id), reverse=True)
 
-    def save_subscription(self, subscription: Subscription) -> None:
+    def add_subscription(self, subscription: Subscription) -> bool:
+        _require_tenant(self._tenant, subscription.tenant_id)
+        if subscription.provider_subscription_id in self._ledger.subscriptions:
+            return False
+        self._ledger.subscriptions[subscription.provider_subscription_id] = subscription
+        return True
+
+    def update_subscription(self, subscription: Subscription) -> None:
         _require_tenant(self._tenant, subscription.tenant_id)
         held = self._ledger.subscriptions.get(subscription.provider_subscription_id)
-        if held is not None and held.tenant_id != subscription.tenant_id:
-            raise RowSecurityViolationError("the subscription id belongs to another tenant")
-        self._ledger.subscriptions[subscription.provider_subscription_id] = subscription
+        if held is not None and held.tenant_id == subscription.tenant_id:
+            self._ledger.subscriptions[subscription.provider_subscription_id] = subscription
+
+    def start_attempt(self, key: str) -> StartAttempt | None:
+        return None if self._tenant is None else self._ledger.starts.get((self._tenant, key))
+
+    def claim_start(self, attempt: StartAttempt) -> bool:
+        _require_tenant(self._tenant, attempt.tenant_id)
+        if (attempt.tenant_id, attempt.key) in self._ledger.starts:
+            return False
+        self._ledger.starts[(attempt.tenant_id, attempt.key)] = attempt
+        return True
+
+    def record_started(
+        self, key: str, *, provider_subscription_id: str, checkout_url: str, at: datetime
+    ) -> None:
+        held = self.start_attempt(key)
+        if held is not None:
+            self._ledger.starts[(held.tenant_id, key)] = replace(
+                held,
+                provider_subscription_id=provider_subscription_id,
+                checkout_url=checkout_url,
+                recorded_at=at,
+            )
+
+    def release_start(self, key: str) -> None:
+        if self._tenant is not None:
+            self._ledger.starts.pop((self._tenant, key), None)
 
     def append_event(self, event: StoredBillingEvent) -> bool:
         _require_tenant(self._tenant, event.tenant_id)

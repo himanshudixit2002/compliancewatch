@@ -12,7 +12,7 @@ from contextlib import AbstractContextManager, contextmanager
 from datetime import datetime
 from typing import Self
 
-from sqlalchemy import Connection, Engine, create_engine, select, text
+from sqlalchemy import Connection, Engine, create_engine, delete, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -23,6 +23,7 @@ from domain_kernel.events import DomainEvent
 from domain_kernel.ids import ConsentId, TenantId, UserId
 from identity.domain.billing import (
     Customer,
+    StartAttempt,
     StoredBillingEvent,
     Subscription,
     SubscriptionStatus,
@@ -50,6 +51,7 @@ from identity.infrastructure.models import (
     TENANT_SETTING,
     BillingCustomerRow,
     BillingEventRow,
+    BillingStartRow,
     BillingSubscriptionRow,
     ChannelConsentRow,
     ConsentRow,
@@ -243,9 +245,12 @@ class SqlAlchemyBillingRepository:
             return None
         return Customer(TenantId(row.tenant_id), row.provider_customer_id, row.email, row.name)
 
-    def add_customer(self, customer: Customer, *, provider: str, at: datetime) -> None:
-        self._session.add(
-            BillingCustomerRow(
+    def add_customer(self, customer: Customer, *, provider: str, at: datetime) -> bool:
+        """Insert unless the tenant has a customer already: two first starts racing each other
+        keep the customer stored first."""
+        statement = (
+            insert(BillingCustomerRow)
+            .values(
                 tenant_id=customer.tenant_id.value,
                 provider=provider,
                 provider_customer_id=customer.provider_customer_id,
@@ -253,17 +258,21 @@ class SqlAlchemyBillingRepository:
                 name=customer.name,
                 created_at=at,
             )
+            .on_conflict_do_nothing(index_elements=["tenant_id"])
+            .returning(BillingCustomerRow.tenant_id)
         )
-        self._session.flush()
+        return self._session.execute(statement).scalar_one_or_none() is not None
 
     def subscription(self, provider_subscription_id: str) -> Subscription | None:
         if self._tenant is None:
             return None
         row = self._session.scalars(
-            select(BillingSubscriptionRow).where(
+            select(BillingSubscriptionRow)
+            .where(
                 BillingSubscriptionRow.provider_subscription_id == provider_subscription_id,
                 BillingSubscriptionRow.tenant_id == self._tenant.value,
             )
+            .execution_options(populate_existing=True)
         ).one_or_none()
         return None if row is None else _to_subscription(row)
 
@@ -277,12 +286,17 @@ class SqlAlchemyBillingRepository:
                 BillingSubscriptionRow.started_at.desc(),
                 BillingSubscriptionRow.provider_subscription_id.desc(),
             )
+            .execution_options(populate_existing=True)
         )
         return [_to_subscription(row) for row in rows]
 
-    def save_subscription(self, subscription: Subscription) -> None:
-        self._session.merge(
-            BillingSubscriptionRow(
+    def add_subscription(self, subscription: Subscription) -> bool:
+        """Insert unless the provider id exists: the tenant's own row (a webhook and a start
+        racing each other) or, hidden by row-level security, another tenant's. Either way the
+        row is left as it is."""
+        statement = (
+            insert(BillingSubscriptionRow)
+            .values(
                 provider_subscription_id=subscription.provider_subscription_id,
                 tenant_id=subscription.tenant_id.value,
                 plan_key=subscription.plan_key,
@@ -291,9 +305,105 @@ class SqlAlchemyBillingRepository:
                 started_at=subscription.started_at,
                 updated_at=subscription.updated_at or subscription.started_at,
                 checkout_url=subscription.checkout_url,
+                last_event_at=subscription.last_event_at,
+                past_due_since=subscription.past_due_since,
             )
+            .on_conflict_do_nothing(index_elements=["provider_subscription_id"])
+            .returning(BillingSubscriptionRow.provider_subscription_id)
         )
-        self._session.flush()
+        return self._session.execute(statement).scalar_one_or_none() is not None
+
+    def update_subscription(self, subscription: Subscription) -> None:
+        """Update the tenant's own row only: the statement names the tenant as well as the id,
+        so even a role not held to row-level security never moves another tenant's row."""
+        if self._tenant is None:
+            return
+        self._session.execute(
+            update(BillingSubscriptionRow)
+            .where(
+                BillingSubscriptionRow.provider_subscription_id
+                == subscription.provider_subscription_id,
+                BillingSubscriptionRow.tenant_id == self._tenant.value,
+                BillingSubscriptionRow.tenant_id == subscription.tenant_id.value,
+            )
+            .values(
+                status=subscription.status.value,
+                quantity=subscription.quantity,
+                updated_at=subscription.updated_at or subscription.started_at,
+                last_event_at=subscription.last_event_at,
+                past_due_since=subscription.past_due_since,
+            )
+            .execution_options(synchronize_session=False)
+        )
+
+    def start_attempt(self, key: str) -> StartAttempt | None:
+        if self._tenant is None:
+            return None
+        row = self._session.scalars(
+            select(BillingStartRow).where(
+                BillingStartRow.tenant_id == self._tenant.value,
+                BillingStartRow.idempotency_key == key,
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        return StartAttempt(
+            tenant_id=TenantId(row.tenant_id),
+            key=row.idempotency_key,
+            plan_key=row.plan_key,
+            quantity=row.quantity,
+            created_at=row.created_at,
+            provider_subscription_id=row.provider_subscription_id,
+            checkout_url=row.checkout_url,
+            recorded_at=row.recorded_at,
+        )
+
+    def claim_start(self, attempt: StartAttempt) -> bool:
+        statement = (
+            insert(BillingStartRow)
+            .values(
+                tenant_id=attempt.tenant_id.value,
+                idempotency_key=attempt.key,
+                plan_key=attempt.plan_key,
+                quantity=attempt.quantity,
+                created_at=attempt.created_at,
+            )
+            .on_conflict_do_nothing(index_elements=["tenant_id", "idempotency_key"])
+            .returning(BillingStartRow.idempotency_key)
+        )
+        return self._session.execute(statement).scalar_one_or_none() is not None
+
+    def record_started(
+        self, key: str, *, provider_subscription_id: str, checkout_url: str, at: datetime
+    ) -> None:
+        if self._tenant is None:
+            return
+        self._session.execute(
+            update(BillingStartRow)
+            .where(
+                BillingStartRow.tenant_id == self._tenant.value,
+                BillingStartRow.idempotency_key == key,
+            )
+            .values(
+                provider_subscription_id=provider_subscription_id,
+                checkout_url=checkout_url,
+                recorded_at=at,
+            )
+            .execution_options(synchronize_session=False)
+        )
+
+    def release_start(self, key: str) -> None:
+        if self._tenant is None:
+            return
+        self._session.execute(
+            delete(BillingStartRow)
+            .where(
+                BillingStartRow.tenant_id == self._tenant.value,
+                BillingStartRow.idempotency_key == key,
+                BillingStartRow.provider_subscription_id.is_(None),
+            )
+            .execution_options(synchronize_session=False)
+        )
 
     def append_event(self, event: StoredBillingEvent) -> bool:
         """Insert unless the tenant holds the body's digest already; two deliveries racing each
@@ -327,6 +437,8 @@ def _to_subscription(row: BillingSubscriptionRow) -> Subscription:
         checkout_url=row.checkout_url,
         quantity=row.quantity,
         updated_at=row.updated_at,
+        last_event_at=row.last_event_at,
+        past_due_since=row.past_due_since,
     )
 
 

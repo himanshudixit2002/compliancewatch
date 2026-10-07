@@ -1,5 +1,6 @@
 """Routes of the identity service. Business logic lives in application use cases."""
 
+from functools import partial
 from typing import Annotated
 
 from fastapi import APIRouter, Header, Path, Query, Request, Response, status
@@ -133,14 +134,21 @@ def start_subscription(
     body: SubscriptionIn, tenant: Tenant, key: IdempotencyKey, wired: Wired
 ) -> JSONResponse:
     """A retry with the same Idempotency-Key and body gets the first answer back for 24 hours
-    and starts nothing at the provider; the same key with another body is a 422."""
+    and starts nothing at the provider; the same key with another body is a 422. A key whose
+    start failed after the provider may have created the subscription is never sent to it
+    again: the retry gets 409 identity-subscription-start-pending."""
     start = wired.start_subscription
     if start is None:
         raise BillingDisabledError()
 
     def produce() -> SubscriptionOut:
         subscription = start.run(
-            tenant, body.plan_key, email=body.email, name=body.name, quantity=body.quantity
+            tenant,
+            body.plan_key,
+            key=key.key,
+            email=body.email,
+            name=body.name,
+            quantity=body.quantity,
         )
         return SubscriptionOut.from_subscription(subscription)
 
@@ -156,15 +164,19 @@ async def billing_webhook(
     request: Request,
     wired: Wired,
     x_razorpay_signature: Annotated[str, Header()] = "",
+    x_razorpay_event_id: Annotated[str, Header(max_length=128)] = "",
 ) -> WebhookOut:
-    """A verified webhook that names no tenant in its notes is answered with ``ignored``; a body
-    the tenant received before with ``duplicate``. Either way the answer is 200, so the provider
-    stops redelivering it."""
+    """A verified webhook that changed nothing is answered with ``ignored``: it names no tenant,
+    a subscription the tenant does not hold and may not adopt, or it is older than the last
+    event applied or follows a cancellation. A body the tenant received before is answered with
+    ``duplicate``. Either way the answer is 200, so the provider stops redelivering it."""
     receive = wired.receive_billing_webhook
     if receive is None:
         raise BillingDisabledError()
     body = await request.body()
-    receipt = await run_in_threadpool(receive.run, body, x_razorpay_signature)
+    receipt = await run_in_threadpool(
+        partial(receive.run, event_id=x_razorpay_event_id), body, x_razorpay_signature
+    )
     event = receipt.event
     return WebhookOut(
         kind=event.kind,
