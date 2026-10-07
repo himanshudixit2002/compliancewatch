@@ -218,7 +218,7 @@ class SqlAlchemyProfileRepository:
         rows = self._session.scalars(
             statement.order_by(node.created_at, node.id).limit(limit)
         ).all()
-        return self._to_nodes(rows)
+        return self._to_nodes(rows, with_attributes=False)
 
     def export_attributes(
         self, after: AttributeCursor | None, limit: int
@@ -275,15 +275,20 @@ class SqlAlchemyProfileRepository:
         ).all()
         return [_review_task(row) for row in rows]
 
-    def _to_nodes(self, rows: Sequence[ProfileNodeRow]) -> list[ProfileNode]:
-        """The nodes of ``rows`` with their attribute values, read in one query."""
+    def _to_nodes(
+        self, rows: Sequence[ProfileNodeRow], *, with_attributes: bool = True
+    ) -> list[ProfileNode]:
+        """The nodes of ``rows`` with their attribute values, read in one query, or with none
+        (``with_attributes=False``: the export reads the values in a section of their own)."""
         if not rows:
             return []
-        attribute_rows = self._session.scalars(
-            select(ProfileAttributeRow).where(
-                ProfileAttributeRow.node_id.in_([row.id for row in rows])
-            )
-        ).all()
+        attribute_rows: Sequence[ProfileAttributeRow] = ()
+        if with_attributes:
+            attribute_rows = self._session.scalars(
+                select(ProfileAttributeRow).where(
+                    ProfileAttributeRow.node_id.in_([row.id for row in rows])
+                )
+            ).all()
         records: dict[uuid.UUID, dict[AttributeKey, AttributeRecord]] = {row.id: {} for row in rows}
         for item in attribute_rows:
             record = _attribute_record(item)

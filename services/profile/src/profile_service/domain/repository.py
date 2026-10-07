@@ -68,7 +68,9 @@ class ProfileRepository(Protocol):
     # order (oldest first, then the key), starting after the cursor of the previous page.
 
     def export_nodes(self, after: NodeCursor | None, limit: int) -> Sequence[ProfileNode]:
-        """At most ``limit`` nodes of every level in the order of (created_at, id)."""
+        """At most ``limit`` nodes of every level in the order of (created_at, id). Their
+        ``attributes`` may be left empty: the export reads the values in their own section
+        (``export_attributes``), so the store need not read them twice."""
         ...
 
     def export_attributes(
