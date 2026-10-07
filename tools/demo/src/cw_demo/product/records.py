@@ -5,9 +5,10 @@ The fan-out step compares a run's counters with the directory entries of the ver
 looks for the audit rows of the hold, the release and any resume, which are rows of no tenant.
 The changes step finds the audit row of its dry run by the request's correlation id, and counts
 the engine's decisions, review items and outbox rows of a tenant before and after it, to prove
-the dry run wrote none. No policy lets the product's role (``cw_app``) read the audit rows of no
-tenant or count another tenant's rows, and no route serves them yet, so ``PostgresRecords`` reads
-them on a session of its own, as the dev stack's database owner, read only
+the dry run wrote none. The audit trail route (``GET /v1/identity/audit``) serves the rows of no
+tenant only to the regulatory team's verified token, which the product's header mode never
+carries, and no route serves the directory or another tenant's counts, so ``PostgresRecords``
+reads them on a session of its own, as the dev stack's database owner, read only
 (``default_transaction_read_only``): it can run nothing but queries. ``make product-check`` passes
 the URL as ``CW_PRODUCT_RECORDS_URL``; the steps fail without it rather than skip.
 

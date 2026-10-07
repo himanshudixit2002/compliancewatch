@@ -116,6 +116,7 @@ TENANT_ROUTES: dict[str, frozenset[str]] = {
             "POST /v1/identity/billing/subscriptions",
             "GET /v1/identity/me",
             "GET /v1/identity/users",
+            "GET /v1/identity/audit",
             "POST /v1/identity/users",
             "PUT /v1/identity/users/{user_id}/roles",
             "POST /v1/identity/users/{user_id}/disable",
