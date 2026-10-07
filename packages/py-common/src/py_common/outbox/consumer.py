@@ -6,6 +6,11 @@ and record the event id in the same transaction. A handler failure is retried in
 ``max_handler_attempts`` the message goes to ``<topic>.<group_id>.dlq`` and the offset is
 committed, so one bad message never blocks a partition. ``run`` wires that to an aiokafka
 consumer with manual offset commits.
+
+A handler that must never process an event raises ``EventRefusedError`` instead: what it wrote
+before raising (the record of the refusal) commits, the event is not marked processed, and the
+message goes to the dead-letter topic at once, without the retries a failure gets
+(``Outcome.REFUSED``). Replayed from there, it is checked again.
 """
 
 import asyncio
@@ -60,6 +65,14 @@ class Outcome(StrEnum):
     PROCESSED = "processed"
     SKIPPED = "skipped"
     DEAD = "dead"
+    REFUSED = "refused"
+    """The handler refused the event for good: dead-lettered at once, never processed."""
+
+
+class EventRefusedError(Exception):
+    """A handler's verdict that an event must never be processed, with why. Unlike any other
+    exception it is not retried: the handler's writes so far commit (the record of the refusal),
+    the event is not marked processed, and the message is dead-lettered at once."""
 
 
 class IdempotentConsumer:
@@ -90,6 +103,7 @@ class IdempotentConsumer:
             return Outcome.DEAD
         last_error = ""
         for attempt in range(1, self._config.max_handler_attempts + 1):
+            refused: EventRefusedError | None = None
             try:
                 async with self._store.unit() as unit:
                     if await unit.already_processed(message.event_id):
@@ -100,8 +114,12 @@ class IdempotentConsumer:
                             group=self.group_id,
                         )
                         return Outcome.SKIPPED
-                    await self._handler(message, unit)
-                    await unit.mark_processed(message.event_id, topic=message.topic)
+                    try:
+                        await self._handler(message, unit)
+                    except EventRefusedError as exc:
+                        refused = exc
+                    else:
+                        await unit.mark_processed(message.event_id, topic=message.topic)
             except Exception as exc:
                 last_error = f"{type(exc).__name__}: {exc}"
                 log.warning(
@@ -115,11 +133,33 @@ class IdempotentConsumer:
                 if attempt < self._config.max_handler_attempts:
                     await self._sleep(self._config.retry_backoff_seconds * 2 ** (attempt - 1))
             else:
-                return Outcome.PROCESSED
+                if refused is None:
+                    return Outcome.PROCESSED
+                await self._refuse(record, message, refused, attempts=attempt)
+                return Outcome.REFUSED
         await self._dead_letter(
             record, error=last_error, attempts=self._config.max_handler_attempts
         )
         return Outcome.DEAD
+
+    async def _refuse(
+        self,
+        record: InboundRecord,
+        message: EventMessage,
+        refused: EventRefusedError,
+        *,
+        attempts: int,
+    ) -> None:
+        log.warning(
+            "consumer.refused",
+            event_id=str(message.event_id),
+            topic=message.topic,
+            group=self.group_id,
+            reason=str(refused),
+        )
+        await self._dead_letter(
+            record, error=f"{type(refused).__name__}: {refused}", attempts=attempts
+        )
 
     async def _dead_letter(self, record: InboundRecord, *, error: str, attempts: int) -> None:
         dlq_topic = f"{record.topic}.{self.group_id}{self._config.dlq_suffix}"

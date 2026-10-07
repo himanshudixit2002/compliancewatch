@@ -9,7 +9,13 @@ from domain_kernel.ids import TenantId
 from py_common.events import EventMessage, encode, kafka_headers, to_message
 from py_common.kafka import KafkaClientConfig
 from py_common.outbox import consumer as consumer_module
-from py_common.outbox.consumer import ConsumerConfig, IdempotentConsumer, InboundRecord, Outcome
+from py_common.outbox.consumer import (
+    ConsumerConfig,
+    EventRefusedError,
+    IdempotentConsumer,
+    InboundRecord,
+    Outcome,
+)
 from py_common.outbox.store import UnitOfWork
 from py_common.outbox.testing import FakeProducer, MemoryProcessedStore, MemoryUnit
 
@@ -107,6 +113,45 @@ async def test_a_poison_message_goes_to_the_consumer_dead_letter_topic() -> None
     assert dead.header("attempts") == b"3"
     assert dead.header("error") == b"RuntimeError: handler exploded"
     assert dead.header("event_id") == str(message.event_id).encode()
+
+
+class Refuser:
+    """Writes the record of its refusal, then refuses."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def __call__(self, message: EventMessage, unit: UnitOfWork) -> None:
+        self.calls += 1
+        assert isinstance(unit, MemoryUnit)
+        unit.writes.append(f"refused {message.event_id}")
+        raise EventRefusedError("not the event identity sent")
+
+
+async def test_a_refused_event_is_dead_lettered_at_once_with_its_record_kept() -> None:
+    store, refuser, producer = MemoryProcessedStore(), Refuser(), FakeProducer()
+    consumer = IdempotentConsumer(
+        group_id="obligation",
+        store=store,
+        handler=refuser,
+        producer=producer,
+        config=ConsumerConfig(max_handler_attempts=3, retry_backoff_seconds=0),
+        sleep=noop_sleep,
+    )
+    message = sample()
+    assert await consumer.process(record(message, offset=3)) == Outcome.REFUSED
+    assert refuser.calls == 1, "a refusal is not retried"
+    assert store.rolled_back == 0
+    assert store.committed_writes == [f"refused {message.event_id}"]
+    assert store.processed == set(), "a refused event is never marked processed"
+    (dead,) = producer.sent
+    assert dead.topic == "obligation.created.obligation.dlq"
+    assert dead.header("attempts") == b"1"
+    assert dead.header("error") == b"EventRefusedError: not the event identity sent"
+    assert await consumer.process(record(message, offset=4)) == Outcome.REFUSED, (
+        "replayed, it is checked again"
+    )
+    assert refuser.calls == 2
 
 
 async def test_undecodable_bytes_are_dead_lettered_without_calling_the_handler() -> None:
