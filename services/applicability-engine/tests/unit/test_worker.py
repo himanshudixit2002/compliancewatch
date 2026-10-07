@@ -226,10 +226,14 @@ async def test_a_failing_read_is_retried_then_dead_lettered(
     assert setup.store.directory == {}
 
 
-def test_the_components_are_two_consumers_that_read_first_and_the_fan_out_worker() -> None:
+def test_the_components_are_the_consumers_and_the_fan_out_worker() -> None:
     readers = Readers(profiles=MemoryProfiles(), rulebook=MemoryRulebook())
     components = worker.components(engine_settings(), readers=readers)
-    profiles, rules = components.consumers
+    profiles, rules, erasure = components.consumers
+    assert (erasure.group_id, erasure.topics) == (
+        "applicability-engine.erasure",
+        ("tenant.deletion.requested",),
+    )
     assert (profiles.group_id, profiles.topics) == ("applicability-engine.profiles", (TOPIC,))
     assert profiles.dead_letter_topics() == (DLQ,)
     assert (rules.group_id, rules.topics) == (
@@ -240,7 +244,7 @@ def test_the_components_are_two_consumers_that_read_first_and_the_fan_out_worker
         "rule.published.applicability-engine.rules.dlq",
         "rule.withdrawn.applicability-engine.rules.dlq",
     )
-    assert {consumer.store_factory for consumer in components.consumers} == {read_first_store}
+    assert {profiles.store_factory, rules.store_factory} == {read_first_store}
     (temporal,) = components.temporal
     assert temporal.task_queue == "applicability"
     assert [workflow.__name__ for workflow in temporal.workflows] == ["FanOutWorkflow"]

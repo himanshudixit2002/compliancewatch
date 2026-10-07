@@ -489,7 +489,7 @@ def test_resend_sends_the_open_request_again(setup: Setup) -> None:
     (entry,) = [e for e in setup.store.audit if e.action == "data_request.resent"]
     assert (entry.actor.label, entry.reason) == ("system:identity-admin", "flag turned on")
     with pytest.raises(DeletionRequestNotFoundError):
-        ResendDeletion(setup.store).run(setup.firm, reason="none open")
+        ResendDeletion(setup.store).run(setup.firm, reason="none asked")
 
 
 def test_the_admin_command_resends(setup: Setup, capsys: pytest.CaptureFixture[str]) -> None:
@@ -503,7 +503,7 @@ def test_the_admin_command_resends(setup: Setup, capsys: pytest.CaptureFixture[s
     assert str(made.id) in capsys.readouterr().out
     assert len(setup.deletion_events()) == 2
     refused = admin_main(
-        ["erasure", "resend", "--tenant", str(setup.firm), "--reason", "none open"],
+        ["erasure", "resend", "--tenant", str(setup.firm), "--reason", "none asked"],
         unit_of_work=setup.store,
         provider=setup.provider,
     )

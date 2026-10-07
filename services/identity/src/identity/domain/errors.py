@@ -365,10 +365,10 @@ class TenantNotErasableError(DomainError):
 
 
 class DeletionRequestNotFoundError(DomainError):
-    """The tenant has no deletion request still waiting on the services (404)."""
+    """The tenant never asked for its deletion (404)."""
 
     type_slug: ClassVar[str] = "identity-deletion-request-not-found"
-    title: ClassVar[str] = "No open deletion request"
+    title: ClassVar[str] = "No deletion request"
 
     def __init__(self) -> None:
-        super().__init__("the tenant has no deletion request that is not completed")
+        super().__init__("the tenant has no deletion request")

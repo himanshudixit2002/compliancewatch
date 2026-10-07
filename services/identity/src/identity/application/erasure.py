@@ -12,9 +12,11 @@
   ``data_request.completed`` entry. It records whatever the flag says: an answer means the
   service has erased, and the request must show it.
 - ``ResendDeletion`` (``identity-admin erasure resend``) writes ``tenant.deletion.requested``
-  again for the tenant's open deletion request: what an operator runs once the flag is on for a
-  request made while it was off, or to retry after a dead letter. Every service's erasure is
-  idempotent, so a service that had answered erases nothing more and answers again.
+  again for the tenant's deletion request (the open one, else the newest): what an operator runs
+  once the flag is on for a request made while it was off, to retry after a dead letter, or to
+  erase again rows an event still in flight wrote after a service had erased. Every service's
+  erasure is idempotent, so a service that had answered erases nothing more and answers again;
+  the answers to a completed request change nothing.
 """
 
 from collections.abc import Callable
@@ -172,9 +174,12 @@ class ResendDeletion:
         self._clock = clock
 
     def run(self, tenant_id: TenantId, *, reason: str) -> DataRequest:
-        """Send the tenant's open deletion request to the services again."""
+        """Send the tenant's deletion request to the services again: the open one, else the
+        newest."""
         with self._unit_of_work(tenant_id) as uow:
-            request = uow.data_requests.open_deletion()
+            request = uow.data_requests.open_deletion() or next(
+                (found for found in uow.data_requests.list() if found.is_deletion), None
+            )
             if request is None:
                 raise DeletionRequestNotFoundError()
             uow.events.publish(deletion_event(request, None))
