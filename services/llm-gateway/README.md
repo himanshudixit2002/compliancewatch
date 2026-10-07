@@ -304,14 +304,19 @@ hosts the route allows, with zero data retention asked for. `CW_LLM_RESIDENCY` (
 `llm_gateway.residency`, owner ai-platform) says whether that may happen:
 
 - `global`, the default, and what `make product` and the image run: it may, as described above.
-- `india_only`: no text leaves India. The composition root wires the Vercel provider behind
-  `ResidencyBlockedProvider` (`infrastructure/providers/residency.py`), which refuses every
-  completion and embedding with 503 `llm-residency-unavailable` without calling it. The refusal
-  is booked in the ledger at no cost and traced like any failed call; no fallback model is tried
-  and the breaker does not count it. `fake/...` models, which the gateway serves in process,
-  still answer, and with `CW_LLM_PROVIDER=fake` every route does. Today that means `india_only`
-  stops every real model call: rule extraction, judgement, question answering and retrieval
-  fail until a provider that runs inference in India is wired (unwrapped) behind the gateway.
+- `india_only`: no text leaves India. Once every provider is registered, the composition root
+  wraps each one that is not an adapter in India (`IN_INDIA` in
+  `infrastructure/providers/residency.py`, only the fake provider today) in
+  `ResidencyBlockedProvider`, whatever it is and whatever name it is registered under: the
+  Vercel provider, an adapter added later, the eval harness's completion provider. So no adapter
+  has to remember a wrapper, and a provider the guard does not know is refused. The guard
+  refuses every completion and embedding with 503 `llm-residency-unavailable` without calling
+  the provider. The refusal is booked in the ledger at no cost and traced like any failed call;
+  no fallback model is tried and the breaker does not count it. `fake/...` models, which the
+  gateway serves in process, still answer, and with `CW_LLM_PROVIDER=fake` every route does.
+  Today that means `india_only` stops every real model call: rule extraction, judgement,
+  question answering and retrieval fail until a provider that runs inference in India is added
+  to `IN_INDIA` and wired behind the gateway.
 
 `GET /v1/llm-gateway/models` reports the policy on every route as
 `residency: {policy, real_models_allowed}`, and the `gateway_wired` line at start logs it.
@@ -431,5 +436,6 @@ dimensions.
 - Queueing non-urgent work when a budget is exhausted; callers get a 429 today
 - `Idempotency-Key`, streaming responses, a second real provider adapter
 - A provider that runs inference in India, which `CW_LLM_RESIDENCY=india_only` would let through
+  once its adapter is listed in `IN_INDIA`
 - Eval harness that refuses an unregistered prompt; the gateway does, the harness does not exist
 - Langfuse v3 server and SDK; a cost dashboard over the ledger; Helm values for the settings above

@@ -1,5 +1,6 @@
-"""CW_LLM_RESIDENCY: india_only refuses every call to a real model before it is made, the fake
-provider keeps answering, and GET /models reports the policy on every route."""
+"""CW_LLM_RESIDENCY: india_only refuses every call to a provider outside the in-India
+allow-list before it is made, whatever the provider is; the fake provider keeps answering, and
+GET /models reports the policy on every route."""
 
 from collections.abc import Callable
 from decimal import Decimal
@@ -9,7 +10,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from domain_kernel.llm import CompletionRequest
+from domain_kernel.llm import CompletionRequest, CompletionResponse
+from domain_kernel.protocols import LLMProvider
 from llm_gateway.domain.embeddings import EmbeddingRequest
 from llm_gateway.domain.errors import ResidencyUnavailableError
 from llm_gateway.domain.features import CallStatus, Feature
@@ -17,7 +19,12 @@ from llm_gateway.domain.residency import ResidencyPolicy
 from llm_gateway.domain.routing import DEFAULT_ROUTES
 from llm_gateway.infrastructure.ledger.memory import MemoryLedger
 from llm_gateway.infrastructure.providers.fake import FakeProvider
-from llm_gateway.infrastructure.providers.residency import ResidencyBlockedProvider
+from llm_gateway.infrastructure.providers.residency import (
+    IN_INDIA,
+    ResidencyBlockedProvider,
+    guarded,
+    in_india,
+)
 from llm_gateway.infrastructure.providers.vercel import VercelGatewayProvider
 from llm_gateway.wiring import GatewayWiring
 
@@ -64,6 +71,17 @@ def test_only_global_allows_real_models() -> None:
     assert [policy.value for policy in ResidencyPolicy] == ["global", "india_only"]
 
 
+def test_the_fake_provider_alone_runs_in_india() -> None:
+    assert set(IN_INDIA) == {FakeProvider}
+    assert in_india(FakeProvider())
+    assert not in_india(Recorder())
+
+    class Subclass(FakeProvider):
+        pass
+
+    assert not in_india(Subclass()), "a subclass may call out; it is listed or refused"
+
+
 class Recorder:
     def __init__(self) -> None:
         self.calls = 0
@@ -96,15 +114,74 @@ def test_the_blocked_provider_refuses_both_calls_and_never_calls_the_one_it_wrap
     assert blocked.provider is wrapped
 
 
+def test_an_unknown_provider_is_blocked_under_india_only_whatever_its_name() -> None:
+    """The guard needs no adapter to wrap itself: a provider it does not know is refused, even
+    under the fake provider's name, and the fake provider answers under any name."""
+    unknown, fake = Recorder(), FakeProvider()
+    providers: dict[str, LLMProvider] = {
+        "example-provider": unknown,
+        "fake": unknown,
+        "vercel": fake,
+    }
+    blocked = guarded(ResidencyPolicy.INDIA_ONLY, providers)
+    assert blocked["vercel"] is fake
+    for name in ("example-provider", "fake"):
+        guard = blocked[name]
+        assert isinstance(guard, ResidencyBlockedProvider)
+        assert (guard.provider, guard.name) == (unknown, name)
+    with pytest.raises(ResidencyUnavailableError, match="on 'example-provider'"):
+        blocked["example-provider"].complete(
+            CompletionRequest(
+                feature="qa", prompt_version="smoke.echo@1", system="", user="hi", model="x/y"
+            )
+        )
+    assert unknown.calls == 0
+    assert guarded(ResidencyPolicy.GLOBAL, providers) == providers
+
+
 def test_india_only_wires_the_real_provider_behind_the_guard(make_app: AppFactory) -> None:
     wiring = wiring_of(make_app(llm_residency="india_only", **REAL))
     assert wiring.residency is ResidencyPolicy.INDIA_ONLY
-    blocked = wiring.providers["vercel"]
-    assert isinstance(blocked, ResidencyBlockedProvider)
-    assert isinstance(blocked.provider, VercelGatewayProvider)
-    assert wiring.embedders["vercel"] is blocked
+    for registered in (wiring.providers, wiring.embedders):
+        blocked = registered["vercel"]
+        assert isinstance(blocked, ResidencyBlockedProvider)
+        assert isinstance(blocked.provider, VercelGatewayProvider)
+        assert isinstance(registered["fake"], FakeProvider)
+        assert set(registered) == {"fake", "vercel"}
     assert isinstance(wiring.providers["fake"], FakeProvider)
     assert wiring.embedders["fake"] is wiring.providers["fake"]
+
+
+class Scripted:
+    """An in-process completion provider, as the eval harness passes one."""
+
+    def complete(self, req: CompletionRequest) -> CompletionResponse:
+        return CompletionResponse(
+            text="scripted", model=req.model or "", input_tokens=1, output_tokens=1
+        )
+
+
+@pytest.mark.usefixtures("no_model_call")
+def test_a_completion_provider_is_guarded_too(make_app: AppFactory) -> None:
+    """The eval harness's seam: under india_only its provider is refused like any provider the
+    guard does not know (the harness runs its in-process gateway under global)."""
+    app = make_app(llm_residency="india_only", completion_provider=Scripted(), **REAL)
+    assert all(
+        isinstance(provider, ResidencyBlockedProvider)
+        for provider in wiring_of(app).providers.values()
+    )
+    assert isinstance(wiring_of(app).embedders["fake"], FakeProvider), "embeddings stay fake"
+    with TestClient(app) as client:
+        answers = [
+            client.post(COMPLETIONS, json=QA),
+            client.post(COMPLETIONS, json={**QA, "model": "fake/echo"}),
+        ]
+    assert [(answer.status_code, answer.json()["type"]) for answer in answers] == [
+        (503, PROBLEM),
+        (503, PROBLEM),
+    ]
+    with TestClient(make_app(completion_provider=Scripted(), **REAL)) as client:
+        assert client.post(COMPLETIONS, json=QA).json()["text"] == "scripted", "under global"
 
 
 def test_global_wires_the_real_provider_as_it_is(make_app: AppFactory) -> None:

@@ -41,7 +41,7 @@ from llm_gateway.infrastructure.ledger.memory import MemoryLedger
 from llm_gateway.infrastructure.ledger.sqlalchemy import SqlAlchemyLedger
 from llm_gateway.infrastructure.prompts.toml import TomlPromptRegistry
 from llm_gateway.infrastructure.providers.fake import FakeProvider
-from llm_gateway.infrastructure.providers.residency import ResidencyBlockedProvider
+from llm_gateway.infrastructure.providers.residency import guarded
 from llm_gateway.infrastructure.providers.vercel import VercelGatewayProvider
 from llm_gateway.infrastructure.tracing.composite import CompositeTracer
 from llm_gateway.infrastructure.tracing.langfuse import LangfuseTracer
@@ -72,14 +72,14 @@ def wire(
 ) -> GatewayWiring:
     """Build every adapter and use case from settings. Fails fast on a bad route override.
 
-    Under ``CW_LLM_RESIDENCY=india_only`` every real provider is wired behind
-    ``ResidencyBlockedProvider``, which refuses each call before it is made; the fake provider,
-    which answers in process, never is.
-
     ``completion_provider``, when given, serves every completion route in place of the
     configured providers; embeddings stay on the configured embedder. It is the seam the eval
-    harness uses to put scripted answers through the real completion path, and it is the
-    caller's own in-process provider, so it is not wrapped.
+    harness uses to put scripted answers through the real completion path.
+
+    Under ``CW_LLM_RESIDENCY=india_only`` every provider that is not an adapter in India
+    (``IN_INDIA``: the fake one) is wired behind ``ResidencyBlockedProvider``, which refuses each
+    call before it is made. ``guarded`` does it last, once every provider is in place, so the
+    completion provider is refused too.
     """
     routing = RoutingTable.default().with_overrides(settings.llm_routes)
     registry = TomlPromptRegistry.load(settings.llm_prompt_registry_path)
@@ -115,11 +115,12 @@ def wire(
             zero_data_retention=settings.ai_gateway_zero_data_retention,
             embedding_dimensions_param=settings.llm_embedding_dimensions_param,
         )
-        real = _within(residency, vercel, name="vercel")
-        providers["vercel"] = real
-        embedders["vercel"] = real
+        providers["vercel"] = vercel
+        embedders["vercel"] = vercel
     if completion_provider is not None:
         providers = dict.fromkeys(providers, completion_provider)
+    completions: Mapping[str, LLMProvider] = guarded(residency, providers)
+    embeddings: Mapping[str, EmbeddingProvider] = guarded(residency, embedders)
 
     ledger: MemoryLedger | SqlAlchemyLedger = (
         MemoryLedger()
@@ -154,7 +155,7 @@ def wire(
     budgets = BudgetGuard(ledger=ledger, publisher=publisher, config=config)
     complete = Complete(
         registry=registry,
-        providers=providers,
+        providers=completions,
         breaker=breaker,
         budgets=budgets,
         cache=cache,
@@ -164,7 +165,7 @@ def wire(
         config=config,
     )
     embed = Embed(
-        providers=embedders,
+        providers=embeddings,
         breaker=breaker,
         budgets=budgets,
         ledger=ledger,
@@ -177,8 +178,8 @@ def wire(
     return GatewayWiring(
         settings=settings,
         residency=residency,
-        providers=providers,
-        embedders=embedders,
+        providers=completions,
+        embedders=embeddings,
         ledger=ledger,
         registry=registry,
         routing=routing,
@@ -188,7 +189,7 @@ def wire(
         checks=(
             ("ledger", ledger.ping),
             ("prompt_registry", lambda: len(registry.list()) > 0),
-            ("provider", lambda: settings.llm_provider in providers),
+            ("provider", lambda: settings.llm_provider in completions),
         ),
         close=tracer.flush,
     )
@@ -236,16 +237,6 @@ def build_app(
         providers=len(wiring.providers),
     )
     return app
-
-
-def _within(
-    residency: ResidencyPolicy, provider: VercelGatewayProvider, *, name: str
-) -> VercelGatewayProvider | ResidencyBlockedProvider:
-    """``provider`` itself when real models are allowed; otherwise a stand-in that refuses every
-    call, since the provider runs inference outside India."""
-    if residency.real_models_allowed:
-        return provider
-    return ResidencyBlockedProvider(provider, name=name)
 
 
 def _langfuse_keys(settings: GatewaySettings) -> tuple[str, str, str] | None:

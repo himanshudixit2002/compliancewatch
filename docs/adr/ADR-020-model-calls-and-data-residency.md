@@ -80,12 +80,13 @@ Not taken yet. It is the maintainer's, with counsel. Until it is taken:
 
 - `CW_LLM_RESIDENCY` in the gateway's settings (`global` or `india_only`; flag
   `llm_gateway.residency`, owner ai-platform, default `global`).
-- Under `india_only` the composition root wires the Vercel provider behind
-  `ResidencyBlockedProvider` (`infrastructure/providers/residency.py`). It refuses completions and
-  embeddings with `ResidencyUnavailableError` (503 `llm-residency-unavailable`, no
-  `Retry-After`) without calling the provider. The ledger books each refusal at no cost and the
-  tracer records it; no fallback model is tried and the breaker does not count it. The fake
-  provider is never wrapped.
+- Under `india_only` the composition root wraps every registered provider that is not an
+  adapter in India (`IN_INDIA` in `infrastructure/providers/residency.py`: the fake provider
+  alone) in `ResidencyBlockedProvider`, whatever it is, so a provider added later or one the
+  guard does not know is refused too. It refuses completions and embeddings with
+  `ResidencyUnavailableError` (503 `llm-residency-unavailable`, no `Retry-After`) without calling
+  the provider. The ledger books each refusal at no cost and the tracer records it; no fallback
+  model is tried and the breaker does not count it.
 - `GET /v1/llm-gateway/models` reports the policy on every route as
   `residency: {policy, real_models_allowed}`; the `gateway_wired` line at start logs it.
 - `cw-mvp check-config` accepts either policy, and still refuses `CW_LLM_PROVIDER=fake` in staging
@@ -96,8 +97,8 @@ Not taken yet. It is the maintainer's, with counsel. Until it is taken:
 - Choosing option A: the setting is deleted with its flag and the gateway stays as it is; the
   draft lines in the privacy notice and the data map become final text with counsel.
 - Choosing option B: `india_only` becomes fixed configuration, every model feature waits for the
-  in-region provider, and the guard then wraps every provider that is not in India. The tracer's
-  host and the log collector have to be in India too, or carry no prompt text.
+  in-region provider, and that provider's adapter joins `IN_INDIA`, the only way past the guard.
+  The tracer's host and the log collector have to be in India too, or carry no prompt text.
 - Either way the decision is recorded here and this ADR becomes Accepted.
 - Revisit when a provider offers suitable models in India, when counsel's view or the rules under
   the Act change, or when a customer's contract asks for data to stay in India.
