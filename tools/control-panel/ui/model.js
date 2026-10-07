@@ -231,6 +231,7 @@ export function normalizeRun(raw) {
     finishedAt: num(r.finished_at),
     seconds: num(r.seconds),
     steps: list(r.steps ?? r.results).map(normalizeStep),
+    cleanup: list(r.cleanup).map(str).filter(Boolean),
     error: r.error ? normalizeError(r.error) : null,
     lines: list(r.lines).map(normalizeLine),
     params: r.params ?? {},
@@ -293,6 +294,9 @@ const ACTION_PARTS = {
 /** The part a running step is working on, and whether it is starting or stopping it. */
 export function busyPart(run) {
   if (!run || run.state !== "running") return null;
+  // a check starts and stops none of your parts: Click through the web app runs on a test copy
+  // of its own, whatever its steps' words say ("start a separate test copy of the services")
+  if (/^gate:|^gates-in-order$/.test(run.actionId)) return null;
   const stopping = /stop|down|reset/i.test(run.actionId);
   let part = ACTION_PARTS[run.actionId] ?? null;
   if (!part) {
@@ -546,13 +550,26 @@ const FAILURES = [
   },
 ];
 
+/**
+ * A run's clean-up steps, which run after a failure or a cancel too, in words: “Stop the test
+ * copy”, or “A” and “B”; "" when it has none.
+ */
+export function cleanupWords(run) {
+  const labels = (run?.cleanup ?? []).map((label) => `“${stepLabel(label)}”`);
+  if (labels.length < 2) return labels[0] ?? "";
+  return `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}`;
+}
+
 /** The plain reason a run failed, with a fix and the action that applies it when there is one. */
 export function explainFailure(run, lines = []) {
   if (!run) return null;
   if (run.state === "cancelled") {
+    const cleanup = cleanupWords(run);
     return {
       title: "Cancelled",
-      fix: "The step that was running was stopped, and the steps after it did not run.",
+      fix: cleanup
+        ? `The step that was running was stopped, and the steps after it did not run, except ${cleanup}, which ran so that nothing is left running.`
+        : "The step that was running was stopped, and the steps after it did not run.",
       action: "",
       go: "",
       detail: "",

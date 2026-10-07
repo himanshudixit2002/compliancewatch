@@ -907,8 +907,17 @@ export const SNAPSHOT = {
     "web-screens-check": ["Check the screens list", "docs/web/screens.md is current.", "seconds"],
     "web-e2e": [
       "Click through the web app",
-      "Playwright with accessibility checks; needs the services running and seeded.",
-      "5 to 10 minutes",
+      "A robot browser clicks through every page of the web app on a separate, temporary copy of the services, then the copy stops. Your own data is never touched.",
+      "10 to 15 minutes",
+      [
+        "First checks that the copy can start: its ports are free, no other browser tests run here, and there is a browser for the tests. If not, it stops there and says why.",
+        "Starts a separate, temporary copy of the ten services with throwaway data, and fills it with made-up demo data.",
+        "Builds the web app in a folder of its own, then a robot browser clicks through every page against the copy and checks each one for accessibility problems.",
+        "The robot browser is Playwright's own Chromium when it is downloaded on this Mac; when it is not, the check uses your installed Google Chrome. With neither, it stops at the start and offers Download the test browser (about 150 MB), which asks first.",
+        "Stops the copy at the end: after the tests pass or fail, and when you cancel. Its data goes with it.",
+        "Your own data and running app are never touched: the copy uses none of your services, databases or ports, and the web app you have open keeps running while it builds.",
+        "The copy listens on ports 9401 to 9410 and 3410. It writes only files git ignores: var/web-stack-check (the copy's logs and seed state), apps/web/.next/web-check (the build) and apps/web/test-results.",
+      ],
     ],
     "ci-lint": ["Check the CI files", "actionlint and the pre-commit config.", "under 1 minute"],
   },
@@ -1550,11 +1559,13 @@ export const SNAPSHOT = {
       safety: "changes-data",
     },
     "web-e2e": {
-      title: "Click through the web app",
-      summary: "Playwright with accessibility checks.",
-      what: ["Builds the web app and runs browser tests."],
+      title: "Click through the web app (on your services)",
+      summary: "Playwright with accessibility checks, against the services of your own stack.",
+      what: ["Builds the web app and runs the browser tests against your own services and data."],
       duration: "5 to 10 minutes",
-      safety: "safe",
+      safety: "refused",
+      refused:
+        "On its own it runs the browser tests against your own services (ports 8001 to 8010 unless .env moves them) and leaves every test record in your database. Use Click through the web app, which runs them on a separate test copy.",
       covered_by: "gate:web-e2e",
     },
     "web-screens": {
