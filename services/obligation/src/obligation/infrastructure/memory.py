@@ -10,7 +10,7 @@ unit, under the same lock, as the rule events consumer does on its connection.
 """
 
 import threading
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from datetime import date, datetime
 from uuid import UUID
@@ -23,7 +23,7 @@ from obligation.domain.comments import ObligationComment
 from obligation.domain.history import ObligationChange
 from obligation.domain.model import Obligation, period_matches
 from obligation.domain.reminders import Reminder
-from obligation.domain.repository import ListingAfter, UnitOfWork
+from obligation.domain.repository import ExportAfter, ListingAfter, UnitOfWork
 from obligation.domain.rule_versions import AppliedDecision, RuleVersionRef
 from py_common.audit import MemoryAuditSink
 
@@ -139,6 +139,14 @@ class MemoryObligationRepository:
         ]
         return sorted(found, key=_page_key)[:limit]
 
+    def export_page(self, after: ExportAfter | None, limit: int) -> Sequence[Obligation]:
+        found = [
+            obligation
+            for obligation in self._store.values()
+            if obligation.tenant_id == self._tenant_id
+        ]
+        return _export_page(found, lambda o: (o.created_at, o.id.value), after, limit)
+
     def add(self, obligation: Obligation) -> None:
         if obligation.id in self._store:
             raise ValueError(f"duplicate obligation {obligation.id}")
@@ -182,6 +190,19 @@ def _page_key(obligation: Obligation) -> tuple[bool, datetime | None, UUID]:
 
 def _after_key(after: ListingAfter) -> tuple[bool, datetime | None, UUID]:
     return (after.due_at is None, after.due_at, after.obligation_id.value)
+
+
+def _export_page[T](
+    rows: Iterable[T],
+    key: Callable[[T], tuple[datetime, UUID]],
+    after: ExportAfter | None,
+    limit: int,
+) -> list[T]:
+    """The rows after ``after`` in the order of ``key`` (a time and an id), at most ``limit``:
+    the keyset page Postgres reads."""
+    start = None if after is None else (after.at, after.id)
+    found = [row for row in rows if start is None or key(row) > start]
+    return sorted(found, key=key)[:limit]
 
 
 class MemoryEventSink:
@@ -366,6 +387,14 @@ class MemoryChangeLog:
         ]
         return sorted(found, key=lambda change: change.occurred_at)
 
+    def export_page(self, after: ExportAfter | None, limit: int) -> Sequence[ObligationChange]:
+        found = [
+            change
+            for change in (*self._committed, *self.pending)
+            if change.tenant_id == self._tenant_id
+        ]
+        return _export_page(found, lambda c: (c.occurred_at, c.id.value), after, limit)
+
     def commit(self) -> None:
         self._committed.extend(self.pending)
         self.pending.clear()
@@ -395,6 +424,14 @@ class MemoryCommentLog:
             if comment.tenant_id == self._tenant_id and comment.obligation_id == obligation_id
         ]
         return sorted(found, key=lambda comment: (comment.created_at, comment.id.value))
+
+    def export_page(self, after: ExportAfter | None, limit: int) -> Sequence[ObligationComment]:
+        found = [
+            comment
+            for comment in (*self._committed, *self.pending)
+            if comment.tenant_id == self._tenant_id
+        ]
+        return _export_page(found, lambda c: (c.created_at, c.id.value), after, limit)
 
     def commit(self) -> None:
         self._committed.extend(self.pending)

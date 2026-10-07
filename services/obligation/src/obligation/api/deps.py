@@ -10,6 +10,10 @@ member of it reads obligations for:
 - without a token (``header`` mode, or ``dual`` mode without one) the header names the tenant, as
   before tokens existed.
 
+``ExportTenant`` is the tenant whose data is exported: a user with one of the tenant admin roles
+(owner, ca_admin) for their own tenant, a service with data:export (and tenant:act) naming it in
+``x-tenant-id``, as identity does when it assembles the export, or without a token the header's.
+
 ``Writer`` is who changes an obligation: a user with one of the tenant member roles, never a
 service, or, without a token, the header's tenant as before. It carries what the use cases record
 of the caller: the audit actor (``py_common.audit.audit_actor``: the user's roles, else the
@@ -24,7 +28,13 @@ from typing import Annotated, Any, Final
 
 from fastapi import Depends, Request
 
-from domain_kernel.access import TENANT_MEMBER_ROLES, Principal, Role, Scope
+from domain_kernel.access import (
+    TENANT_ADMIN_ROLES,
+    TENANT_MEMBER_ROLES,
+    Principal,
+    Role,
+    Scope,
+)
 from domain_kernel.ids import TenantId
 from obligation.application.tracking import Acting
 from obligation.domain.errors import ObligationTenantRequiredError
@@ -40,6 +50,9 @@ member = require_roles(TENANT_MEMBER_ROLES, scopes={Scope.TENANT_ACT})
 writer = require_roles(TENANT_MEMBER_ROLES)
 """A user with a tenant member role; a service is refused, and the anonymous principal of
 ``header`` mode passes."""
+exporter = require_roles(TENANT_ADMIN_ROLES, scopes=[Scope.DATA_EXPORT])
+"""A user with a tenant admin role (owner, ca_admin) or a service with data:export; the anonymous
+principal of ``header`` mode passes."""
 tenant_of_request = tenant_scope(True, ObligationTenantRequiredError)
 
 PUBLIC_ROLES: Final = tuple(role.value for role in Role if role in TENANT_MEMBER_ROLES)
@@ -53,6 +66,15 @@ async def member_tenant(
     tenant: Annotated[TenantId, Depends(tenant_of_request)],
 ) -> TenantId:
     """The request's tenant, once the caller is known to be one of its members."""
+    return tenant
+
+
+async def export_tenant(
+    principal: Annotated[Principal, Depends(exporter)],
+    tenant: Annotated[TenantId, Depends(tenant_of_request)],
+) -> TenantId:
+    """The tenant whose data is exported, once the caller is known to be one of its admins or a
+    service exporting for it (data:export, and tenant:act to name it in ``x-tenant-id``)."""
     return tenant
 
 
@@ -78,4 +100,5 @@ def wiring(request: Request) -> Wiring:
 
 Tenant = Annotated[TenantId, Depends(member_tenant)]
 Writer = Annotated[Acting, Depends(acting_member)]
+ExportTenant = Annotated[TenantId, Depends(export_tenant)]
 Wired = Annotated[Wiring, Depends(wiring)]

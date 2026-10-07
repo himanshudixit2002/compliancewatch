@@ -11,6 +11,9 @@ The tracking routes are served twice, with the same handlers: under the service'
 API (tag ``public``), ``/v1/obligations/{obligation_id}``, with the roles that may call them as
 ``x-roles``. The public API also lists a business's obligations a page at a time,
 ``/v1/businesses/{business_id}/obligations``, beside the profile service's business routes.
+
+``/v1/obligation/data-export`` is the service's part of a tenant's data export, which identity
+assembles: for the tenant's admins and for a service with data:export (``deps.ExportTenant``).
 """
 
 from datetime import date
@@ -22,13 +25,14 @@ from fastapi.responses import JSONResponse
 
 from domain_kernel.ids import BusinessId, ObligationId, RuleVersionId, UserId
 from domain_kernel.status import ObligationStatus
-from obligation.api.deps import PUBLIC_ROUTE, Tenant, Wired, Writer
+from obligation.api.deps import PUBLIC_ROUTE, ExportTenant, Tenant, Wired, Writer
 from obligation.api.schemas import (
     AssigneeIn,
     BusinessObligationCursor,
     BusinessObligationOut,
     CommentIn,
     CommentOut,
+    DataExportOut,
     ObligationDetailOut,
     ObligationOut,
     StatusIn,
@@ -95,6 +99,20 @@ def list_obligations(
         )
     )
     return [ObligationOut.from_obligation(obligation) for obligation in found]
+
+
+@router.get(
+    "/data-export",
+    summary="Everything the service holds of the tenant, for the tenant's data export",
+    responses=problem_responses(401, 403),
+)
+def data_export(tenant: ExportTenant, wired: Wired) -> DataExportOut:
+    """The tenant's obligations in any status (``obligations``), the change log of each
+    (``changes``) and the comments on them (``comments``), each oldest first and then by id,
+    every section present and empty when there is nothing. For a user with owner or ca_admin, and
+    for a service with data:export naming the tenant in ``x-tenant-id`` (with tenant:act);
+    anyone else is a 403, and no tenant a 401."""
+    return DataExportOut.from_export(wired.export_tenant_data.run(tenant))
 
 
 @business_router.get(

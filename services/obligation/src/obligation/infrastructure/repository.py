@@ -32,16 +32,18 @@ from sqlalchemy import (
     Connection,
     Engine,
     RowMapping,
+    Select,
     and_,
     create_engine,
     func,
     or_,
     select,
     text,
+    tuple_,
     update,
 )
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import InstrumentedAttribute, Session
 from sqlalchemy.pool import NullPool
 
 from domain_kernel.events import DomainEvent
@@ -61,7 +63,12 @@ from obligation.domain.comments import CommentId, ObligationComment
 from obligation.domain.history import ChangeKind, ObligationChange
 from obligation.domain.model import Obligation
 from obligation.domain.reminders import Reminder
-from obligation.domain.repository import ListingAfter, UnitOfWork, UnitOfWorkFactory
+from obligation.domain.repository import (
+    ExportAfter,
+    ListingAfter,
+    UnitOfWork,
+    UnitOfWorkFactory,
+)
 from obligation.domain.rule_versions import AppliedDecision, Citation, RuleVersionRef
 from obligation.infrastructure.models import (
     TENANT_SETTING,
@@ -206,6 +213,12 @@ class SqlAlchemyObligationRepository:
             statement = statement.where(_after(after))
         return [_to_obligation(row) for row in self._session.scalars(statement).all()]
 
+    def export_page(self, after: ExportAfter | None, limit: int) -> Sequence[Obligation]:
+        statement = _export_page(
+            select(ObligationRow), ObligationRow.created_at, ObligationRow.id, after, limit
+        )
+        return [_to_obligation(row) for row in self._session.scalars(statement).all()]
+
     def add(self, obligation: Obligation) -> None:
         self._session.add(_to_row(obligation))
         self._session.flush()
@@ -232,6 +245,21 @@ def _after(after: ListingAfter) -> Any:
         and_(ObligationRow.due_at == after.due_at, later_id),
         ObligationRow.due_at.is_(None),
     )
+
+
+def _export_page[R](
+    statement: Select[R],
+    at: InstrumentedAttribute[datetime],
+    row_id: InstrumentedAttribute[UUID],
+    after: ExportAfter | None,
+    limit: int,
+) -> Select[R]:
+    """One keyset page of a tenant's rows by time (``at``: creation, or a change's occurrence)
+    and id; row-level security keeps it to the unit's tenant."""
+    statement = statement.order_by(at, row_id).limit(limit)
+    if after is not None:
+        statement = statement.where(tuple_(at, row_id) > tuple_(after.at, after.id))
+    return statement
 
 
 class OutboxSink:
@@ -401,6 +429,16 @@ class SqlAlchemyChangeLog:
         )
         return [_to_change(row) for row in self._session.scalars(statement).all()]
 
+    def export_page(self, after: ExportAfter | None, limit: int) -> Sequence[ObligationChange]:
+        statement = _export_page(
+            select(ObligationChangeRow),
+            ObligationChangeRow.occurred_at,
+            ObligationChangeRow.id,
+            after,
+            limit,
+        )
+        return [_to_change(row) for row in self._session.scalars(statement).all()]
+
 
 def _to_change_row(change: ObligationChange) -> ObligationChangeRow:
     return ObligationChangeRow(
@@ -487,18 +525,29 @@ class SqlAlchemyCommentLog:
             .where(ObligationCommentRow.obligation_id == obligation_id.value)
             .order_by(ObligationCommentRow.created_at, ObligationCommentRow.id)
         )
-        return [
-            ObligationComment(
-                id=CommentId(row.id),
-                tenant_id=TenantId(row.tenant_id),
-                obligation_id=ObligationId(row.obligation_id),
-                author_id=_user(row.author_id),
-                author_label=row.author_label,
-                body=row.body,
-                created_at=row.created_at.astimezone(UTC),
-            )
-            for row in self._session.scalars(statement).all()
-        ]
+        return [_to_comment(row) for row in self._session.scalars(statement).all()]
+
+    def export_page(self, after: ExportAfter | None, limit: int) -> Sequence[ObligationComment]:
+        statement = _export_page(
+            select(ObligationCommentRow),
+            ObligationCommentRow.created_at,
+            ObligationCommentRow.id,
+            after,
+            limit,
+        )
+        return [_to_comment(row) for row in self._session.scalars(statement).all()]
+
+
+def _to_comment(row: ObligationCommentRow) -> ObligationComment:
+    return ObligationComment(
+        id=CommentId(row.id),
+        tenant_id=TenantId(row.tenant_id),
+        obligation_id=ObligationId(row.obligation_id),
+        author_id=_user(row.author_id),
+        author_label=row.author_label,
+        body=row.body,
+        created_at=row.created_at.astimezone(UTC),
+    )
 
 
 class SqlAlchemyReminderLog:

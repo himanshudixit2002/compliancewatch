@@ -137,6 +137,16 @@ Design reference: Project Foundation guide, sections 7 and 14.
   `GET /v1/profile/nodes/{node_id}` with this service's token): 404
   `obligation-business-not-found` when it is not, 503 `profile-unavailable` when profile cannot
   say. A business with obligations on the page is the tenant's, so profile is not asked then.
+- `application/export.py`: `ExportTenantData`, the service's part of a tenant's data export, which
+  identity assembles (`GET /v1/obligation/data-export`, for a user with owner or ca_admin and for
+  a service with data:export and tenant:act naming the tenant in `x-tenant-id`). Three sections,
+  always present: `obligations` (every obligation in any status), `changes` (the change log) and
+  `comments`, each oldest first and then by id, read in keyset pages of `EXPORT_PAGE_SIZE` (500)
+  rows in one unit of work of the tenant (`export_page` on the obligations, the change log and the
+  comments), so row-level security keeps them to it. Rows carry the records' fields under their
+  own names as JSON values, without the tenant's id; nothing else (outbox, idempotency keys,
+  reminders, the rule version cache) is exported. It writes no audit entry: identity records the
+  export.
 - `infrastructure/repository.py`: `PostgresUnitOfWorkFactory` opens one transaction per call
   with the `app.tenant_id` setting that the row-level security policy reads, and writes events
   to the outbox on the same connection. `infrastructure/memory.py` is the in-memory twin for

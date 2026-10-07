@@ -5,6 +5,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from obligation.application.changes import ApplyDeadlineChange, CloseObligation, WithdrawRule
+from obligation.application.export import ExportTenantData
 from obligation.application.materialise import MaterialiseObligations
 from obligation.application.queries import ListBusinessObligations, ListObligations
 from obligation.application.tracking import (
@@ -34,3 +35,4 @@ class Wiring:
     change_status: ChangeStatus
     assign: AssignObligation
     add_comment: AddComment
+    export_tenant_data: ExportTenantData
