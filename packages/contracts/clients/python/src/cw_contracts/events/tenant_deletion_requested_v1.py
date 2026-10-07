@@ -10,7 +10,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 class TenantDeletionRequestedV1(BaseModel):
     """
-    A tenant asked for its data to be deleted; every service erases what it holds for the tenant before deadline_at, keeping audit records when retain_audit is true. Producer: identity. Consumers: profile, obligation, notification, qa, applicability-engine, llm-gateway.
+    A tenant asked for its data to be deleted; every service that holds the tenant's data erases it before deadline_at, keeping audit records when retain_audit is true, and answers with tenant.data.erased. Producer: identity. Consumers: identity, profile, obligation, notification, applicability-engine and rulebook, each in its group <service>.erasure; qa holds no tenant data, and the llm-gateway's cost ledger keeps the tenant id only, for 13 months (docs/legal/data-map.md).
     """
 
     model_config = ConfigDict(

@@ -30,6 +30,7 @@ replication_factor = 3
 "obligation.rescheduled" = { partitions = 3, retention_days = 7, cleanup_policy = "delete" }
 "profile.updated" = { partitions = 3, retention_days = 7, cleanup_policy = "delete" }
 "tenant.created" = { partitions = 3, retention_days = 7, cleanup_policy = "delete" }
+"tenant.data.erased" = { partitions = 3, retention_days = 7, cleanup_policy = "delete" }
 "tenant.deletion.requested" = { partitions = 3, retention_days = 7, cleanup_policy = "delete" }
 "user.role.changed" = { partitions = 3, retention_days = 7, cleanup_policy = "delete" }
 

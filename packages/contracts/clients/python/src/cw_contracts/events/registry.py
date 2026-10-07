@@ -25,6 +25,7 @@ from cw_contracts.events.rule_rejected_v1 import RuleRejectedV1
 from cw_contracts.events.rule_superseded_v1 import RuleSupersededV1
 from cw_contracts.events.rule_withdrawn_v1 import RuleWithdrawnV1
 from cw_contracts.events.tenant_created_v1 import TenantCreatedV1
+from cw_contracts.events.tenant_data_erased_v1 import TenantDataErasedV1
 from cw_contracts.events.tenant_deletion_requested_v1 import TenantDeletionRequestedV1
 from cw_contracts.events.user_role_changed_v1 import UserRoleChangedV1
 
@@ -177,9 +178,16 @@ TOPICS: Mapping[str, TopicSpec] = MappingProxyType(
             tenant_scoped=True,
             schema_file="tenant.created.v1.json",
         ),
+        "tenant.data.erased": TopicSpec(
+            topic="tenant.data.erased",
+            version="1.0.0",
+            model=TenantDataErasedV1,
+            tenant_scoped=True,
+            schema_file="tenant.data.erased.v1.json",
+        ),
         "tenant.deletion.requested": TopicSpec(
             topic="tenant.deletion.requested",
-            version="1.0.0",
+            version="1.0.1",
             model=TenantDeletionRequestedV1,
             tenant_scoped=True,
             schema_file="tenant.deletion.requested.v1.json",
