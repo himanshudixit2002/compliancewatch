@@ -472,14 +472,19 @@ describe("DecidePanel", () => {
       ).getByRole("button", { name: "Return" }),
     );
     await waitFor(() => expect(action).toHaveBeenCalledTimes(1));
-    // The answer re-renders the panel; the next steps wait for it rather than racing it.
+    // The fields and buttons are disabled while the decision is pending; the next steps wait for
+    // the rendered answer rather than racing it (a slow runner typed into a disabled note).
     await waitFor(() =>
       expect(screen.queryByRole("dialog", { name: "Return the version for rework?" })).toBeNull(),
     );
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toContain("Example decided."),
+    );
     const reject = screen.getByRole("button", { name: "Reject" });
-    await user.type(notes[1] as HTMLElement, "Example why");
+    await user.type(screen.getAllByLabelText(/^Note/)[1] as HTMLElement, "Example why");
     expect(reject).toHaveProperty("disabled", true);
     await user.selectOptions(screen.getByLabelText(/^Why the candidate is rejected/), "duplicate");
+    await waitFor(() => expect(reject).toHaveProperty("disabled", false));
     await user.click(reject);
     const dialog = await screen.findByRole("dialog", { name: "Reject this task?" });
     expect(dialog.textContent).toContain("rejects the candidate");
