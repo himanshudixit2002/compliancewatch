@@ -41,6 +41,10 @@ and draft answers receive your questions with identifiers masked and do not reta
 - Service providers that host and run the service in India (cloud hosting in the Mumbai region
   is the design assumption), send messages (Meta for WhatsApp, an email provider) and process
   payments. Each is bound by contract to use the data only for the service.
+- Model providers outside India that read regulations and draft answers for us: they receive
+  the text of your questions, with identifiers such as PAN, GSTIN, Aadhaar, phone numbers and
+  email addresses masked, and are asked not to keep it. [Draft - to be reviewed by a lawyer:
+  this cross-border processing, or keeping every model call in India instead.]
 - Your chartered accountant or adviser, when you link your business to their account.
 - Authorities, when the law requires it.
 
