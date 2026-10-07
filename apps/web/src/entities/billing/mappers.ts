@@ -18,7 +18,8 @@ export function planFromDto(dto: PlanDto): Plan {
 }
 
 export function newSubscriptionToDto(input: NewSubscription): SubscriptionInDto {
-  return { plan_key: input.planKey, email: input.email, name: input.name };
+  const dto: SubscriptionInDto = { plan_key: input.planKey, email: input.email, name: input.name };
+  return input.quantity === undefined ? dto : { ...dto, quantity: input.quantity };
 }
 
 export function subscriptionFromDto(dto: SubscriptionDto): Subscription {

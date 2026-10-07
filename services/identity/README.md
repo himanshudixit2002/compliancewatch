@@ -1,6 +1,6 @@
 # identity service
 
-Part of the ComplianceWatch monorepo. **Tenants, users and roles (row-level security, events through the outbox), sign-in through an identity provider (a fake one locally, Supabase Auth in the MVP, ADR-014), the access tokens every service verifies (ES256, published as a JWKS), service tokens for service clients, consent records (append-only) with their API, channel consents for WhatsApp numbers no tenant owns yet, and billing behind a flag: the `BillingProvider` protocol, an in-memory provider and a Razorpay skeleton.**
+Part of the ComplianceWatch monorepo. **Tenants, users and roles (row-level security, events through the outbox), sign-in through an identity provider (a fake one locally, Supabase Auth in the MVP, ADR-014), the access tokens every service verifies (ES256, published as a JWKS), service tokens for service clients, consent records (append-only) with their API, channel consents for WhatsApp numbers no tenant owns yet, and billing behind a flag: the `BillingProvider` protocol, an in-memory provider and a Razorpay skeleton, the billing ledger in Postgres, the entitlements a tenant's plan gives and the plan limits behind `identity.plan_limits`.**
 Design reference: Project Foundation guide, sections 7, 14 and 16.
 
 - **Owns:** Tenants, users, roles, API keys; maps OIDC claims to roles; issues partner API keys; enforces plan limits; the audit log's table, `audit.event`
@@ -29,8 +29,9 @@ Design reference: Project Foundation guide, sections 7, 14 and 16.
 | `GET /v1/identity/channel-consents/{channel}/{subject}` | A number's current state per purpose on a channel, with its history (service token) |
 | `GET /v1/identity/audit` | The audit trail, newest first, a keyset page of at most 200: a tenant's entries for its owners, CA admins and compliance leads; the platform's (and the internal tenant's) for analysts, reviewers and admins; 403 for any other role or a service, 422 for a bad cursor or range |
 | `GET /v1/identity/billing/plans` | The plans (placeholders with zero prices until pricing is decided) |
-| `POST /v1/identity/billing/subscriptions` | Start a subscription with the provider; 503 while `CW_BILLING_PROVIDER=none` |
-| `POST /v1/identity/billing/webhook` | Provider webhook; the body is verified against the webhook secret (`X-Razorpay-Signature`) before it is read |
+| `POST /v1/identity/billing/subscriptions` | Start a subscription with the provider (`Idempotency-Key` required: a retry with the same key and body gets the first answer and starts nothing more; another body is a 422); 503 while `CW_BILLING_PROVIDER=none` |
+| `POST /v1/identity/billing/webhook` | Provider webhook; the body is verified against the webhook secret (`X-Razorpay-Signature`) before it is read; 200 with `ignored` when it names no tenant, `duplicate` when the tenant received the same body before |
+| `GET /v1/identity/entitlements` | What the tenant's plan entitles it to: the plan, its status, the `registrations` and `seats` limits (null is none) and whether they are `enforced`; a user's own tenant, or a service with `entitlements:read` naming the tenant in `x-tenant-id` |
 
 Purposes: `terms`, `privacy_notice`, `profile_processing`, `whatsapp_reminders`,
 `email_reminders`, `analytics`. Sources: `web_onboarding`, `web_settings` (a change made later
@@ -107,11 +108,65 @@ service's audited actions). Rows are kept seven years and never changed.
 
 Identity writes its own entries in the transaction of each change: `tenant.created` (sign-up, and
 `bootstrap-internal`), `user.invited`, `user.roles_changed` and `user.disabled` (roles and status,
-never a contact detail), `consent.recorded`, `subscription.started` and
-`subscription.status_changed` (by `system:billing-webhook`), and from `identity-admin`
-`service_client.created`, `service_client.revoked` and `audit.exported` (by
-`system:identity-admin`). Channel consents and the dev service clients made at start are not
-audited.
+never a contact detail), `consent.recorded`, `subscription.started`, and by
+`system:billing-webhook` `subscription.status_changed`, `subscription.event_ignored` (a late
+event, or one after a cancellation) and `subscription.unmatched` (a webhook for a subscription
+the tenant may not hold), and from `identity-admin` `service_client.created`,
+`service_client.revoked` and `audit.exported` (by `system:identity-admin`). Channel consents and
+the dev service clients made at start are not audited.
+
+Billing ledger (migrations 0008 and 0009, `identity.billing_customer`, `billing_subscription`,
+`billing_start` and `billing_event`, all under forced row-level security): a tenant's provider
+customer, its subscriptions with their plan, quantity and status, the starts it asked for, and
+every verified webhook, append-only (a trigger refuses UPDATE, and DELETE outside a tenant
+erasure).
+
+- **One provider subscription per Idempotency-Key.** `StartSubscription` records the start
+  (`billing_start`, keyed by tenant and key) in its own transaction before it calls the provider.
+  The tenant's provider customer is made once and stored at once; two first starts racing each
+  other keep the customer stored first. The provider's answer is noted on the start, then the
+  subscription and `subscription.started` are stored in one transaction. A retry with the same
+  key never calls the provider again: it gets the stored subscription (recorded from the start's
+  note if the ledger write had failed), or 409 `identity-subscription-start-pending` when the
+  start failed after the provider may have created the subscription. A failure before the
+  subscription was asked for, or a refusal by the provider (nothing created), frees the key.
+- **Webhooks.** Verified first, then dedupled per tenant by the SHA-256 of the body (unique
+  (tenant_id, body_sha256)). The event is stored as a projection on an allowlist, never the body:
+  the event's kind, time and id (`x-razorpay-event-id`), and of the subscription, payment and
+  invoice entities only their ids, plan, status, quantity, times, amounts and currency (and the
+  notes `tenant_id` and `plan_key`), masked for personal identifiers as well. Names, emails, phone
+  numbers, VPAs, addresses and card or bank details are never stored.
+- **Order.** The subscription keeps the time of the last event applied (`last_event_at`); an
+  older event that arrives later is stored, changes nothing and is audited as
+  `subscription.event_ignored`. Cancelled is final: no later event makes it active again.
+- **Adoption.** A webhook for a subscription the tenant does not hold records it
+  (`subscription.started` by `system:billing-webhook`) only when the payload's customer is the
+  tenant's stored provider customer and the tenant exists, which covers a start whose last
+  write failed. Otherwise nothing changes, the event is audited as `subscription.unmatched`, and
+  the answer is 200 `ignored` with a warning: a webhook never creates a subscription from its
+  notes alone, and a subscription id another tenant holds is never moved (a tenant-guarded
+  insert, never a 500 that the provider would retry).
+- **Quantities** stay within 1..`CW_PLAN_MAX_QUANTITY` (1000; it can lower the API's ceiling,
+  not raise it), from a request or a webhook.
+
+A webhook finds its tenant only in the subscription's notes, which this service sets when it
+creates it; one without is logged and answered as ignored.
+
+Entitlements: the plan of the tenant's newest active subscription, or past-due one within the
+grace, times its quantity, or the free allowance (`CW_PLAN_FREE_REGISTRATIONS` and
+`CW_PLAN_FREE_SEATS`, one each); the internal tenant has no limits. A past-due subscription
+(Razorpay's `pending`, and `halted` once it stopped retrying) keeps its plan for
+`CW_PLAN_PAST_DUE_GRACE_DAYS` (14) after it turned past due, then the tenant has the free
+allowance until a charge succeeds. With the flag `identity.plan_limits` on for a tenant
+(`CW_PLAN_LIMITS_ENFORCED=true`, optionally `CW_PLAN_LIMITS_TENANTS=<ids>`; default off), an
+invitation past the seats (active users) is refused with 402 `identity-seat-limit-reached`, once
+early and again with the tenant locked, before the provider's account is made, so a refused
+invitation leaves no account behind; profile refuses a new GSTIN registration past the
+registrations with 402 `profile-plan-limit-reached`. Both problems carry `limit` and `used`
+(the `LimitProblem` schema in the specs), and nothing else about the tenant. **Placeholders,
+decided by the maintainer with the pricing:** the plans' prices and limits
+(`identity.domain.billing.PLANS`: per unit, the owner plan 5 registrations and 3 seats, the CA
+plan 25 and 1), the free allowance, and the past-due grace of 14 days.
 
 Roles depend on the tenant's kind: a business has owners, staff and compliance leads; a CA firm has
 CA admins, CA staff and compliance leads; the internal tenant has analysts, reviewers and admins.
@@ -151,7 +206,8 @@ test, where a key is made at start with a warning); `CW_ACCESS_TOKEN_TTL_SECONDS
 `CW_IDENTITY_DEV_CLIENTS` (local and test only); `CW_IDENTITY_STORE=memory|postgres`; `CW_IDENTITY_CHANNEL_TOKEN` (secret; the bot
 sends the same value as `IDENTITY_SERVICE_TOKEN`); `CW_BILLING_PROVIDER=none|memory|razorpay` with
 `CW_RAZORPAY_KEY_ID`, `CW_RAZORPAY_KEY_SECRET`, `CW_RAZORPAY_WEBHOOK_SECRET` and
-`CW_RAZORPAY_PLAN_IDS=owner_monthly=plan_x,ca_seat_monthly=plan_y`. Manual steps before
+`CW_RAZORPAY_PLAN_IDS=owner_monthly=plan_x,ca_seat_monthly=plan_y`; `CW_PLAN_FREE_REGISTRATIONS`
+and `CW_PLAN_FREE_SEATS` (1 each). Manual steps before
 `razorpay` works: a Razorpay account, plans matching `identity.domain.billing.PLANS`, a
 webhook to `/v1/identity/billing/webhook` with a secret, API keys. Nothing is created by code.
 The OpenAPI spec is `packages/contracts/openapi/identity.v1.json` (`make openapi SERVICE=identity`).
@@ -206,9 +262,9 @@ The secrets these steps create rotate as `docs/runbooks/secret-rotation.md` desc
 ```
 src/identity/
   api/             # routers, request/response schemas, auth dependencies
-  domain/          # tenancy.py: Tenant, User, roles by tenant kind; provider.py: IdentityProvider; sessions.py: TokenMinter; service_clients.py; events.py; repository.py: the unit of work; consent.py, channel_consent.py, billing.py
-  application/     # tenancy.py: CreateTenant, CurrentUser, InviteUser, ChangeRoles, DisableUser, ListUsers, ReadMembership; sessions.py: ExchangeSession, IssueServiceToken; bootstrap.py: BootstrapInternalTenant, service clients; consents.py, channel_consents.py, billing.py
-  infrastructure/  # memory.py, models.py, repository.py (Postgres, RLS, outbox); minter.py; providers/{fake,supabase}.py; billing/{memory,razorpay}.py
+  domain/          # tenancy.py: Tenant, User, roles by tenant kind; provider.py: IdentityProvider; sessions.py: TokenMinter; service_clients.py; events.py; repository.py: the unit of work; consent.py, channel_consent.py, billing.py (plans, the ledger port), entitlements.py, flags.py
+  application/     # tenancy.py: CreateTenant, CurrentUser, InviteUser, ChangeRoles, DisableUser, ListUsers, ReadMembership; sessions.py: ExchangeSession, IssueServiceToken; bootstrap.py: BootstrapInternalTenant, service clients; consents.py, channel_consents.py, billing.py, entitlements.py (ReadEntitlements, SeatCheck)
+  infrastructure/  # memory.py, models.py, repository.py (Postgres, RLS, outbox, the billing ledger); minter.py; flags.py; providers/{fake,supabase}.py; billing/{memory,razorpay}.py
   admin.py         # identity-admin: signing keys, service clients, the internal tenant
   composition.py   # the identity provider CW_AUTH_PROVIDER names
   identity_dev_clients.toml  # the service clients local and test runs create

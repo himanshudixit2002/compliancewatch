@@ -230,6 +230,13 @@ class EnvFlagProvider(_RegistryProvider):
                 return frozenset(_canonical_tenant(part) for part in raw.split(",") if part.strip())
         return frozenset()
 
+    def may_be_on(self, flag_key: str) -> bool:
+        """Whether the bool flag is on for any tenant: its variable says true, or it is unset and
+        the default is on."""
+        definition = self._definition(flag_key, "bool")
+        raw = self._raw(definition)
+        return bool(definition.default) if raw is None else raw[1].lower() in _TRUE
+
     def resolve_boolean_details(
         self,
         flag_key: str,
@@ -434,6 +441,20 @@ def configure_flags(
     return provider
 
 
+def flag_may_be_on(
+    name: str, settings: Settings, *, environ: Mapping[str, str] | None = None
+) -> bool:
+    """Whether the bool flag ``name`` can be on for some tenant of a process with ``settings``,
+    for wiring decided at startup: with Unleash always (it can turn on at any time), with the env
+    provider when its variable says true (for every tenant or for the listed ones)."""
+    if settings.flags_provider == "unleash":
+        return True
+    provider = EnvFlagProvider(
+        default_registry(), environment(settings) if environ is None else environ
+    )
+    return provider.may_be_on(name)
+
+
 def reset_flags() -> None:
     """Back to no provider: every flag answers its default (tests)."""
     api.set_provider_and_wait(NoOpProvider(), DOMAIN)
@@ -497,6 +518,7 @@ __all__ = [
     "default_registry",
     "environment",
     "flag_enabled",
+    "flag_may_be_on",
     "flag_value",
     "reset_flags",
 ]

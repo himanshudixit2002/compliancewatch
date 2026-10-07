@@ -283,3 +283,35 @@ class InternalTenantExistsError(DomainError):
         super().__init__(
             "the internal tenant exists already; its admins invite the regulatory team"
         )
+
+
+class SeatLimitReachedError(DomainError):
+    """The tenant's plan has no seat left for another user (402). The body carries the limit and
+    how many seats are used (``limit``, ``used``), and nothing about who holds them."""
+
+    type_slug: ClassVar[str] = "identity-seat-limit-reached"
+    title: ClassVar[str] = "Plan seat limit reached"
+
+    def __init__(self, *, limit: int, used: int) -> None:
+        self.limit = limit
+        self.used = used
+        self.problem_extensions: Mapping[str, object] = {"limit": limit, "used": used}
+        super().__init__(
+            f"the plan allows {limit} seat(s) and {used} are in use; upgrade the plan or "
+            "disable a user first"
+        )
+
+
+class SubscriptionStartPendingError(DomainError):
+    """A start under this Idempotency-Key is running, or failed where the provider may have
+    created the subscription, so it is never sent to the provider again (409). The billing page
+    shows the subscription once the provider's webhook records it; a new start needs a new key."""
+
+    type_slug: ClassVar[str] = "identity-subscription-start-pending"
+    title: ClassVar[str] = "A subscription is being created"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "a subscription is being created for this request; check the billing page before "
+            "starting another one"
+        )

@@ -27,6 +27,7 @@ from py_common.flags import (
     default_registry,
     environment,
     flag_enabled,
+    flag_may_be_on,
     flag_value,
     reset_flags,
 )
@@ -485,6 +486,19 @@ def test_from_settings_needs_the_connection() -> None:
     settings = Settings.model_construct(flags_provider="unleash", unleash_url=None)
     with pytest.raises(ValueError, match="CW_UNLEASH_URL and CW_UNLEASH_API_TOKEN"):
         UnleashFlagProvider.from_settings(settings)
+
+
+def test_may_be_on_reads_the_variable_or_the_default_and_unleash_always_may() -> None:
+    name = "identity.plan_limits"
+    assert not flag_may_be_on(name, Settings(), environ={})
+    assert flag_may_be_on(name, Settings(), environ={"CW_PLAN_LIMITS_ENFORCED": "true"})
+    assert flag_may_be_on(
+        name,
+        Settings(),
+        environ={"CW_PLAN_LIMITS_ENFORCED": "on", "CW_PLAN_LIMITS_TENANTS": TENANT_A},
+    )
+    assert not flag_may_be_on(name, Settings(), environ={"CW_PLAN_LIMITS_ENFORCED": "false"})
+    assert flag_may_be_on(name, unleash_settings(), environ={})
 
 
 def test_the_module_exports_its_api() -> None:

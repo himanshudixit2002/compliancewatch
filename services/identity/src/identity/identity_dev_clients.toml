@@ -24,6 +24,10 @@ reason = "checks that the user a member assigns an obligation to belongs to the 
 scopes = ["rulebook:write", "llm:call", "tenant:act"]
 reason = "writes extracted documents, mentions and relation candidates to the rulebook and calls the gateway, naming a tenant only when it attributes cost"
 
+[profile]
+scopes = ["entitlements:read"]
+reason = "checks a new GSTIN registration against the tenant's plan limits while identity.plan_limits is on: reads GET /v1/identity/entitlements for that tenant"
+
 [qa]
 scopes = ["llm:call", "tenant:act"]
 reason = "answers a tenant's question: reads the tenant's profile and obligations and calls the gateway for that tenant"

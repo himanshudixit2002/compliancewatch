@@ -4,7 +4,10 @@ A ``DomainError`` becomes ``application/problem+json`` whose ``type`` is the err
 The service passes the status each of its errors maps to; the kernel's defaults apply underneath.
 Request validation errors, HTTP errors and unhandled exceptions get the same shape, so a client
 parses one error format. An error may carry extra response headers in ``problem_headers``
-(the gateway's budget error sets ``Retry-After`` that way). A required header listed in
+(the gateway's budget error sets ``Retry-After`` that way), and extension members of the body in
+``problem_extensions`` (RFC 9457 section 3.2: the plan-limit errors add the limit and the count
+that reached it). An extension never replaces a member the shape defines, and it carries no
+personal data. A required header listed in
 ``MISSING_HEADER_ERRORS`` that a request leaves out is answered with its own problem rather than
 request-invalid: a creating request without ``Idempotency-Key`` is a 428. ``problem_response``
 builds the same body for code outside a FastAPI app, such as ASGI middleware that answers a
@@ -19,7 +22,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException
 
 from domain_kernel.errors import (
@@ -94,6 +97,27 @@ class Problem(BaseModel):
     errors: list[ValidationIssue] | None = None
 
 
+class LimitProblem(Problem):
+    """A problem that a plan's limit refused (402): the ``limit`` and how many are ``used``,
+    as extension members (RFC 9457 section 3.2). Nothing else about what was asked for."""
+
+    limit: int = Field(description="What the tenant's plan allows")
+    used: int = Field(description="How many the tenant holds already")
+
+
+LIMIT_PROBLEM_SCHEMA_REF = "#/components/schemas/LimitProblem"
+
+
+def limit_problem_responses() -> dict[int | str, dict[str, Any]]:
+    """The OpenAPI ``responses`` entry of a 402 whose body is a ``LimitProblem``."""
+    return {
+        402: {
+            "description": _phrase(402),
+            "content": {PROBLEM_MEDIA_TYPE: {"schema": {"$ref": LIMIT_PROBLEM_SCHEMA_REF}}},
+        }
+    }
+
+
 def problem_responses(*statuses: int) -> dict[int | str, dict[str, Any]]:
     """OpenAPI ``responses`` entries declaring the problem shape for the given statuses."""
     entries: dict[int | str, dict[str, Any]] = {
@@ -118,6 +142,7 @@ def install_problem_handlers(
         if not isinstance(exc, DomainError):  # pragma: no cover - registered for DomainError
             raise exc
         headers = getattr(exc, "problem_headers", None)
+        extensions = getattr(exc, "problem_extensions", None)
         return problem_response(
             request,
             status=_status_for(exc, statuses, default_status),
@@ -125,6 +150,7 @@ def install_problem_handlers(
             title=exc.title,
             detail=exc.detail,
             headers=dict(headers) if headers else None,
+            extensions=dict(extensions) if extensions else None,
         )
 
     def validation_error(request: Request, exc: Exception) -> JSONResponse:
@@ -218,9 +244,11 @@ def problem_response(
     detail: str | None,
     headers: Mapping[str, str] | None = None,
     errors: list[ValidationIssue] | None = None,
+    extensions: Mapping[str, object] | None = None,
 ) -> JSONResponse:
     """An ``application/problem+json`` response for ``request``, carrying its path as
-    ``instance`` and its correlation id. A pure ASGI app builds ``request`` from the scope
+    ``instance`` and its correlation id, and the ``extensions`` members a member of the shape
+    does not already name. A pure ASGI app builds ``request`` from the scope
     (``Request(scope)``) and awaits the response with the scope, receive and send."""
     problem = Problem(
         type=type_uri,
@@ -231,8 +259,12 @@ def problem_response(
         correlation_id=correlation_id_of(request),
         errors=errors,
     )
+    body: dict[str, Any] = problem.model_dump(exclude_none=True)
+    for name, value in (extensions or {}).items():
+        if name not in Problem.model_fields:
+            body[name] = value
     return JSONResponse(
-        problem.model_dump(exclude_none=True),
+        body,
         status_code=status,
         headers=headers,
         media_type=PROBLEM_MEDIA_TYPE,
@@ -251,6 +283,12 @@ def _publish_problem_schema(app: FastAPI) -> None:
             problem = Problem.model_json_schema(ref_template="#/components/schemas/{model}")
             components.update(problem.pop("$defs", {}))
             components["Problem"] = problem
+            if f'"{LIMIT_PROBLEM_SCHEMA_REF}"' in json.dumps(schema.get("paths", {})):
+                limited = LimitProblem.model_json_schema(
+                    ref_template="#/components/schemas/{model}"
+                )
+                limited.pop("$defs", None)
+                components["LimitProblem"] = limited
             _document_problems(schema)
         return schema
 

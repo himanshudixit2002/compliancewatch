@@ -11,13 +11,14 @@ from identity.application.channel_consents import ChannelConsentSummary
 from identity.application.consents import ConsentSummary
 from identity.application.sessions import ServiceSession, Session
 from identity.application.tenancy import CreatedTenant
-from identity.domain.billing import PLANS, Plan, Subscription
+from identity.domain.billing import MAX_QUANTITY, PLANS, REGISTRATIONS, SEATS, Plan, Subscription
 from identity.domain.channel_consent import (
     MESSAGE_ID_MAX_LENGTH,
     ChannelConsentRecord,
     ConsentChannel,
 )
 from identity.domain.consent import ConsentPurpose, ConsentRecord, ConsentSource, ConsentState
+from identity.domain.entitlements import Entitlements
 from identity.domain.tenancy import (
     MAX_NAME_CHARS,
     Tenant,
@@ -167,12 +168,22 @@ class ChannelConsentSummaryOut(BaseModel):
         )
 
 
+class LimitsOut(BaseModel):
+    registrations: int | None = Field(
+        description="GSTIN registrations across the tenant's businesses; null is no limit"
+    )
+    seats: int | None = Field(description="Active users; null is no limit")
+
+
 class PlanOut(BaseModel):
     key: str
     name: str
     amount_paise: int
     period: str
     description: str
+    limits: LimitsOut = Field(
+        description="What one unit of the plan's quantity allows (placeholders until decided)"
+    )
 
     @classmethod
     def from_plan(cls, plan: Plan) -> "PlanOut":
@@ -182,6 +193,9 @@ class PlanOut(BaseModel):
             amount_paise=plan.amount_paise,
             period=plan.period.value,
             description=plan.description,
+            limits=LimitsOut(
+                registrations=plan.limit(REGISTRATIONS, 1), seats=plan.limit(SEATS, 1)
+            ),
         )
 
 
@@ -189,6 +203,12 @@ class SubscriptionIn(Strict):
     plan_key: str = Field(pattern="^(" + "|".join(PLANS) + ")$")
     email: str = Field(min_length=3, max_length=254)
     name: str = Field(min_length=1, max_length=200)
+    quantity: int = Field(
+        default=1,
+        ge=1,
+        le=MAX_QUANTITY,
+        description="Units of the plan: businesses for the owner plan, seats for the CA plan",
+    )
 
 
 class SubscriptionOut(BaseModel):
@@ -197,6 +217,7 @@ class SubscriptionOut(BaseModel):
     status: str
     started_at: datetime
     checkout_url: str
+    quantity: int
 
     @classmethod
     def from_subscription(cls, subscription: Subscription) -> "SubscriptionOut":
@@ -206,6 +227,7 @@ class SubscriptionOut(BaseModel):
             status=subscription.status.value,
             started_at=subscription.started_at,
             checkout_url=subscription.checkout_url,
+            quantity=subscription.quantity,
         )
 
 
@@ -213,6 +235,37 @@ class WebhookOut(BaseModel):
     kind: str
     provider_subscription_id: str
     status: str | None
+    ignored: bool = Field(
+        default=False,
+        description=(
+            "Nothing changed: the webhook names no tenant, or a subscription the tenant does "
+            "not hold and may not adopt, or it is older than the last event applied, or follows "
+            "a cancellation"
+        ),
+    )
+    duplicate: bool = Field(
+        default=False, description="The same body was received before; nothing changed"
+    )
+
+
+class EntitlementsOut(BaseModel):
+    plan_key: str = Field(description="The current plan; free without a paid subscription")
+    status: str = Field(description="The subscription's status, or free")
+    limits: LimitsOut
+    enforced: bool = Field(
+        description="Whether going over the limits is refused (the flag identity.plan_limits)"
+    )
+
+    @classmethod
+    def from_entitlements(cls, entitlements: Entitlements) -> "EntitlementsOut":
+        return cls(
+            plan_key=entitlements.plan_key,
+            status=entitlements.status,
+            limits=LimitsOut(
+                registrations=entitlements.limits.registrations, seats=entitlements.limits.seats
+            ),
+            enforced=entitlements.enforced,
+        )
 
 
 # ---------------------------------------------------------------- sign-in and tokens

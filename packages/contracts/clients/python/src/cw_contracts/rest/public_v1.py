@@ -943,6 +943,26 @@ class LayerOut(BaseModel):
     result: LayerResult
 
 
+class LimitProblem(BaseModel):
+    """
+    A problem that a plan's limit refused (402): the ``limit`` and how many are ``used``,
+    as extension members (RFC 9457 section 3.2). Nothing else about what was asked for.
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    correlation_id: Annotated[str | None, Field(title="Correlation Id")] = None
+    detail: Annotated[str | None, Field(title="Detail")] = None
+    errors: Annotated[list[ValidationIssue] | None, Field(title="Errors")] = None
+    instance: Annotated[str | None, Field(title="Instance")] = None
+    limit: Annotated[int, Field(description="What the tenant's plan allows", title="Limit")]
+    status: Annotated[int, Field(title="Status")]
+    title: Annotated[str, Field(title="Title")]
+    type: Annotated[str, Field(title="Type")]
+    used: Annotated[int, Field(description="How many the tenant holds already", title="Used")]
+
+
 class NodeOut(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,

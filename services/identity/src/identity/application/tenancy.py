@@ -17,7 +17,8 @@ the routes refuse a request without one in dual mode) the tenant header names th
 does on every tenant route, and ``changed_by`` is empty. Such an anonymous caller grants no admin
 or regulatory role (``SIGNED_IN_GRANTS``): identity would put the role in the tokens it signs,
 which the other services trust. ``InviteUser`` creates the person's account at the identity provider
-first and removes it again when the user cannot be stored. A change of roles and disabling each
+inside the unit of work that stores the user, after the plan's seat check passed with the tenant
+locked, and removes it again when the user cannot be stored. A change of roles and disabling each
 bump the user's session version; every change publishes user.role.changed. The last active admin
 of a tenant can be neither demoted nor disabled, and changes and disables in one tenant run one at
 a time (``admin_context`` locks the tenant), so two of them at once cannot both pass that check.
@@ -32,7 +33,7 @@ from collections.abc import Callable, Iterable
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Final
+from typing import Final, Protocol
 
 from domain_kernel.access import REGULATORY_ROLES, TENANT_ADMIN_ROLES, Principal, Role
 from domain_kernel.audit import AuditActor, AuditEntry
@@ -69,6 +70,12 @@ SIGN_UP_KINDS = (TenantKind.BUSINESS, TenantKind.CA_FIRM)
 SIGNED_IN_GRANTS: Final = TENANT_ADMIN_ROLES | REGULATORY_ROLES
 """Roles only an admin a verified token names may grant: those that manage a tenant's users and
 those that curate the rulebook."""
+
+
+class SeatCheck(Protocol):
+    def __call__(self, uow: UnitOfWork, tenant_id: TenantId) -> None:
+        """Raise when the tenant has no seat left for one more user."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -267,10 +274,16 @@ class InviteUser:
         provider: IdentityProvider,
         *,
         clock: Callable[[], datetime] = utc_now,
+        seats: SeatCheck | None = None,
     ) -> None:
+        """``seats`` refuses a user past the tenant's plan (``SeatLimitReachedError``, 402). It
+        runs once early, and again with the tenant locked; only after that second check passes is
+        the provider's account made, inside the same locked unit of work, so two invitations at
+        once cannot both take the last seat and a refusal leaves no account at the provider."""
         self._unit_of_work = unit_of_work
         self._provider = provider
         self._clock = clock
+        self._seats = seats
 
     def run(
         self,
@@ -283,62 +296,70 @@ class InviteUser:
     ) -> User:
         with self._unit_of_work(tenant_id) as uow:
             tenant, _ = admin_context(uow, tenant_id, actor)
+            if self._seats is not None:
+                self._seats(uow, tenant_id)
         wanted = allowed_roles(tenant.kind, roles)
         check_grant(actor, wanted)
-        subject = self._provider.provision(
-            email=contact.email, phone=contact.phone, display_name=display_name.strip()
-        )
+        subject: str | None = None
         try:
-            return self._store(tenant, actor, subject, contact, wanted, display_name)
+            with self._unit_of_work(tenant.id) as uow:
+                tenant, admin = admin_context(uow, tenant.id, actor, lock=self._seats is not None)
+                if self._seats is not None:
+                    self._seats(uow, tenant.id)
+                subject = self._provider.provision(
+                    email=contact.email, phone=contact.phone, display_name=display_name.strip()
+                )
+                return self._add(uow, tenant, admin, actor, subject, contact, wanted, display_name)
         except Exception:
             # The account is new and nobody can sign in with it; a provider that cannot remove it
             # now leaves an orphan account, never a user.
-            with suppress(ProviderUnavailableError):
-                self._provider.delete(subject)
+            if subject is not None:
+                with suppress(ProviderUnavailableError):
+                    self._provider.delete(subject)
             raise
 
-    def _store(
+    def _add(
         self,
+        uow: UnitOfWork,
         tenant: Tenant,
+        admin: User | None,
         actor: Principal,
         subject: str,
         contact: Contact,
         roles: frozenset[Role],
         display_name: str,
     ) -> User:
-        with self._unit_of_work(tenant.id) as uow:
-            tenant, admin = admin_context(uow, tenant.id, actor)
-            user = User.new(
-                tenant,
-                provider=self._provider.name,
-                provider_subject=subject,
-                contact=contact,
-                roles=roles,
-                at=self._clock(),
-                display_name=display_name,
+        user = User.new(
+            tenant,
+            provider=self._provider.name,
+            provider_subject=subject,
+            contact=contact,
+            roles=roles,
+            at=self._clock(),
+            display_name=display_name,
+        )
+        uow.users.add(user)
+        uow.subjects.add(SubjectEntry.of(user))
+        uow.events.publish(
+            UserRoleChanged(
+                tenant_id=tenant.id,
+                user_id=user.id,
+                roles=sorted_roles(user.roles),
+                previous_roles=(),
+                reason=RoleChangeReason.INVITED,
+                session_version=user.session_version,
+                changed_by=_changed_by(admin),
             )
-            uow.users.add(user)
-            uow.subjects.add(SubjectEntry.of(user))
-            uow.events.publish(
-                UserRoleChanged(
-                    tenant_id=tenant.id,
-                    user_id=user.id,
-                    roles=sorted_roles(user.roles),
-                    previous_roles=(),
-                    reason=RoleChangeReason.INVITED,
-                    session_version=user.session_version,
-                    changed_by=_changed_by(admin),
-                )
+        )
+        uow.audit.write(
+            _user_entry(
+                "user.invited",
+                user,
+                actor,
+                before=None,
+                after={"roles": sorted_role_names(user.roles), "status": user.status.value},
             )
-            uow.audit.write(
-                _user_entry(
-                    "user.invited",
-                    user,
-                    actor,
-                    before=None,
-                    after={"roles": sorted_role_names(user.roles), "status": user.status.value},
-                )
-            )
+        )
         return user
 
 

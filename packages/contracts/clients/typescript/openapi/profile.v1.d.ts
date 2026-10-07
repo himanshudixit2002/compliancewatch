@@ -574,6 +574,49 @@ export type components = {
      * @enum {string}
      */
     ItemState: "missing" | "unsure" | "known" | "not_applicable";
+    /**
+     * LimitProblem
+     * @description A problem that a plan's limit refused (402): the ``limit`` and how many are ``used``,
+     *     as extension members (RFC 9457 section 3.2). Nothing else about what was asked for.
+     */
+    LimitProblem: {
+      /**
+       * Correlation Id
+       * @default null
+       */
+      correlation_id?: string | null;
+      /**
+       * Detail
+       * @default null
+       */
+      detail?: string | null;
+      /**
+       * Errors
+       * @default null
+       */
+      errors?: components["schemas"]["ValidationIssue"][] | null;
+      /**
+       * Instance
+       * @default null
+       */
+      instance?: string | null;
+      /**
+       * Limit
+       * @description What the tenant's plan allows
+       */
+      limit: number;
+      /** Status */
+      status: number;
+      /** Title */
+      title: string;
+      /** Type */
+      type: string;
+      /**
+       * Used
+       * @description How many the tenant holds already
+       */
+      used: number;
+    };
     /** LocationIn */
     LocationIn: {
       /**
@@ -1146,6 +1189,15 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      /** @description Payment Required */
+      402: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["LimitProblem"];
+        };
+      };
       /** @description Forbidden */
       403: {
         headers: {
@@ -1175,6 +1227,15 @@ export interface operations {
       };
       /** @description Precondition Required */
       428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
         headers: {
           [name: string]: unknown;
         };
@@ -1427,6 +1488,15 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      /** @description Payment Required */
+      402: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["LimitProblem"];
+        };
+      };
       /** @description Forbidden */
       403: {
         headers: {
@@ -1465,6 +1535,15 @@ export interface operations {
       };
       /** @description Precondition Required */
       428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
         headers: {
           [name: string]: unknown;
         };
@@ -2109,6 +2188,15 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      /** @description Payment Required */
+      402: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["LimitProblem"];
+        };
+      };
       /** @description Forbidden */
       403: {
         headers: {
@@ -2120,6 +2208,15 @@ export interface operations {
       };
       /** @description Unprocessable Entity */
       422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
         headers: {
           [name: string]: unknown;
         };

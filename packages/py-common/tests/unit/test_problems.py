@@ -10,7 +10,12 @@ from starlette.types import Receive, Scope, Send
 
 from domain_kernel.errors import DomainError, InvariantViolationError, UnknownAttributeError
 from py_common.app import create_app
-from py_common.problems import PROBLEM_MEDIA_TYPE, problem_response, problem_responses
+from py_common.problems import (
+    PROBLEM_MEDIA_TYPE,
+    limit_problem_responses,
+    problem_response,
+    problem_responses,
+)
 from py_common.request_context import REQUEST_ID_HEADER, RequestContextMiddleware
 
 PREFIX = "urn:compliancewatch:problem:"
@@ -28,6 +33,12 @@ class TenantRateLimitedError(RateLimitedError):
     title = "Tenant rate limited"
 
 
+class QuotaReachedError(DomainError):
+    type_slug = "quota-reached"
+    title = "Quota reached"
+    problem_extensions: ClassVar[Mapping[str, object]] = {"limit": 3, "used": 3, "status": 200}
+
+
 class UnmappedError(DomainError):
     type_slug = "unmapped"
     title = "Unmapped"
@@ -43,6 +54,10 @@ def _app() -> FastAPI:
     @router.get("/mapped")
     async def mapped() -> None:
         raise TenantRateLimitedError("slow down")
+
+    @router.get("/quota", responses=limit_problem_responses())
+    async def quota() -> None:
+        raise QuotaReachedError()
 
     @router.get("/unmapped")
     async def unmapped() -> None:
@@ -73,7 +88,10 @@ def _app() -> FastAPI:
         return signature
 
     return create_app(
-        service_name="t", version="0", routers=[router], problem_status={RateLimitedError: 429}
+        service_name="t",
+        version="0",
+        routers=[router],
+        problem_status={RateLimitedError: 429, QuotaReachedError: 402},
     )
 
 
@@ -97,6 +115,14 @@ def test_mapped_error_uses_the_most_specific_status_and_the_error_type(client: T
         "instance": "/t/mapped",
         "correlation_id": "req-1",
     }
+
+
+def test_an_error_adds_its_extension_members_but_never_replaces_one(client: TestClient) -> None:
+    response = client.get("/t/quota")
+    assert response.status_code == 402
+    body = response.json()
+    assert (body["type"], body["status"]) == (PREFIX + "quota-reached", 402)
+    assert (body["limit"], body["used"]) == (3, 3)
 
 
 def test_unmapped_domain_error_is_400(client: TestClient) -> None:
@@ -153,6 +179,16 @@ def test_openapi_publishes_the_problem_schema() -> None:
     assert "ValidationIssue" in spec["components"]["schemas"]
     content = spec["paths"]["/t/items/{item_id}"]["get"]["responses"]["422"]["content"]
     assert list(content) == [PROBLEM_MEDIA_TYPE]
+
+
+def test_openapi_publishes_the_limit_problem_only_where_a_route_answers_it() -> None:
+    spec = _app().openapi()
+    limited = spec["components"]["schemas"]["LimitProblem"]
+    assert {"limit", "used", "type", "title", "status"} <= set(limited["required"])
+    content = spec["paths"]["/t/quota"]["get"]["responses"]["402"]["content"]
+    assert content[PROBLEM_MEDIA_TYPE]["schema"]["$ref"].endswith("/LimitProblem")
+    bare = create_app(service_name="p", version="0", routers=[APIRouter()])
+    assert "LimitProblem" not in bare.openapi()["components"]["schemas"]
 
 
 def test_openapi_documents_problems_for_undecodable_bodies_and_validation() -> None:

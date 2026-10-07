@@ -11,6 +11,7 @@ export const PLAN_DTOS: PlanDto[] = [
     amount_paise: 149900,
     period: "monthly",
     description: "Example description.",
+    limits: { registrations: 5, seats: 3 },
   },
   {
     key: "example_yearly",
@@ -18,6 +19,7 @@ export const PLAN_DTOS: PlanDto[] = [
     amount_paise: 0,
     period: "yearly",
     description: "",
+    limits: { registrations: null, seats: null },
   },
 ];
 
@@ -28,6 +30,7 @@ export function subscriptionDto(overrides: Partial<SubscriptionDto> = {}): Subsc
     status: "created",
     started_at: "2000-01-01T00:00:00Z",
     checkout_url: "https://checkout.example.com/sub_example_1",
+    quantity: 1,
     ...overrides,
   };
 }

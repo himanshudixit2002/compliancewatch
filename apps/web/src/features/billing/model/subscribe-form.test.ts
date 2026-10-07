@@ -48,4 +48,27 @@ describe("parseSubscribeForm", () => {
       },
     });
   });
+
+  it("reads the units when given, and refuses anything but a whole number from 1 to 1000", () => {
+    const valid = { plan_key: "example_monthly", email: "owner@example.com", name: "Example" };
+    expect(parseSubscribeForm(form({ ...valid, quantity: " 3 " }), KEYS)).toEqual({
+      ok: true,
+      value: {
+        planKey: "example_monthly",
+        email: "owner@example.com",
+        name: "Example",
+        quantity: 3,
+      },
+    });
+    expect(parseSubscribeForm(form({ ...valid, quantity: "" }), KEYS)).toEqual({
+      ok: true,
+      value: { planKey: "example_monthly", email: "owner@example.com", name: "Example" },
+    });
+    for (const quantity of ["0", "1001", "2.5", "-1", "two"]) {
+      expect(parseSubscribeForm(form({ ...valid, quantity }), KEYS)).toEqual({
+        ok: false,
+        fieldErrors: { [SUBSCRIBE_FIELDS.quantity]: ["Enter a whole number from 1 to 1000."] },
+      });
+    }
+  });
 });

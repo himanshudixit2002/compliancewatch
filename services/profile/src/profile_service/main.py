@@ -1,7 +1,10 @@
 """Composition root for the profile service.
 
 Guide section 11: wiring of interfaces to implementations happens here, never inside the layers.
-The caller and its tenant come from ``py_common.auth`` by ``CW_AUTH_MODE`` (``api.deps``).
+The caller and its tenant come from ``py_common.auth`` by ``CW_AUTH_MODE`` (``api.deps``). A new
+GSTIN registration is checked against the tenant's plan while the flag ``identity.plan_limits``
+is on for it, reading ``GET {CW_IDENTITY_URL}/v1/identity/entitlements`` with this service's own
+token (``infrastructure.entitlements``).
 """
 
 from collections.abc import Awaitable, Callable
@@ -32,12 +35,15 @@ from profile_service.application.businesses import (
 from profile_service.application.onboarding import OnboardingChecklist
 from profile_service.application.prefill import PrefillFromGstin
 from profile_service.application.registration import RegisterNodes
+from profile_service.domain.entitlements import EntitlementsReader
 from profile_service.domain.errors import (
     AttributeLevelMismatchError,
     BusinessIdentifierRequiredError,
+    EntitlementsMisconfiguredError,
     FinancialYearRequiredError,
     InvalidHierarchyError,
     NotABusinessError,
+    PlanLimitReachedError,
     ProfileNodeNotFoundError,
     RegistrationAmbiguousError,
     TenantRequiredError,
@@ -45,6 +51,7 @@ from profile_service.domain.errors import (
 from profile_service.domain.flags import FeatureFlags
 from profile_service.domain.lookup import GstinLookupProvider
 from profile_service.domain.repository import UnitOfWorkFactory
+from profile_service.infrastructure.entitlements import FlaggedEntitlements, HttpEntitlements
 from profile_service.infrastructure.flags import OpenFeatureFlags
 from profile_service.infrastructure.lookup import (
     DEMO_LOOKUPS,
@@ -60,6 +67,7 @@ from profile_service.infrastructure.repository import (
 from profile_service.settings import ProfileSettings
 from profile_service.wiring import Wiring
 from py_common.app import create_app, module_app
+from py_common.auth import TokenSource, service_auth_from
 from py_common.auth.fastapi import Authenticator
 from py_common.flags import configure_flags
 from py_common.idempotency import IdempotencyStore, MemoryIdempotencyStore
@@ -78,6 +86,8 @@ PROBLEM_STATUS: dict[type[DomainError], int] = {
     # A value the ontology rejects or a key it does not define is a bad request, not a 404
     InvalidAttributeValueError: 422,
     UnknownAttributeError: 422,
+    PlanLimitReachedError: 402,
+    EntitlementsMisconfiguredError: 503,
 }
 
 
@@ -87,16 +97,24 @@ def wire(
     *,
     wording: OntologyWording | None = None,
     flags: FeatureFlags | None = None,
+    entitlements: EntitlementsReader | None = None,
+    token_source: TokenSource | None = None,
 ) -> Wiring:
     """Build the use cases on the store the settings name, with the packaged ontology and its
     English wording unless others are given. Without ``flags`` the process-wide OpenFeature
     provider is configured from the settings and answers them. Idempotency keys live next to
     the profile tables (``idempotency_key``, migration 0003), each key in its own short
-    transaction."""
+    transaction. Without ``entitlements`` a new registration is checked against identity's
+    entitlements for the tenants the flag ``identity.plan_limits`` is on for."""
     loaded = ontology or ontology_package.load()
     if flags is None:
         configure_flags(settings)
         flags = OpenFeatureFlags()
+    if entitlements is None:
+        auth = service_auth_from(settings, token_source=token_source)
+        entitlements = FlaggedEntitlements(
+            flags, HttpEntitlements(settings.identity_url, auth=auth)
+        )
     unit_of_work: UnitOfWorkFactory
     ping: Callable[[], bool]
     idempotency: IdempotencyStore
@@ -124,17 +142,17 @@ def wire(
         unit_of_work=unit_of_work,
         store_ready=store_ready,
         idempotency=idempotency,
-        register=RegisterNodes(unit_of_work),
+        register=RegisterNodes(unit_of_work, entitlements=entitlements),
         set_attributes=SetAttributes(unit_of_work, loaded),
         next_question=NextQuestion(unit_of_work, loaded),
         build_snapshot=BuildSnapshot(unit_of_work),
         confirm_financial_year=ConfirmFinancialYear(unit_of_work, loaded),
         prefill=prefill,
-        create_business=CreateBusiness(unit_of_work, loaded, prefill),
+        create_business=CreateBusiness(unit_of_work, loaded, prefill, entitlements=entitlements),
         update_business=UpdateBusiness(unit_of_work, loaded),
         read_business=ReadBusiness(unit_of_work),
         list_businesses=ListBusinesses(unit_of_work),
-        add_registration=AddRegistration(unit_of_work, prefill),
+        add_registration=AddRegistration(unit_of_work, prefill, entitlements=entitlements),
         onboarding=OnboardingChecklist(unit_of_work, loaded),
     )
 
@@ -165,11 +183,14 @@ def build_app(
     *,
     flags: FeatureFlags | None = None,
     authenticator: Authenticator | None = None,
+    entitlements: EntitlementsReader | None = None,
+    token_source: TokenSource | None = None,
 ) -> FastAPI:
-    """``flags`` replaces the OpenFeature flags (tests). ``authenticator`` replaces the one
-    ``CW_AUTH_MODE`` describes; a process that hosts identity passes identity's own."""
+    """``flags`` replaces the OpenFeature flags and ``entitlements`` the identity client
+    (tests). ``authenticator`` replaces the one ``CW_AUTH_MODE`` describes and ``token_source``
+    the service client's tokens; a process that hosts identity passes identity's own."""
     settings = settings or ProfileSettings(service_name=SERVICE_NAME)
-    wiring = wire(settings, flags=flags)
+    wiring = wire(settings, flags=flags, entitlements=entitlements, token_source=token_source)
     app = create_app(
         service_name=SERVICE_NAME,
         version=__version__,

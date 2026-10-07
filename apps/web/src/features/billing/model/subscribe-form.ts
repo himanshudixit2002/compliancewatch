@@ -6,12 +6,19 @@ import { EMAIL_MAX_LENGTH, isEmailAddress } from "@/shared/lib/identifiers";
 /**
  * The subscribe form's fields and their shape check, mirroring the identity service's
  * SubscriptionIn: a plan the service offers, the billing contact's email (3 to 254 characters)
- * and name (1 to 200). No card or bank detail is ever a field: the provider's checkout page
- * collects payment.
+ * and name (1 to 200), and optionally the quantity, the units of the plan (1 to 1000: businesses
+ * for the owner plan, seats for the CA plan; left empty, the service takes one). No card or bank
+ * detail is ever a field: the provider's checkout page collects payment.
  */
-export const SUBSCRIBE_FIELDS = { plan: "plan_key", email: "email", name: "name" } as const;
+export const SUBSCRIBE_FIELDS = {
+  plan: "plan_key",
+  email: "email",
+  name: "name",
+  quantity: "quantity",
+} as const;
 
 export const NAME_MAX_LENGTH = 200;
+export const QUANTITY_MAX = 1000;
 
 export type ParsedSubscribeForm =
   { ok: true; value: NewSubscription } | { ok: false; fieldErrors: FieldErrors };
@@ -38,6 +45,17 @@ export function parseSubscribeForm(
   else if (name.length > NAME_MAX_LENGTH) {
     errors[SUBSCRIBE_FIELDS.name] = [t("billing.error.nameTooLong", { max: NAME_MAX_LENGTH })];
   }
+  const quantityText = text(formData, SUBSCRIBE_FIELDS.quantity);
+  const quantity = quantityText === "" ? undefined : Number(quantityText);
+  if (
+    quantity !== undefined &&
+    (!/^\d+$/.test(quantityText) || quantity < 1 || quantity > QUANTITY_MAX)
+  ) {
+    errors[SUBSCRIBE_FIELDS.quantity] = [t("billing.error.quantity", { max: QUANTITY_MAX })];
+  }
   if (Object.keys(errors).length > 0) return { ok: false, fieldErrors: errors };
-  return { ok: true, value: { planKey, email, name } };
+  return {
+    ok: true,
+    value: quantity === undefined ? { planKey, email, name } : { planKey, email, name, quantity },
+  };
 }

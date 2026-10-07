@@ -18,10 +18,11 @@ from sqlalchemy import (
     Uuid,
     text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from domain_kernel.access import MAX_CLIENT_ID_CHARS, Role
+from identity.domain.billing import SubscriptionStatus
 from identity.domain.channel_consent import (
     CHANNEL_PURPOSES,
     CHANNEL_SOURCES,
@@ -60,6 +61,11 @@ SECRET_SHA256_PATTERN: Final[str] = "^[0-9a-f]{64}$"
 CLIENT_ID_PATTERN: Final[str] = "^[a-z0-9][a-z0-9._-]*$"
 NO_RLS: Final[str] = "No row-level security: "
 INTERNAL_TENANT_INDEX: Final[str] = "ux_tenant_internal"
+SUBSCRIPTION_STATUSES: Final[tuple[str, ...]] = tuple(s.value for s in SubscriptionStatus)
+BILLING_EVENT_DIGEST: Final[str] = "uq_billing_event_body"
+PROVIDER_ID_CHARS: Final = 64
+START_KEY_CHARS: Final = 128
+"""py_common.idempotency's longest key."""
 
 
 def sql_in_list(column: str, values: tuple[str, ...]) -> str:
@@ -259,3 +265,113 @@ class ServiceClientRow(Base):
     scopes: Mapped[list[str]] = mapped_column(ARRAY(String(length=64)), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class BillingCustomerRow(Base):
+    __tablename__ = "billing_customer"
+    __table_args__ = (
+        PrimaryKeyConstraint("tenant_id", name="pk_billing_customer"),
+        {"comment": "A tenant's customer at the billing provider; row-level security by tenant_id"},
+    )
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(Uuid())
+    provider: Mapped[str] = mapped_column(String(length=32), nullable=False)
+    provider_customer_id: Mapped[str] = mapped_column(
+        String(length=PROVIDER_ID_CHARS), nullable=False
+    )
+    email: Mapped[str] = mapped_column(String(length=MAX_EMAIL_CHARS), nullable=False)
+    name: Mapped[str] = mapped_column(String(length=MAX_NAME_CHARS), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class BillingSubscriptionRow(Base):
+    __tablename__ = "billing_subscription"
+    __table_args__ = (
+        PrimaryKeyConstraint("provider_subscription_id", name="pk_billing_subscription"),
+        CheckConstraint(
+            sql_in_list("status", SUBSCRIPTION_STATUSES), name="ck_billing_subscription_status"
+        ),
+        CheckConstraint("quantity >= 1", name="ck_billing_subscription_quantity"),
+        Index("ix_billing_subscription_tenant_started", "tenant_id", "started_at"),
+        {
+            "comment": (
+                "A tenant's subscriptions at the billing provider and their current status; "
+                "row-level security by tenant_id"
+            )
+        },
+    )
+
+    provider_subscription_id: Mapped[str] = mapped_column(String(length=PROVIDER_ID_CHARS))
+    tenant_id: Mapped[uuid.UUID] = mapped_column(Uuid(), nullable=False)
+    plan_key: Mapped[str] = mapped_column(String(length=64), nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer(), nullable=False, server_default="1")
+    status: Mapped[str] = mapped_column(String(length=16), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    checkout_url: Mapped[str] = mapped_column(Text(), nullable=False, server_default="")
+    last_event_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    past_due_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class BillingStartRow(Base):
+    __tablename__ = "billing_start"
+    __table_args__ = (
+        PrimaryKeyConstraint("tenant_id", "idempotency_key", name="pk_billing_start"),
+        CheckConstraint("quantity >= 1", name="ck_billing_start_quantity"),
+        {
+            "comment": (
+                "Subscription starts by Idempotency-Key, recorded before the provider is called; "
+                "row-level security by tenant_id"
+            )
+        },
+    )
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(Uuid())
+    idempotency_key: Mapped[str] = mapped_column(String(length=START_KEY_CHARS))
+    plan_key: Mapped[str] = mapped_column(String(length=64), nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    provider_subscription_id: Mapped[str | None] = mapped_column(
+        String(length=PROVIDER_ID_CHARS), nullable=True
+    )
+    checkout_url: Mapped[str] = mapped_column(Text(), nullable=False, server_default="")
+    recorded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class BillingEventRow(Base):
+    __tablename__ = "billing_event"
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="pk_billing_event"),
+        UniqueConstraint("tenant_id", "body_sha256", name=BILLING_EVENT_DIGEST),
+        CheckConstraint(
+            "status IS NULL OR " + sql_in_list("status", SUBSCRIPTION_STATUSES),
+            name="ck_billing_event_status",
+        ),
+        CheckConstraint(
+            f"body_sha256 ~ '{SECRET_SHA256_PATTERN}'", name="ck_billing_event_body_sha256"
+        ),
+        Index(
+            "ix_billing_event_subscription",
+            "tenant_id",
+            "provider_subscription_id",
+            "received_at",
+        ),
+        {
+            "comment": (
+                "Append-only verified billing webhooks with the payload masked; row-level "
+                "security by tenant_id"
+            )
+        },
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid())
+    tenant_id: Mapped[uuid.UUID] = mapped_column(Uuid(), nullable=False)
+    provider_subscription_id: Mapped[str] = mapped_column(
+        String(length=PROVIDER_ID_CHARS), nullable=False, server_default=""
+    )
+    kind: Mapped[str] = mapped_column(String(length=64), nullable=False)
+    status: Mapped[str | None] = mapped_column(String(length=16), nullable=True)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    body_sha256: Mapped[str] = mapped_column(String(length=64), nullable=False)
+    raw_event: Mapped[dict[str, object]] = mapped_column(JSONB(), nullable=False)

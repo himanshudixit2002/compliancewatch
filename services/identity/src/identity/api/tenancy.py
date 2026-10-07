@@ -38,7 +38,7 @@ from identity.api.schemas import (
 from identity.domain.tenancy import Contact, TenantKind
 from py_common.auth.errors import AuthTokenRequiredError
 from py_common.auth.fastapi import CurrentPrincipal, authenticator_of, require_roles
-from py_common.problems import problem_responses
+from py_common.problems import limit_problem_responses, problem_responses
 
 router = APIRouter(prefix="/v1/identity", tags=["identity"])
 
@@ -122,7 +122,8 @@ def read_membership(user_id: UUID, tenant: Tenant, wired: Wired) -> MembershipOu
     "/users",
     summary="Invite a user: their account at the identity provider, then the user (tenant admins)",
     status_code=status.HTTP_201_CREATED,
-    responses=problem_responses(401, 403, 404, 409, 422, 503),
+    # 402: identity-seat-limit-reached, with the plan's limit and the seats used
+    responses={**problem_responses(401, 403, 404, 409, 422, 503), **limit_problem_responses()},
     dependencies=[TenantAdmin],
 )
 def invite_user(

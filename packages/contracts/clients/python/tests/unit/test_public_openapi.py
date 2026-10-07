@@ -27,6 +27,7 @@ ROLES = {
     "admin",
 }
 """The tenant members' roles and the regulatory team's (``domain_kernel.access``)."""
+LIMIT_PROBLEM_REF = "#/components/schemas/LimitProblem"
 PROBLEM_REF = "#/components/schemas/Problem"
 PROBLEM = {
     "properties": {"status": {"type": "integer"}, "title": {"type": "string"}},
@@ -114,8 +115,11 @@ def test_every_public_operation_names_its_roles_and_answers_problems(
     assert set(op["x-roles"]) <= ROLES
     errors = {code: response for code, response in op["responses"].items() if code[0] in "45"}
     assert errors
-    for response in errors.values():
-        assert response["content"]["application/problem+json"]["schema"] == {"$ref": PROBLEM_REF}
+    for code, response in errors.items():
+        schema = response["content"]["application/problem+json"]["schema"]
+        # A plan limit's 402 is a Problem with its limit and the count (LimitProblem).
+        allowed = [PROBLEM_REF, LIMIT_PROBLEM_REF] if code == "402" else [PROBLEM_REF]
+        assert schema in [{"$ref": ref} for ref in allowed]
 
 
 @pytest.mark.parametrize(

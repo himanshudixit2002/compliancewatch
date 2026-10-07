@@ -34,8 +34,9 @@ settled some time after it ends: ``settled_until(now)`` is the latest ``--to`` t
 
 ``audit_entry`` builds the entries identity's own use cases write, each in the unit of work of
 the change: ``tenant.created``, ``user.invited``, ``user.roles_changed``, ``user.disabled``,
-``consent.recorded``, ``subscription.started``, ``subscription.status_changed`` and, from the
-operator's CLI, ``service_client.created`` and ``service_client.revoked``. Their volume is that
+``consent.recorded``, ``subscription.started``, ``subscription.status_changed``,
+``subscription.event_ignored``, ``subscription.unmatched`` and, from the operator's CLI,
+``service_client.created`` and ``service_client.revoked``. Their volume is that
 of people's actions (sign-ups, invitations, role changes, consents, billing changes): a few rows
 per tenant per month.
 """

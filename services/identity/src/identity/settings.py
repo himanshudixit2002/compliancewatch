@@ -5,6 +5,16 @@ records. Billing stays ``none`` until the maintainer has a Razorpay account, pla
 (docs in identity/infrastructure/billing/razorpay.py); ``razorpay_plan_ids`` maps our plan
 keys to Razorpay plan ids as ``owner_monthly=plan_x,ca_seat_monthly=plan_y``.
 
+``plan_free_registrations`` and ``plan_free_seats`` (``CW_PLAN_FREE_REGISTRATIONS`` and
+``CW_PLAN_FREE_SEATS``, one each) are what a tenant without a paid subscription is entitled to:
+placeholders the maintainer decides with the pricing. They are refused past only while the flag
+``identity.plan_limits`` (``CW_PLAN_LIMITS_ENFORCED``, per tenant with
+``CW_PLAN_LIMITS_TENANTS``) is on; ``GET /v1/identity/entitlements`` reports them either way.
+``plan_past_due_grace_days`` (``CW_PLAN_PAST_DUE_GRACE_DAYS``, 14) is how long a past-due or
+halted subscription keeps its plan, another placeholder the maintainer decides; then the tenant
+has the free allowance. ``plan_max_quantity`` (``CW_PLAN_MAX_QUANTITY``, 1000) bounds the units a
+start or a webhook may give a subscription; it can lower the API's ceiling of 1000, not raise it.
+
 ``identity_channel_token`` is the shared secret the WhatsApp bot sends in
 ``x-cw-service-token`` to record and read channel consents. Unset, both routes refuse every call
 (503): consents keyed by a phone number are personal data no tenant guards, so they fail closed.
@@ -38,6 +48,7 @@ from typing import Final, Literal, Self
 from pydantic import Field, SecretStr, field_validator, model_validator
 
 from domain_kernel.access import Scope
+from identity.domain.billing import MAX_QUANTITY
 from py_common.settings import Settings
 
 MIN_FAKE_SECRET_BYTES = 32
@@ -56,6 +67,10 @@ class IdentitySettings(Settings):
     razorpay_key_secret: SecretStr | None = None
     razorpay_webhook_secret: SecretStr | None = None
     razorpay_plan_ids: dict[str, str] = Field(default_factory=dict)
+    plan_free_registrations: int = Field(default=1, ge=0)
+    plan_free_seats: int = Field(default=1, ge=0)
+    plan_past_due_grace_days: int = Field(default=14, ge=0, le=365)
+    plan_max_quantity: int = Field(default=MAX_QUANTITY, ge=1, le=MAX_QUANTITY)
     identity_channel_token: SecretStr | None = None
     auth_provider: AuthProvider = "fake"
     identity_fake_provider_secret: SecretStr | None = None

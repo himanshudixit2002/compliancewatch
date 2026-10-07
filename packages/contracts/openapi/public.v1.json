@@ -1490,6 +1490,93 @@
         "title": "LayerResult",
         "type": "string"
       },
+      "LimitProblem": {
+        "description": "A problem that a plan's limit refused (402): the ``limit`` and how many are ``used``,\nas extension members (RFC 9457 section 3.2). Nothing else about what was asked for.",
+        "properties": {
+          "correlation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Correlation Id"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Detail"
+          },
+          "errors": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ValidationIssue"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Errors"
+          },
+          "instance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Instance"
+          },
+          "limit": {
+            "description": "What the tenant's plan allows",
+            "title": "Limit",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          },
+          "used": {
+            "description": "How many the tenant holds already",
+            "title": "Used",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "limit",
+          "used"
+        ],
+        "title": "LimitProblem",
+        "type": "object"
+      },
       "LookupResultOut": {
         "properties": {
           "business_category": {
@@ -3341,6 +3428,16 @@
             },
             "description": "Unauthorized"
           },
+          "402": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LimitProblem"
+                }
+              }
+            },
+            "description": "Payment Required"
+          },
           "403": {
             "content": {
               "application/problem+json": {
@@ -3380,6 +3477,16 @@
               }
             },
             "description": "Precondition Required"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "summary": "Create a business from its GSTIN, or from its PAN alone",
@@ -4013,6 +4120,16 @@
             },
             "description": "Unauthorized"
           },
+          "402": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LimitProblem"
+                }
+              }
+            },
+            "description": "Payment Required"
+          },
           "403": {
             "content": {
               "application/problem+json": {
@@ -4062,6 +4179,16 @@
               }
             },
             "description": "Precondition Required"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "summary": "Add a GSTIN registration to a business and pre-fill it",

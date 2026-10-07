@@ -137,10 +137,12 @@ def test_dev_clients_come_from_the_committed_file_or_the_setting() -> None:
         "notification",
         "obligation",
         "pipeline",
+        "profile",
         "qa",
         "whatsapp-bot",
         "worker",
     }
+    assert committed["profile"] == {Scope.ENTITLEMENTS_READ}
     assert committed["applicability-engine"] == {Scope.TENANT_ACT}
     assert committed["obligation"] == {Scope.TENANT_ACT}
     assert committed["notification"] == {Scope.TENANT_ACT}

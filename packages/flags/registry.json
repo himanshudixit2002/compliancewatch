@@ -78,6 +78,19 @@
       "services": ["identity"]
     },
     {
+      "name": "identity.plan_limits",
+      "type": "bool",
+      "default": false,
+      "owner": "identity-partner",
+      "description": "Refuses what goes over a tenant's plan with a 402 that carries the limit and the count: identity's invitation past the tenant's seats (identity-seat-limit-reached) and profile's new GSTIN registration past its registrations (profile-plan-limit-reached; profile reads GET /v1/identity/entitlements with a 60 s cache, applies the limit only when identity answers enforced true, fails open when identity cannot be reached (a 10 s failure cache) and answers 503 profile-entitlements-misconfigured when identity refuses it with 401 or 403). Off, GET /v1/identity/entitlements still reports the limits with enforced false. With the flag set, profile's registration routes count against CW_MVP_LOOPBACK_LIMIT in the single app. The free allowance (CW_PLAN_FREE_REGISTRATIONS, CW_PLAN_FREE_SEATS) and the plans' limits are placeholders the maintainer decides with the pricing. With CW_PLAN_LIMITS_TENANTS it applies to the listed tenants only.",
+      "removal": "When pricing and plan limits are decided and the limits have been enforced for every tenant for 30 days.",
+      "expires": "2027-06-30",
+      "targeting": "tenant",
+      "env": "CW_PLAN_LIMITS_ENFORCED",
+      "tenants_env": "CW_PLAN_LIMITS_TENANTS",
+      "services": ["identity", "profile"]
+    },
+    {
       "name": "llm_gateway.provider",
       "type": "string",
       "default": "fake",

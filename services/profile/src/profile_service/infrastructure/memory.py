@@ -83,6 +83,13 @@ class MemoryProfileRepository:
             entities = [node for node in entities if self._matches(node, query.casefold())]
         return entities[:limit]
 
+    def count(self, level: AttributeLevel) -> int:
+        return sum(
+            1
+            for node in self._nodes.values()
+            if node.tenant_id == self._tenant and node.level is level
+        )
+
     def registrations_of(
         self, entity_ids: Sequence[BusinessId]
     ) -> Mapping[BusinessId, Sequence[ProfileNode]]:

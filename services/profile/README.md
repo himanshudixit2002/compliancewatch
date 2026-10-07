@@ -79,6 +79,36 @@ These routes and `GET /v1/ontology` are the profile's part of the public API spe
 `x-roles` names `owner`, `staff`, `ca_admin`, `ca_staff` and `compliance_lead`, which a caller an
 access token names must hold (see Authentication).
 
+## Plan limits
+
+While the flag `identity.plan_limits` is on for a tenant (`CW_PLAN_LIMITS_ENFORCED=true`,
+optionally `CW_PLAN_LIMITS_TENANTS=<ids>`; read through the shared flags reader; default off), a
+new GSTIN registration, from `POST /v1/businesses`, `POST /v1/businesses/{id}/registrations` or
+`POST /v1/profile/registrations`, is refused once the tenant holds as many as its plan allows:
+402 `profile-plan-limit-reached` with `limit` and `used`, and never the GSTIN asked for. A GSTIN
+the tenant holds already is found as before, and a business from its PAN alone counts nothing.
+The limit is `limits.registrations` of `GET {CW_IDENTITY_URL}/v1/identity/entitlements`, read
+with this service's own token (client `profile`, scope `entitlements:read`;
+`CW_SERVICE_CLIENT_ID` and `CW_SERVICE_CLIENT_SECRET`) before the unit of work opens, kept 60
+seconds per tenant (`infrastructure/entitlements.py`, `HttpEntitlements`). Identity is the
+single source of truth: the limit applies only when identity answers `enforced: true` as well as
+profile's own flag being on, so the two services never disagree when the variable is set on one
+and not the other.
+
+- It fails open only when identity cannot be reached (a transport error, a timeout, a 5xx, or no
+  service token from identity): the registration goes ahead with a warning
+  (`profile_entitlements_unavailable`).
+- A 401 or 403 (no service client, no token, or no `entitlements:read`), or an answer profile
+  cannot read, is a misconfiguration, not an outage: the registration is refused with 503
+  `profile-entitlements-misconfigured`, whose detail names the setting to check and nothing about
+  the tenant, and the error is logged (`profile_entitlements_misconfigured`).
+- Either failure is kept for 10 seconds per tenant, so an outage does not cost every registration
+  the 2-second timeout, and the log gets one line per tenant every 10 seconds.
+
+Two registrations racing for the last place can both pass; the limit is commercial, not an
+invariant. The values are the maintainer's placeholders (see the
+identity README).
+
 ## Authentication
 
 The caller comes from `py_common.auth` by `CW_AUTH_MODE` (`api/deps.py`):

@@ -9,6 +9,7 @@ import { encryptSession } from "@/server/session";
 import { PLAN_DTOS, subscriptionDto } from "@/test/billing-fixture";
 import { fakeCookies } from "@/test/fake-cookies";
 import { fakeFetch, jsonResponse, problemResponse, type RecordedRequest } from "@/test/fake-fetch";
+import { IDEMPOTENCY_KEY_FIELD } from "@/shared/lib/idempotency";
 import { startSubscription } from "./actions";
 
 vi.mock("next/headers", async () => (await import("@/test/fake-cookies")).nextHeadersMock());
@@ -45,7 +46,13 @@ function form(entries: Record<string, string>): FormData {
   return data;
 }
 
-const VALID = { plan_key: "example_monthly", email: "owner@example.com", name: "Example Traders" };
+const FORM_UUID = "3d4e5f6a-7b8c-4d9e-8f0a-1b2c3d4e5f6a";
+const VALID = {
+  plan_key: "example_monthly",
+  email: "owner@example.com",
+  name: "Example Traders",
+  [IDEMPOTENCY_KEY_FIELD]: FORM_UUID,
+};
 
 /** The identity service with the provider the test names: none answers 503, memory 201. */
 function identity(provider: "none" | "memory", options: { failPlans?: boolean } = {}) {
@@ -102,6 +109,7 @@ describe("startSubscription", () => {
     expect(state.problem?.correlationId).toMatch(/^[0-9a-f-]{36}$/);
     const post = fake.requests.find((request) => request.method === "POST");
     expect(post?.headers["x-tenant-id"]).toBe(TENANT);
+    expect(post?.headers["idempotency-key"]).toBe(FORM_UUID);
     expect(post?.body).toEqual({
       plan_key: "example_monthly",
       email: "owner@example.com",
@@ -121,6 +129,20 @@ describe("startSubscription", () => {
         startedAt: "1 Jan 2000, 5:30 am IST",
         checkoutUrl: null,
       },
+    });
+  });
+
+  it("sends the units the form carries", async () => {
+    await signedInAs();
+    const fake = identity("memory");
+    vi.stubGlobal("fetch", fake.fetchImpl);
+    await startSubscription(IDLE, form({ ...VALID, quantity: "3" }));
+    const post = fake.requests.find((request) => request.method === "POST");
+    expect(post?.body).toEqual({
+      plan_key: "example_monthly",
+      email: "owner@example.com",
+      name: "Example Traders",
+      quantity: 3,
     });
   });
 

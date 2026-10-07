@@ -15,3 +15,9 @@ class FeatureFlags(Protocol):
     def enabled(self, name: str, tenant_id: TenantId) -> bool:
         """Whether the bool flag ``name`` is on for ``tenant_id``."""
         ...
+
+
+PLAN_LIMITS: Final = "identity.plan_limits"
+"""Refuse a new GSTIN registration past the tenant's plan (402), reading the limit from the
+identity service. Off by default; on per tenant first. Identity refuses invitations past the
+plan's seats under the same flag."""

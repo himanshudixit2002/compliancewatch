@@ -31,7 +31,7 @@ from profile_service.api.schemas import (
 from profile_service.application.attributes import financial_year_in_india
 from profile_service.domain.errors import ProfileNodeNotFoundError
 from profile_service.domain.events import ChangeSource
-from py_common.problems import problem_responses
+from py_common.problems import limit_problem_responses, problem_responses
 
 router = APIRouter(prefix="/v1/profile", tags=["profile"])
 
@@ -56,7 +56,8 @@ def create_entity(body: EntityIn, tenant: Tenant, wired: Wired) -> NodeOut:
     "/registrations",
     summary="Register a GSTIN; its PAN finds or creates the entity",
     status_code=status.HTTP_201_CREATED,
-    responses=problem_responses(401, 403, 422),
+    # 402 profile-plan-limit-reached with limit and used; 503 profile-entitlements-misconfigured
+    responses={**problem_responses(401, 403, 422, 503), **limit_problem_responses()},
 )
 def create_registration(body: RegistrationIn, tenant: Tenant, wired: Wired) -> NodeOut:
     registered = wired.register.registration(

@@ -583,6 +583,36 @@
         "title": "DevProviderTokenOut",
         "type": "object"
       },
+      "EntitlementsOut": {
+        "properties": {
+          "enforced": {
+            "description": "Whether going over the limits is refused (the flag identity.plan_limits)",
+            "title": "Enforced",
+            "type": "boolean"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/LimitsOut"
+          },
+          "plan_key": {
+            "description": "The current plan; free without a paid subscription",
+            "title": "Plan Key",
+            "type": "string"
+          },
+          "status": {
+            "description": "The subscription's status, or free",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plan_key",
+          "status",
+          "limits",
+          "enforced"
+        ],
+        "title": "EntitlementsOut",
+        "type": "object"
+      },
       "HealthResponse": {
         "properties": {
           "service": {
@@ -715,6 +745,127 @@
           "keys"
         ],
         "title": "JwksOut",
+        "type": "object"
+      },
+      "LimitProblem": {
+        "description": "A problem that a plan's limit refused (402): the ``limit`` and how many are ``used``,\nas extension members (RFC 9457 section 3.2). Nothing else about what was asked for.",
+        "properties": {
+          "correlation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Correlation Id"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Detail"
+          },
+          "errors": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ValidationIssue"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Errors"
+          },
+          "instance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Instance"
+          },
+          "limit": {
+            "description": "What the tenant's plan allows",
+            "title": "Limit",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          },
+          "used": {
+            "description": "How many the tenant holds already",
+            "title": "Used",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "limit",
+          "used"
+        ],
+        "title": "LimitProblem",
+        "type": "object"
+      },
+      "LimitsOut": {
+        "properties": {
+          "registrations": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "GSTIN registrations across the tenant's businesses; null is no limit",
+            "title": "Registrations"
+          },
+          "seats": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Active users; null is no limit",
+            "title": "Seats"
+          }
+        },
+        "required": [
+          "registrations",
+          "seats"
+        ],
+        "title": "LimitsOut",
         "type": "object"
       },
       "MeOut": {
@@ -852,6 +1003,10 @@
             "title": "Key",
             "type": "string"
           },
+          "limits": {
+            "$ref": "#/components/schemas/LimitsOut",
+            "description": "What one unit of the plan's quantity allows (placeholders until decided)"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -866,7 +1021,8 @@
           "name",
           "amount_paise",
           "period",
-          "description"
+          "description",
+          "limits"
         ],
         "title": "PlanOut",
         "type": "object"
@@ -1163,6 +1319,14 @@
             "pattern": "^(owner_monthly|ca_seat_monthly)$",
             "title": "Plan Key",
             "type": "string"
+          },
+          "quantity": {
+            "default": 1,
+            "description": "Units of the plan: businesses for the owner plan, seats for the CA plan",
+            "maximum": 1000.0,
+            "minimum": 1.0,
+            "title": "Quantity",
+            "type": "integer"
           }
         },
         "required": [
@@ -1187,6 +1351,10 @@
             "title": "Provider Subscription Id",
             "type": "string"
           },
+          "quantity": {
+            "title": "Quantity",
+            "type": "integer"
+          },
           "started_at": {
             "format": "date-time",
             "title": "Started At",
@@ -1202,7 +1370,8 @@
           "provider_subscription_id",
           "status",
           "started_at",
-          "checkout_url"
+          "checkout_url",
+          "quantity"
         ],
         "title": "SubscriptionOut",
         "type": "object"
@@ -1427,6 +1596,18 @@
       },
       "WebhookOut": {
         "properties": {
+          "duplicate": {
+            "default": false,
+            "description": "The same body was received before; nothing changed",
+            "title": "Duplicate",
+            "type": "boolean"
+          },
+          "ignored": {
+            "default": false,
+            "description": "Nothing changed: the webhook names no tenant, or a subscription the tenant does not hold and may not adopt, or it is older than the last event applied, or follows a cancellation",
+            "title": "Ignored",
+            "type": "boolean"
+          },
           "kind": {
             "title": "Kind",
             "type": "string"
@@ -1780,6 +1961,7 @@
     },
     "/v1/identity/billing/subscriptions": {
       "post": {
+        "description": "A retry with the same Idempotency-Key and body gets the first answer back for 24 hours\nand starts nothing at the provider; the same key with another body is a 422. A key whose\nstart failed after the provider may have created the subscription is never sent to it\nagain: the retry gets 409 identity-subscription-start-pending.",
         "operationId": "start_subscription_v1_identity_billing_subscriptions_post",
         "parameters": [
           {
@@ -1799,6 +1981,20 @@
               ],
               "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
               "title": "X-Tenant-Id"
+            }
+          },
+          {
+            "description": "A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours",
+              "maxLength": 128,
+              "minLength": 8,
+              "pattern": "^[!-~]+$",
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],
@@ -1853,6 +2049,16 @@
             },
             "description": "Forbidden"
           },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -1862,6 +2068,16 @@
               }
             },
             "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Required"
           },
           "503": {
             "content": {
@@ -1887,6 +2103,7 @@
     },
     "/v1/identity/billing/webhook": {
       "post": {
+        "description": "A verified webhook that changed nothing is answered with ``ignored``: it names no tenant,\na subscription the tenant does not hold and may not adopt, or it is older than the last\nevent applied or follows a cancellation. A body the tenant received before is answered with\n``duplicate``. Either way the answer is 200, so the provider stops redelivering it.",
         "operationId": "billing_webhook_v1_identity_billing_webhook_post",
         "parameters": [
           {
@@ -1896,6 +2113,17 @@
             "schema": {
               "default": "",
               "title": "X-Razorpay-Signature",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-razorpay-event-id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 128,
+              "title": "X-Razorpay-Event-Id",
               "type": "string"
             }
           }
@@ -2415,6 +2643,84 @@
         ]
       }
     },
+    "/v1/identity/entitlements": {
+      "get": {
+        "description": "The plan of the tenant's current subscription (the newest active or past-due one) times\nits quantity, or the free allowance; the internal tenant has no limits. ``enforced`` says\nwhether going over them is refused (the flag identity.plan_limits for the tenant).",
+        "operationId": "read_entitlements_v1_identity_entitlements_get",
+        "parameters": [
+          {
+            "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
+            "in": "header",
+            "name": "x-tenant-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
+              "title": "X-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntitlementsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "What the tenant's plan entitles it to: its registrations and seats",
+        "tags": [
+          "identity"
+        ]
+      }
+    },
     "/v1/identity/me": {
       "get": {
         "operationId": "me_v1_identity_me_get",
@@ -2909,6 +3215,16 @@
               }
             },
             "description": "Unauthorized"
+          },
+          "402": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LimitProblem"
+                }
+              }
+            },
+            "description": "Payment Required"
           },
           "403": {
             "content": {

@@ -29,13 +29,21 @@ from profile_service.api.deps import PUBLIC_ROUTE, Caller, Tenant, Wired
 from profile_service.domain.errors import ProfileNodeNotFoundError
 from py_common.idempotency.fastapi import IDEMPOTENCY_RESPONSES, IdempotencyKey, run_idempotent
 from py_common.pagination import InvalidCursorError, Page, Pagination, page_of
-from py_common.problems import problem_responses
+from py_common.problems import limit_problem_responses, problem_responses
 
 router = APIRouter(prefix="/v1/businesses", tags=["public", "businesses"])
 
 LIST_SCOPE = "profile.businesses"
 READ_PROBLEMS = problem_responses(401, 403, 404, 422)
-CREATE_PROBLEMS = {**problem_responses(401, 403, 422), **IDEMPOTENCY_RESPONSES}
+REGISTRATION_PROBLEMS = {**problem_responses(503), **limit_problem_responses()}
+"""402: a GSTIN registration past the tenant's plan (profile-plan-limit-reached), with the
+plan's ``limit`` and the registrations ``used``; 503: identity refused profile's request for the
+limits (profile-entitlements-misconfigured)."""
+CREATE_PROBLEMS = {
+    **problem_responses(401, 403, 422),
+    **REGISTRATION_PROBLEMS,
+    **IDEMPOTENCY_RESPONSES,
+}
 
 
 class BusinessCursor(BaseModel):
@@ -165,7 +173,7 @@ def onboarding(business_id: UUID, tenant: Tenant, wired: Wired) -> OnboardingOut
     summary="Add a GSTIN registration to a business and pre-fill it",
     status_code=status.HTTP_201_CREATED,
     response_model=RegistrationCreatedOut,
-    responses={**READ_PROBLEMS, **IDEMPOTENCY_RESPONSES},
+    responses={**READ_PROBLEMS, **REGISTRATION_PROBLEMS, **IDEMPOTENCY_RESPONSES},
     openapi_extra=PUBLIC_ROUTE,
 )
 def add_registration(

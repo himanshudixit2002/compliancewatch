@@ -40,6 +40,7 @@ from identity.wiring import Wiring as IdentityWiring
 from py_common.app import create_app
 from py_common.auth import IssuerTokenSource, TokenIssuer, TokenSource
 from py_common.auth.fastapi import Authenticator
+from py_common.flags import flag_may_be_on
 from py_common.health import ReadinessCheck
 from py_common.logging import configure_logging
 from py_common.request_context import RequestContextMiddleware
@@ -134,7 +135,10 @@ def build_app(
         services,
         {entry.name: entry.prefix for entry in registry},
         exposure=EXPOSURE,
-        loopback={entry.name: entry.loopback_routes for entry in registry},
+        loopback={
+            entry.name: entry.loopback_routes_for(lambda flag: flag_may_be_on(flag, settings))
+            for entry in registry
+        },
     )
     dispatcher = ServiceDispatcher(
         root,
