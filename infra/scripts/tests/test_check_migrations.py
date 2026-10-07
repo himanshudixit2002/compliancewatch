@@ -16,6 +16,7 @@ from check_migrations import (
     TenantColumn,
     catalog_problems,
     directory_reads,
+    directory_roles,
     libpq_dsn,
     load_config,
     parse_config,
@@ -593,8 +594,22 @@ def test_the_sqlalchemy_url_form_is_accepted() -> None:
 DIRECTORY = Policy("thing_directory", "SELECT", True, "true", None, ("cw_identity_directory",))
 
 
+def test_the_directory_roles_are_those_roles_sql_declares(tmp_path: Path) -> None:
+    assert directory_roles() == {"cw_identity_directory"}
+    roles = tmp_path / "roles.sql"
+    roles.write_text(
+        "DECLARE\n  directory_role CONSTANT text := 'cw_audit_directory';\n"
+        "  other CONSTANT text := 'cw_identity';\n-- 'cw_mentioned_directory'\n"
+    )
+    assert directory_roles(roles) == {"cw_audit_directory"}
+
+
 def test_a_read_policy_of_one_directory_role_is_allowed(config: LintConfig) -> None:
     assert directory_reads(DIRECTORY)
+    assert not directory_reads(DIRECTORY, frozenset()), "roles.sql must make the role"
+    assert not directory_reads(
+        Policy("thing_directory", "SELECT", True, None, None, ("cw_identity_directory",))
+    )
     tables = [*baseline(), tenant_table(policies=(ISOLATION, DIRECTORY))]
     assert catalog_problems(tables, config) == []
 
@@ -614,6 +629,19 @@ def test_a_read_policy_of_one_directory_role_is_allowed(config: LintConfig) -> N
         ),
         Policy("thing_directory", "ALL", True, "true", "true", ("cw_identity_directory",)),
         Policy("thing_directory", "UPDATE", True, "true", None, ("cw_identity_directory",)),
+        Policy(
+            "thing_directory", "SELECT", True, "(kind = 'export')", None, ("cw_identity_directory",)
+        ),
+        Policy("thing_directory", "SELECT", True, "true", None, ("cw_rogue_directory",)),
+    ],
+    ids=[
+        "public",
+        "a service role",
+        "two roles",
+        "for all",
+        "for update",
+        "a narrower using",
+        "a role roles.sql never makes",
     ],
 )
 def test_anything_wider_than_a_directory_read_fails(config: LintConfig, policy: Policy) -> None:

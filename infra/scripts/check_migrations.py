@@ -17,9 +17,11 @@ migrated, with the rules and exemptions of ``migration_lint.toml``:
   rows through without that comparison, except a purge policy: FOR DELETE, with the USING
   ``expires_at < now()`` and no WITH CHECK. It lets a job with no tenant delete expired rows
   of every tenant and lets no one read or write a row (``py_common.idempotency`` creates one).
-  A directory read policy is allowed too: FOR SELECT, granted to a single role named
-  ``cw_<name>_directory``, the NOLOGIN owner of a SECURITY DEFINER function that answers counts
-  across tenants (infra/dev/postgres/roles.sql makes them; nobody logs in as one).
+  A directory read policy is allowed too: FOR SELECT with USING (true) and no WITH CHECK,
+  granted to a single ``cw_<name>_directory`` role that infra/dev/postgres/roles.sql makes (the
+  lint reads the names it declares as ``... CONSTANT text := 'cw_<name>_directory'``): the
+  NOLOGIN, NOINHERIT owner of a SECURITY DEFINER function that answers counts across tenants.
+  A role of that name made anywhere else, or a wider policy, is not a directory read.
 - R2: every table in a tenant schema has a tenant_id column.
 - R3: a nullable tenant_id is allowed only on an exempt table.
 - R4: every exemption matches at least one table.
@@ -61,6 +63,13 @@ SQL_CALLS = frozenset({"execute", "exec_driver_sql"})
 TENANT_SETTING = "nullif(current_setting('app.tenant_id',true),'')"
 DIRECTORY_ROLE = re.compile(r"^cw_[a-z][a-z0-9_]*_directory$")
 """The name of a NOLOGIN directory role whose read policy may cross tenants."""
+ROLES_SQL = ROOT / "infra" / "dev" / "postgres" / "roles.sql"
+DECLARED_DIRECTORY_ROLE = re.compile(
+    r"\b\w+\s+CONSTANT\s+text\s*:=\s*'(cw_[a-z][a-z0-9_]*_directory)'"
+)
+"""How roles.sql declares the name of a directory role it creates."""
+EVERY_ROW = "true"
+"""The USING of a directory read policy, normalised."""
 EXPIRED_ROWS = "(expires_at<now())"
 """The USING of a purge policy, normalised as ``_normalised`` leaves Postgres's deparsed text."""
 EXEMPT = "exempt"
@@ -445,14 +454,25 @@ def purges_expired_rows(policy: Policy) -> bool:
     )
 
 
-def directory_reads(policy: Policy) -> bool:
-    """True for a directory read policy: FOR SELECT, for one ``cw_<name>_directory`` role
-    only, and no WITH CHECK."""
+def directory_roles(path: Path = ROLES_SQL) -> frozenset[str]:
+    """The directory roles roles.sql creates, by the names it declares."""
+    text = path.read_text(encoding="utf-8")
+    return frozenset(DECLARED_DIRECTORY_ROLE.findall(text))
+
+
+def directory_reads(policy: Policy, roles: frozenset[str] | None = None) -> bool:
+    """True for a directory read policy: FOR SELECT with USING (true) and no WITH CHECK, for one
+    ``cw_<name>_directory`` role only, which roles.sql creates (``roles``, read from the file
+    unless given)."""
+    known = directory_roles() if roles is None else roles
     return (
         policy.command == "SELECT"
         and policy.with_check is None
+        and policy.qual is not None
+        and _normalised(policy.qual) == EVERY_ROW
         and len(policy.roles) == 1
         and DIRECTORY_ROLE.match(policy.roles[0]) is not None
+        and policy.roles[0] in known
     )
 
 

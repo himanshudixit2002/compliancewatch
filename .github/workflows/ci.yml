@@ -519,6 +519,10 @@ jobs:
           if [ -n "$members" ]; then
             echo "::error::these roles are members of other roles: $members"; exit 1
           fi
+      # The catalog again, now that make db-roles has made the identity directory's read policy
+      # (roles.sql): the lint accepts it only as roles.sql declares it.
+      - name: Tenant tables after the roles (migration lint, catalog rules)
+        run: make migrations-catalog
       # Each service started on its own as its own role: the UI-only stack on the Postgres store
       # (make web-stack STORE=postgres connects each service as cw_<schema>) answers /ready on
       # every port, and a tenant's read under row-level security answers 200; then it stops. On
