@@ -8,6 +8,10 @@ returns one attribute to ask. ``BuildSnapshot`` merges the lineage for the appli
 engine. ``ConfirmFinancialYear`` opens a confirmation task for every entity whose per-year
 values are missing for the new year (the April task of ADR-016); ``financial_year_in_india``
 names the year a moment falls in.
+
+Every save that changes a value writes one ``profile_node.attributes_changed`` audit entry with
+the values it changed, before and after (``application.audit``); the pre-fill writes
+``profile_node.prefilled`` through the same path.
 """
 
 from collections.abc import Callable, Sequence
@@ -20,6 +24,7 @@ from domain_kernel.financial_year import FinancialYear
 from domain_kernel.ids import BusinessId, TenantId, UserId
 from domain_kernel.ontology import Ontology
 from domain_kernel.profiles import ProfileSnapshot
+from profile_service.application.audit import ATTRIBUTES_CHANGED, record_attributes
 from profile_service.domain.errors import ProfileNodeNotFoundError
 from profile_service.domain.events import ChangeSource
 from profile_service.domain.model import (
@@ -91,11 +96,13 @@ def apply_changes(
     source: ChangeSource,
     by: UserId | None,
     now: datetime,
+    audit_action: str = ATTRIBUTES_CHANGED,
 ) -> SetResult:
     """Apply ``changes`` to ``node`` inside the caller's unit of work.
 
-    The node is saved and ``profile.updated`` goes to the outbox; each ``not_applicable`` answer
-    opens a review task and records an eval case. A batch that changes nothing stores nothing.
+    The node is saved, ``profile.updated`` goes to the outbox and ``audit_action`` to the audit
+    log with the values that changed; each ``not_applicable`` answer opens a review task and
+    records an eval case. A batch that changes nothing stores nothing.
     Every use case that writes attributes goes through here, so a rejected value anywhere in a
     unit of work rolls the whole unit back.
     """
@@ -104,6 +111,7 @@ def apply_changes(
         return SetResult(node, (), ())
     uow.profiles.save(outcome.node)
     uow.events.publish(outcome.event)
+    record_attributes(uow, audit_action, node, outcome.node, now)
     tasks = tuple(open_review(uow, tenant_id, request, now) for request in outcome.reviews)
     for request in outcome.reviews:
         uow.eval_cases.record(_eval_case(outcome.node, request, now))

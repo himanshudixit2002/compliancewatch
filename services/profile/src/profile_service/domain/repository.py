@@ -4,6 +4,7 @@ from collections.abc import Mapping, Sequence
 from contextlib import AbstractContextManager
 from typing import Protocol
 
+from domain_kernel.audit import AuditSink
 from domain_kernel.events import DomainEvent
 from domain_kernel.ids import BusinessId, TenantId
 from domain_kernel.ontology import AttributeLevel
@@ -69,6 +70,11 @@ class UnitOfWork(Protocol):
 
     @property
     def eval_cases(self) -> EvalCaseRecorder: ...
+
+    @property
+    def audit(self) -> AuditSink:
+        """Where the unit's audit entries go, in its transaction."""
+        ...
 
 
 class UnitOfWorkFactory(Protocol):

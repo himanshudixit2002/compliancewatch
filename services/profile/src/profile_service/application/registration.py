@@ -3,7 +3,8 @@
 
 ``register_entity`` and ``register_registration`` do the work inside a unit of work the caller
 holds, so a use case can create a business and fill it in one transaction; ``RegisterNodes``
-opens one unit of work per call."""
+opens one unit of work per call. Each node created writes its ``profile_node.registered`` audit
+entry in the unit of work that creates it (``application.audit``); a node found writes none."""
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -13,6 +14,7 @@ from domain_kernel.events import utc_now
 from domain_kernel.identifiers import Gstin, Pan
 from domain_kernel.ids import BusinessId, TenantId
 from domain_kernel.ontology import AttributeLevel
+from profile_service.application.audit import record_registered
 from profile_service.domain.errors import InvalidHierarchyError, ProfileNodeNotFoundError
 from profile_service.domain.model import ProfileNode
 from profile_service.domain.repository import UnitOfWork, UnitOfWorkFactory
@@ -33,6 +35,7 @@ def register_entity(
         return Registered(existing, False)
     node = ProfileNode.entity(tenant_id=tenant_id, pan=pan, name=name, at=now)
     uow.profiles.add(node)
+    record_registered(uow, node, now)
     return Registered(node, True)
 
 
@@ -58,6 +61,7 @@ def register_registration(
         tenant_id=tenant_id, entity=entity_registered.node, gstin=gstin, name=name, at=now
     )
     uow.profiles.add(node)
+    record_registered(uow, node, now)
     return entity_registered, Registered(node, True)
 
 
@@ -85,6 +89,7 @@ class RegisterNodes:
     def location(
         self, tenant_id: TenantId, registration_id: BusinessId, label: str, name: str
     ) -> Registered:
+        now = self._clock()
         with self._unit_of_work(tenant_id) as uow:
             registration = uow.profiles.get(registration_id)
             if registration is None:
@@ -99,7 +104,8 @@ class RegisterNodes:
                 registration=registration,
                 label=label,
                 name=name,
-                at=self._clock(),
+                at=now,
             )
             uow.profiles.add(node)
+            record_registered(uow, node, now)
             return Registered(node, True)

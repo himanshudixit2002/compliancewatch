@@ -19,6 +19,7 @@ from profile_service.application.attributes import (
     ConfirmFinancialYear,
     SetAttributes,
 )
+from profile_service.application.audit import ATTRIBUTES_CHANGED, REGISTERED
 from profile_service.application.registration import RegisterNodes
 from profile_service.domain.events import ChangeSource
 from profile_service.domain.model import AttributeChange, ValueState
@@ -27,6 +28,7 @@ from profile_service.infrastructure.repository import (
     PostgresUnitOfWorkFactory,
 )
 from profile_service.testing import GSTIN_KARNATAKA
+from py_common.audit.testing import install_audit_table, read_audit_entries
 from py_common.db_roles import apply_roles, as_role
 
 SERVICE_DIR = Path(__file__).resolve().parents[2]
@@ -56,6 +58,15 @@ def database_url() -> Iterator[str]:
         yield f"{base_url}?options=-csearch_path%3D{SCHEMA}%2Cpublic"
 
 
+def install_audit(database_url: str) -> None:
+    """``audit.event`` as identity's migration makes it, before the roles are applied, so
+    cw_profile may add rows to it."""
+    engine = create_engine(database_url)
+    with engine.begin() as connection:
+        install_audit_table(connection)
+    engine.dispose()
+
+
 @pytest.fixture(scope="module")
 def migrated(database_url: str) -> Iterator[Config]:
     with pytest.MonkeyPatch.context() as env:
@@ -63,6 +74,7 @@ def migrated(database_url: str) -> Iterator[Config]:
         env.setenv("CW_DB_SCHEMA", SCHEMA)
         config = Config(str(SERVICE_DIR / "alembic.ini"))
         command.upgrade(config, "head")
+        install_audit(database_url)
         yield config
 
 
@@ -111,7 +123,9 @@ def test_migration_creates_the_tables_with_row_level_security(engine: Engine) ->
     assert forced == [True, True, True, True]
 
 
-def test_use_cases_end_to_end_with_the_outbox(app_engine: Engine, tmp_path: Path) -> None:
+def test_use_cases_end_to_end_with_the_outbox(
+    app_engine: Engine, engine: Engine, tmp_path: Path
+) -> None:
     ontology = ontology_package.load()
     cases = tmp_path / "cases.jsonl"
     factory = PostgresUnitOfWorkFactory(app_engine, eval_cases=JsonLinesEvalRecorder(cases))
@@ -169,6 +183,37 @@ def test_use_cases_end_to_end_with_the_outbox(app_engine: Engine, tmp_path: Path
     lines = cases.read_text().splitlines()
     assert len(lines) == 1
     assert '"attribute": "employee_count"' in lines[0]
+
+    # cw_profile only adds audit rows; the container's superuser reads them back.
+    with engine.connect() as connection:
+        created = read_audit_entries(connection, action=REGISTERED)
+        changed = read_audit_entries(connection, action=ATTRIBUTES_CHANGED)
+    # One unit creates both nodes at one clock time, so the rows come back in id order.
+    assert {(e.tenant_id, e.subject_id) for e in created} == {
+        (tenant, str(entity_id)),
+        (tenant, str(registration_id)),
+    }
+    assert [e.subject_id for e in changed] == [str(entity_id), str(registration_id)]
+    on_entity = changed[0]
+    assert (on_entity.tenant_id, on_entity.subject_type, on_entity.actor.label) == (
+        tenant,
+        "profile_node",
+        "system:profile",
+    )
+    assert on_entity.before == {
+        "employee_count": None,
+        "state_codes": None,
+        "turnover_band@2025-26": None,
+    }
+    assert on_entity.after == {
+        "employee_count": {"state": "not_applicable", "value": None, "source": "user_input"},
+        "state_codes": {"state": "known", "value": ("07", "29"), "source": "user_input"},
+        "turnover_band@2025-26": {
+            "state": "known",
+            "value": "2_crore_to_5_crore",
+            "source": "user_input",
+        },
+    }
 
 
 def test_downgrade_and_upgrade(migrated: Config, engine: Engine) -> None:
