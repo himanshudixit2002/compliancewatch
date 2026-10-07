@@ -6,9 +6,9 @@ export type RequestHeaders = Readonly<Record<string, string>>;
 
 /**
  * What the billing page needs: the plans on offer and starting a subscription for the tenant.
- * Starting one carries the Idempotency-Key the form was rendered with
- * (`idempotencyHeaders(formData, "identity.start-subscription")`), so a double submit starts one
- * subscription with the provider.
+ * Starting one carries the Idempotency-Key the form minted for the attempt
+ * (`idempotencyHeaders(formData, "identity.start-subscription")`), so a double submit or a retry
+ * starts one subscription with the provider.
  */
 export interface BillingPort {
   plans(): Promise<Result<readonly Plan[]>>;

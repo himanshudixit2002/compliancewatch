@@ -69,11 +69,13 @@ describe("SubscribeForm", () => {
         container.querySelector("[data-slot='subscribe-result']"),
       ),
     );
-    expect(Object.fromEntries(sent?.entries() ?? [])).toEqual({
+    const { idempotency_key: key, ...values } = Object.fromEntries(sent?.entries() ?? []);
+    expect(values).toEqual({
       plan_key: "example_yearly",
       email: "owner@example.com",
       name: "Example Traders",
     });
+    expect(key).toMatch(/^[0-9a-f-]{36}$/);
     // The refused values stay in the form.
     expect((screen.getByLabelText(/Billing email/) as HTMLInputElement).value).toBe(
       "owner@example.com",
@@ -137,5 +139,75 @@ describe("SubscribeForm", () => {
     expect(document.activeElement).toBe(
       screen.getByRole("button", { name: "Start the subscription" }),
     );
+  });
+
+  it("keeps one key across retries of the same values and mints a new one after a success or a change", async () => {
+    const keys: string[] = [];
+    let minted = 0;
+    const answers: ActionState<SubscribeResult>[] = [
+      { status: "error", problem: { type: "urn:example", title: "Example outage" } },
+      { status: "error", problem: { type: "urn:example", title: "Example outage" } },
+      {
+        status: "ok",
+        value: {
+          planName: "Example yearly plan",
+          status: "Created",
+          providerSubscriptionId: "sub_example_2",
+          startedAt: "1 Jan 2000, 5:30 am IST",
+          checkoutUrl: null,
+        },
+      },
+      { status: "error", problem: { type: "urn:example", title: "Example outage" } },
+      { status: "error", problem: { type: "urn:example", title: "Example outage" } },
+    ];
+    render(
+      <SubscribeForm
+        action={async (_state, formData) => {
+          keys.push(String(formData.get("idempotency_key")));
+          return answers[keys.length - 1] ?? { status: "idle" };
+        }}
+        plans={PLANS}
+        fields={FIELDS}
+        newKey={() => `example-key-${++minted}`}
+      />,
+    );
+    const user = userEvent.setup();
+    const submit = () => user.click(screen.getByRole("button", { name: "Start the subscription" }));
+    await fillAndSubmit(); // a failure
+    await waitFor(() => expect(keys).toHaveLength(1));
+    await submit(); // the same values again: a retry
+    await waitFor(() => expect(keys).toHaveLength(2));
+    await submit(); // still the same: succeeds
+    await waitFor(() => expect(keys).toHaveLength(3));
+    await fillAndSubmit(); // after a success: a new attempt
+    await waitFor(() => expect(keys).toHaveLength(4));
+    await user.type(screen.getByLabelText(/Billing name/), " Two");
+    await submit(); // the values changed: a new attempt
+    await waitFor(() => expect(keys).toHaveLength(5));
+    expect(keys).toEqual([
+      "example-key-1",
+      "example-key-1",
+      "example-key-1",
+      "example-key-2",
+      "example-key-3",
+    ]);
+  });
+
+  it("asks for the units when the page names the field, and sends them", async () => {
+    let sent: FormData | undefined;
+    const { container } = render(
+      <SubscribeForm
+        action={async (_state, formData) => {
+          sent = formData;
+          return { status: "idle" };
+        }}
+        plans={PLANS}
+        fields={{ ...FIELDS, quantity: "quantity" }}
+      />,
+    );
+    await userEvent.setup().type(screen.getByLabelText(/Units/), "3");
+    await fillAndSubmit();
+    await waitFor(() => expect(sent?.get("quantity")).toBe("3"));
+    expect(await runAxe(container)).toHaveNoViolations();
   });
 });

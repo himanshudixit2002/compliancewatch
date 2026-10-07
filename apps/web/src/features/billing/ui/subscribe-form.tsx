@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useId, useRef, type ReactNode } from "react";
+import { useActionState, useEffect, useId, useRef } from "react";
 import {
   Banner,
   Button,
@@ -18,6 +18,7 @@ import { isProblemOf } from "@/entities/problem/mappers";
 import { t } from "@/shared/i18n";
 import { fieldErrorOf, idleAction } from "@/shared/lib/action-state";
 import type { ActionState } from "@/shared/lib/action-state";
+import { IDEMPOTENCY_KEY_FIELD } from "@/shared/lib/idempotency";
 
 /** What the action returns on success (the billing model's SubscriptionView, structurally). */
 export interface SubscribeResult {
@@ -36,16 +37,46 @@ export type SubscribeAction = (
 export interface SubscribeFormProps {
   action: SubscribeAction;
   plans: readonly { key: string; name: string; price: string; period: string }[];
-  fields: { plan: string; email: string; name: string };
-  /** The hidden Idempotency-Key input the page rendered for this form. */
-  idempotencyInput?: ReactNode;
+  /** The fields' names; without `quantity` the form asks for none and sends none. */
+  fields: { plan: string; email: string; name: string; quantity?: string };
+  /** Mints an Idempotency-Key (tests); a random UUID by default. */
+  newKey?: () => string;
+}
+
+interface Submitted {
+  plan: string;
+  email: string;
+  name: string;
+  quantity: string;
 }
 
 interface Attempt {
   state: ActionState<SubscribeResult>;
   /** What was submitted, put back after a refusal (React resets a form after its action). */
-  submitted: { plan: string; email: string; name: string };
+  submitted: Submitted;
   count: number;
+  /** The Idempotency-Key the last submission carried. */
+  key?: string;
+}
+
+const EMPTY: Submitted = { plan: "", email: "", name: "", quantity: "" };
+
+function sameValues(a: Submitted, b: Submitted): boolean {
+  return a.plan === b.plan && a.email === b.email && a.name === b.name && a.quantity === b.quantity;
+}
+
+/**
+ * The key a submission carries: the previous one while the same values are sent again after a
+ * failure (a retry of the same attempt, which the service answers once), a new one after a
+ * success or when the values changed (a new attempt).
+ */
+function keyFor(previous: Attempt, submitted: Submitted, newKey: () => string): string {
+  const retry =
+    previous.key !== undefined &&
+    previous.count > 0 &&
+    previous.state.status !== "ok" &&
+    sameValues(previous.submitted, submitted);
+  return retry && previous.key !== undefined ? previous.key : newKey();
 }
 
 /**
@@ -54,34 +85,51 @@ interface Attempt {
  * The answer is shown under the form: the subscription with the link to that checkout page, the
  * plain "billing is not connected" state when the service has no provider (nothing was started,
  * nothing charged; the reference is the request id), or the problem and the fields to fix.
+ *
+ * Each submission carries an Idempotency-Key the form mints: kept while the same values are sent
+ * again after a failure, so a retry starts at most one subscription with the provider, and
+ * replaced after a success or once the values change, so the next subscription is a new request
+ * rather than a key the service would refuse as reused.
  */
-export function SubscribeForm({ action, plans, fields, idempotencyInput }: SubscribeFormProps) {
+export function SubscribeForm({
+  action,
+  plans,
+  fields,
+  newKey = () => crypto.randomUUID(),
+}: SubscribeFormProps) {
   const id = useId();
   const [attempt, formAction, pending] = useActionState(
     async (previous: Attempt, formData: FormData): Promise<Attempt> => {
-      const read = (name: string) => {
-        const value = formData.get(name);
+      const read = (name: string | undefined) => {
+        const value = name === undefined ? null : formData.get(name);
         return typeof value === "string" ? value : "";
       };
+      const submitted: Submitted = {
+        plan: read(fields.plan),
+        email: read(fields.email),
+        name: read(fields.name),
+        quantity: read(fields.quantity),
+      };
+      const key = keyFor(previous, submitted, newKey);
+      formData.set(IDEMPOTENCY_KEY_FIELD, key);
       return {
         state: await action(previous.state, formData),
-        submitted: { plan: read(fields.plan), email: read(fields.email), name: read(fields.name) },
+        submitted,
         count: previous.count + 1,
+        key,
       };
     },
     {
       state: idleAction<SubscribeResult>(),
-      submitted: { plan: plans[0]?.key ?? "", email: "", name: "" },
+      submitted: { ...EMPTY, plan: plans[0]?.key ?? "" },
       count: 0,
     },
   );
   const { state } = attempt;
   const resultRef = useRef<HTMLDivElement>(null);
 
-  const kept =
-    state.status === "error"
-      ? attempt.submitted
-      : { plan: plans[0]?.key ?? "", email: "", name: "" };
+  const kept: Submitted =
+    state.status === "error" ? attempt.submitted : { ...EMPTY, plan: plans[0]?.key ?? "" };
 
   // After an answer, focus moves to it: the subscription, the billing state or the problem.
   // A refusal on the fields alone leaves focus where it is, next to the messages.
@@ -109,7 +157,6 @@ export function SubscribeForm({ action, plans, fields, idempotencyInput }: Subsc
         data-slot="subscribe-form"
         className="flex max-w-xl flex-col gap-4"
       >
-        {idempotencyInput}
         <div key={attempt.count} className="contents">
           <div className="grid gap-2">
             <span id={planLabel} className="text-sm font-medium text-fg">
@@ -171,6 +218,24 @@ export function SubscribeForm({ action, plans, fields, idempotencyInput }: Subsc
               defaultValue={kept.name}
             />
           </Field>
+          {fields.quantity === undefined ? null : (
+            <Field
+              id={`${id}-quantity`}
+              label={t("billing.quantity")}
+              description={t("billing.quantityHelp")}
+              error={fieldErrorOf(state, fields.quantity)}
+            >
+              <Input
+                name={fields.quantity}
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={1000}
+                step={1}
+                defaultValue={kept.quantity}
+              />
+            </Field>
+          )}
         </div>
         <p className="text-sm text-fg-muted">{t("billing.noCardData")}</p>
         <div>

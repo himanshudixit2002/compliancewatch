@@ -11,9 +11,9 @@ import type { BillingPort, RequestHeaders } from "./ports";
 /**
  * Billing over the typed identity client. The plans are the same for every tenant and are kept
  * for five minutes under `identity:plans`; a subscription is started for the session's tenant
- * (x-tenant-id) and is never retried or cached. It carries the Idempotency-Key the form was
- * rendered with: a second submit of the same render gets the first answer back and starts nothing
- * more with the provider, and the form still disables itself while one is pending.
+ * (x-tenant-id) and is never retried or cached. It carries the Idempotency-Key the form minted
+ * for the attempt: a retry of the same values gets the first answer back and starts nothing more
+ * with the provider, and the form still disables itself while one is pending.
  */
 export class BillingGateway implements BillingPort {
   private readonly identity: IdentityClient;

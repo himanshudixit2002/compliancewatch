@@ -26,6 +26,14 @@ describe("billing mappers", () => {
       newSubscriptionToDto({ planKey: "example_plan", email: "a@example.com", name: "Example" }),
     ).toEqual({ plan_key: "example_plan", email: "a@example.com", name: "Example" });
     expect(
+      newSubscriptionToDto({
+        planKey: "example_plan",
+        email: "a@example.com",
+        name: "Example",
+        quantity: 4,
+      }),
+    ).toEqual({ plan_key: "example_plan", email: "a@example.com", name: "Example", quantity: 4 });
+    expect(
       subscriptionFromDto({
         plan_key: "example_plan",
         provider_subscription_id: "sub_example_1",

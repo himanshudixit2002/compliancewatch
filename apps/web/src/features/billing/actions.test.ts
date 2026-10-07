@@ -132,6 +132,20 @@ describe("startSubscription", () => {
     });
   });
 
+  it("sends the units the form carries", async () => {
+    await signedInAs();
+    const fake = identity("memory");
+    vi.stubGlobal("fetch", fake.fetchImpl);
+    await startSubscription(IDLE, form({ ...VALID, quantity: "3" }));
+    const post = fake.requests.find((request) => request.method === "POST");
+    expect(post?.body).toEqual({
+      plan_key: "example_monthly",
+      email: "owner@example.com",
+      name: "Example Traders",
+      quantity: 3,
+    });
+  });
+
   it("names the fields to fix before starting anything", async () => {
     await signedInAs();
     const fake = identity("memory");

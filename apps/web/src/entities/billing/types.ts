@@ -30,6 +30,8 @@ export interface NewSubscription {
   /** The billing contact's address, sent to the provider. */
   email: string;
   name: string;
+  /** Units of the plan (1 to 1000); left out, the service takes one. */
+  quantity?: number;
 }
 
 export interface Subscription {

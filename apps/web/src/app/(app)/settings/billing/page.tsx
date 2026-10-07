@@ -5,7 +5,6 @@ import {
   getBillingPage,
   startSubscription,
 } from "@/features/billing";
-import { IdempotencyKeyInput } from "@/server/api/idempotency";
 import { requireScreenSession } from "@/server/dal";
 import { settingsHeaderLinks } from "@/shared/config/nav";
 import { screenById } from "@/shared/config/screens";
@@ -30,7 +29,6 @@ export default async function BillingPage() {
       tabs={tabs}
       action={startSubscription}
       fields={SUBSCRIBE_FIELDS}
-      idempotencyInput={<IdempotencyKeyInput />}
     />
   );
 }

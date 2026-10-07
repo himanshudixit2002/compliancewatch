@@ -20,7 +20,7 @@ import { subscriptionView, type SubscriptionView } from "./model/subscription";
 /**
  * Starts a subscription for the tenant: the screen's gate again (owner or CA admin), the
  * billing capability, the form's shape against the plans the service offers, then `POST
- * /v1/identity/billing/subscriptions` with the Idempotency-Key the form was rendered with. The service's answer is the result: the subscription
+ * /v1/identity/billing/subscriptions` with the Idempotency-Key the form minted for the attempt. The service's answer is the result: the subscription
  * with its checkout page, or its problem. With no billing provider connected that problem is 503
  * `billing-disabled`, which the form shows as "billing is not connected" rather than as a
  * failure; nothing was started and nothing was charged.
