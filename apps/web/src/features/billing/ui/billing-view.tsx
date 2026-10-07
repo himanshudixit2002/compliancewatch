@@ -11,13 +11,22 @@ export interface BillingViewProps {
   tabs: readonly NavLink[];
   action: SubscribeAction;
   fields: SubscribeFormProps["fields"];
+  idempotencyInput?: SubscribeFormProps["idempotencyInput"];
 }
 
 /**
  * The billing page: the plans the identity service offers, each with its price, period and the
  * service's own description, and the form that starts a subscription with the provider.
  */
-export function BillingView({ title, plans, crumbs, tabs, action, fields }: BillingViewProps) {
+export function BillingView({
+  title,
+  plans,
+  crumbs,
+  tabs,
+  action,
+  fields,
+  idempotencyInput,
+}: BillingViewProps) {
   return (
     <div data-slot="billing" className="flex max-w-4xl flex-col gap-8">
       <SettingsHeader title={title} description={t("billing.intro")} crumbs={crumbs} tabs={tabs} />
@@ -52,7 +61,12 @@ export function BillingView({ title, plans, crumbs, tabs, action, fields }: Bill
         <h2 id="billing-subscribe" className="text-lg font-semibold text-fg">
           {t("billing.subscribeTitle")}
         </h2>
-        <SubscribeForm action={action} plans={plans} fields={fields} />
+        <SubscribeForm
+          action={action}
+          plans={plans}
+          fields={fields}
+          idempotencyInput={idempotencyInput}
+        />
       </section>
     </div>
   );

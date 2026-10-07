@@ -6,14 +6,14 @@ import { call } from "@/server/api/client";
 import { identityClient, type ClientContext, type IdentityClient } from "@/server/api/services";
 import { cachedRead, tags } from "@/server/cache";
 import { mapBody, type Result } from "@/server/result";
-import type { BillingPort } from "./ports";
+import type { BillingPort, RequestHeaders } from "./ports";
 
 /**
  * Billing over the typed identity client. The plans are the same for every tenant and are kept
  * for five minutes under `identity:plans`; a subscription is started for the session's tenant
- * (x-tenant-id) and is never retried or cached. The route takes no Idempotency-Key: a second
- * submit starts a second subscription with the provider, so the form disables itself while one
- * is pending.
+ * (x-tenant-id) and is never retried or cached. It carries the Idempotency-Key the form was
+ * rendered with: a second submit of the same render gets the first answer back and starts nothing
+ * more with the provider, and the form still disables itself while one is pending.
  */
 export class BillingGateway implements BillingPort {
   private readonly identity: IdentityClient;
@@ -31,10 +31,15 @@ export class BillingGateway implements BillingPort {
     return mapBody(result, (plans) => plans.map(planFromDto));
   }
 
-  async subscribe(input: NewSubscription): Promise<Result<Subscription>> {
+  async subscribe(
+    input: NewSubscription,
+    idempotency: RequestHeaders,
+  ): Promise<Result<Subscription>> {
     const result = await call(
       this.identity.POST("/v1/identity/billing/subscriptions", {
         body: newSubscriptionToDto(input),
+        // The spec marks the header required; the value comes from the form's hidden input.
+        params: { header: idempotency as { "Idempotency-Key": string } },
       }),
     );
     return mapBody(result, subscriptionFromDto);

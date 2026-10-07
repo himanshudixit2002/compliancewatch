@@ -10,6 +10,7 @@ describe("billing mappers", () => {
         amount_paise: 0,
         period: "monthly",
         description: "Example description",
+        limits: { registrations: 1, seats: 1 },
       }),
     ).toEqual({
       key: "example_plan",
@@ -31,6 +32,7 @@ describe("billing mappers", () => {
         status: "created",
         started_at: "2000-01-01T00:00:00Z",
         checkout_url: "",
+        quantity: 1,
       }),
     ).toEqual({
       planKey: "example_plan",

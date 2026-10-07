@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useId, useRef } from "react";
+import { useActionState, useEffect, useId, useRef, type ReactNode } from "react";
 import {
   Banner,
   Button,
@@ -37,6 +37,8 @@ export interface SubscribeFormProps {
   action: SubscribeAction;
   plans: readonly { key: string; name: string; price: string; period: string }[];
   fields: { plan: string; email: string; name: string };
+  /** The hidden Idempotency-Key input the page rendered for this form. */
+  idempotencyInput?: ReactNode;
 }
 
 interface Attempt {
@@ -53,7 +55,7 @@ interface Attempt {
  * plain "billing is not connected" state when the service has no provider (nothing was started,
  * nothing charged; the reference is the request id), or the problem and the fields to fix.
  */
-export function SubscribeForm({ action, plans, fields }: SubscribeFormProps) {
+export function SubscribeForm({ action, plans, fields, idempotencyInput }: SubscribeFormProps) {
   const id = useId();
   const [attempt, formAction, pending] = useActionState(
     async (previous: Attempt, formData: FormData): Promise<Attempt> => {
@@ -107,6 +109,7 @@ export function SubscribeForm({ action, plans, fields }: SubscribeFormProps) {
         data-slot="subscribe-form"
         className="flex max-w-xl flex-col gap-4"
       >
+        {idempotencyInput}
         <div key={attempt.count} className="contents">
           <div className="grid gap-2">
             <span id={planLabel} className="text-sm font-medium text-fg">

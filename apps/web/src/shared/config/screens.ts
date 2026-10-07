@@ -998,7 +998,7 @@ const SCREEN_LIST = [
     nav: { group: "settings", order: 3 },
     parent: "owner.settings",
     notes:
-      "The plans as the identity service states them and starting a subscription with its billing provider; with no provider connected the page says billing is not connected. Plan usage and entitlement limits arrive with the route it awaits.",
+      "The plans as the identity service states them and starting a subscription with its billing provider (with the Idempotency-Key the form was rendered with); with no provider connected the page says billing is not connected. The entitlements route it awaits has landed (M3-4: the plan, its registration and seat limits, and whether they are enforced); showing them is W11's.",
   },
   {
     id: "owner.settings.notification-recipients",

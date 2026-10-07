@@ -8,6 +8,7 @@ import { fakeFetch } from "@/test/fake-fetch";
 import { billingGateway } from "./gateway";
 
 const TENANT = "2a6f0c1e-5b7d-4e8f-9a0b-1c2d3e4f5a6b";
+const REQUEST_UUID = "0b7c8d9e-1f2a-4b3c-8d4e-5f6a7b8c9d0e";
 const owner: ClientPrincipal = {
   userId: "7c1e2d3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
   tenantId: TENANT,
@@ -43,13 +44,13 @@ describe("BillingGateway", () => {
         body: subscriptionDto(),
       },
     ]);
-    const started = await billingGateway({ session: owner, fetchImpl: fake.fetchImpl }).subscribe({
-      planKey: "example_monthly",
-      email: "owner@example.com",
-      name: "Example Traders",
-    });
+    const started = await billingGateway({ session: owner, fetchImpl: fake.fetchImpl }).subscribe(
+      { planKey: "example_monthly", email: "owner@example.com", name: "Example Traders" },
+      { "Idempotency-Key": REQUEST_UUID },
+    );
     expect(started.ok && started.value.providerSubscriptionId).toBe("sub_example_1");
     expect(fake.requests[0]?.headers[TENANT_HEADER]).toBe(TENANT);
+    expect(fake.requests[0]?.headers["idempotency-key"]).toBe(REQUEST_UUID);
     expect(fake.requests[0]?.body).toEqual({
       plan_key: "example_monthly",
       email: "owner@example.com",
@@ -69,11 +70,10 @@ describe("BillingGateway", () => {
         },
       },
     ]);
-    const started = await billingGateway({ session: owner, fetchImpl: fake.fetchImpl }).subscribe({
-      planKey: "example_monthly",
-      email: "owner@example.com",
-      name: "Example Traders",
-    });
+    const started = await billingGateway({ session: owner, fetchImpl: fake.fetchImpl }).subscribe(
+      { planKey: "example_monthly", email: "owner@example.com", name: "Example Traders" },
+      { "Idempotency-Key": REQUEST_UUID },
+    );
     expect(!started.ok && started.error.kind).toBe("unavailable");
   });
 });
