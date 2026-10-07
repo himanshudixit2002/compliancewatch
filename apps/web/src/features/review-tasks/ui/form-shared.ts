@@ -118,13 +118,14 @@ export interface ContentValues {
   specification: unknown;
 }
 
-/** A clause a citation may name: a clause of a cited document, or of the candidate's. */
+/**
+ * A clause a citation may name: a clause of a cited document, or of the candidate's. Its whole
+ * text, which a quote is checked against, is the page's `ClauseTextsProvider`'s, sent once.
+ */
 export interface ClauseOption {
   value: string;
   /** "en.p3: Example clause text that ..." */
   label: string;
-  /** The clause's whole text, which the quote must hold word for word. */
-  text: string;
 }
 
 /** An open relation candidate of the candidate's document, which a draft may take on. */

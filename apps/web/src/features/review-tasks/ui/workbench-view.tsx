@@ -8,6 +8,7 @@ import { RuleVersionStatusChip } from "@/shared/ui/rule-version-status";
 import { ServiceError } from "@/shared/ui/service-error";
 import type { WorkbenchView as WorkbenchModel } from "../model/workbench";
 import { CandidatePane } from "./candidate-pane";
+import { ClauseTextsProvider } from "./clause-texts";
 import { Comparisons } from "./comparison-view";
 import { HistoryView } from "./history-view";
 import { RulePane, type RuleActions } from "./rule-pane";
@@ -129,31 +130,35 @@ export function WorkbenchView({ crumbs, view, actions }: WorkbenchViewProps) {
           <ServiceError error={view.ontologyError} />
         </div>
       )}
-      <div
-        className={cn(
-          "grid grid-cols-1 gap-8 lg:grid-cols-2",
-          withCandidate ? "2xl:grid-cols-3" : undefined,
-        )}
-        data-slot="panes"
-      >
-        <div className={cn("min-w-0", withCandidate ? "lg:row-span-2 2xl:row-span-1" : undefined)}>
-          <SourcePane pane={view.source} />
-        </div>
-        {view.candidate === null ? null : (
-          <div className="min-w-0">
-            <CandidatePane pane={view.candidate} />
+      <ClauseTextsProvider texts={view.source.clauseTexts}>
+        <div
+          className={cn(
+            "grid grid-cols-1 gap-8 lg:grid-cols-2",
+            withCandidate ? "2xl:grid-cols-3" : undefined,
+          )}
+          data-slot="panes"
+        >
+          <div
+            className={cn("min-w-0", withCandidate ? "lg:row-span-2 2xl:row-span-1" : undefined)}
+          >
+            <SourcePane pane={view.source} />
           </div>
-        )}
-        <div className="min-w-0">
-          <RulePane
-            pane={view.rule}
-            candidateTask={view.candidateTask}
-            access={view.access}
-            ontology={view.editorOntology}
-            actions={actions}
-          />
+          {view.candidate === null ? null : (
+            <div className="min-w-0">
+              <CandidatePane pane={view.candidate} />
+            </div>
+          )}
+          <div className="min-w-0">
+            <RulePane
+              pane={view.rule}
+              candidateTask={view.candidateTask}
+              access={view.access}
+              ontology={view.editorOntology}
+              actions={actions}
+            />
+          </div>
         </div>
-      </div>
+      </ClauseTextsProvider>
       <Comparisons
         proposal={view.comparisons.proposal}
         previous={view.comparisons.previous}

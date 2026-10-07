@@ -1152,7 +1152,11 @@ the pipeline's record of the document is read (`GET /v1/pipeline/documents/{docu
 document the rulebook received another way, as the web seed registers the recorded notification,
 says the pipeline stores no file for it). Nothing is embedded: the app answers every response with
 `X-Frame-Options: DENY`, and a PDF in a frame would need `frame-ancestors 'self'` on the raw route
-alone plus a sandboxed `iframe`, a framing decision left for when someone asks for it.
+alone plus a sandboxed `iframe`, a framing decision left for when someone asks for it. Each
+clause's text reaches the browser once: the page hands the texts of every clause it shows to one
+client provider, the pane draws each clause from it by code point ranges (its marks computed on
+the server) and the citation rows check a quote against it, where the pane's markup and the forms'
+clause choices each carried the whole text before.
 Consequences: the analyst compares the clause text with the file in two tabs; the page makes one
 pipeline read per document it shows.
 

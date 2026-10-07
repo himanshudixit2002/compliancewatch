@@ -2,7 +2,6 @@ import type { Route } from "next";
 import Link from "next/link";
 import {
   Badge,
-  HighlightMark,
   Table,
   TableBody,
   TableCaption,
@@ -13,27 +12,8 @@ import {
 } from "@compliancewatch/ui";
 import { t } from "@/shared/i18n";
 import { ServiceError } from "@/shared/ui/service-error";
-import type { SourceClause, SourceDocument, SourcePane as SourcePaneModel } from "../model/source";
-
-function ClauseText({ clause }: { clause: SourceClause }) {
-  return (
-    <>
-      {clause.segments.map((segment, index) =>
-        segment.mark ? (
-          <HighlightMark
-            key={index}
-            startLabel={t("workbench.source.markStart")}
-            endLabel={t("workbench.source.markEnd")}
-          >
-            {segment.text}
-          </HighlightMark>
-        ) : (
-          <span key={index}>{segment.text}</span>
-        ),
-      )}
-    </>
-  );
-}
+import type { SourceDocument, SourcePane as SourcePaneModel } from "../model/source";
+import { ClauseText } from "./clause-texts";
 
 function FileLink({ document }: { document: SourceDocument }) {
   const file = document.file;
@@ -135,7 +115,7 @@ function DocumentSection({ document }: { document: SourceDocument }) {
                   className="mt-2 text-sm whitespace-pre-wrap text-fg"
                   data-slot="source-clause-text"
                 >
-                  <ClauseText clause={clause} />
+                  <ClauseText clauseId={clause.clauseId} runs={clause.runs} />
                 </p>
                 {clause.unmatched.length === 0 ? null : (
                   <div className="mt-2 flex flex-col gap-1" data-slot="span-unmatched">
@@ -164,7 +144,8 @@ export interface SourcePaneProps {
  * The source pane: each document the draft rests on with its clauses (every cited quote marked,
  * or the whole clause when the quote does not match it word for word), a link to it in the
  * document viewer and to the file the pipeline stored, opened in a new tab and never framed here,
- * and the draft's citations with their verification.
+ * and the draft's citations with their verification. The clauses' texts come from the page's
+ * `ClauseTextsProvider`, which the citation rows read too.
  */
 export function SourcePane({ pane }: SourcePaneProps) {
   return (

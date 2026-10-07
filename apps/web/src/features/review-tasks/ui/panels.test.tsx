@@ -8,6 +8,7 @@ import { EXAMPLE_ANALYST_ID, EXAMPLE_OTHER_VERSION_ID } from "@/test/rule-versio
 import { EXAMPLE_RELATION_CANDIDATE_ID } from "@/test/review-task-fixture";
 import type { WriteAction } from "@/shared/ui/write-outcome";
 import { ClaimPanel } from "./claim-panel";
+import { ClauseTextsProvider } from "./clause-texts";
 import { DecidePanel } from "./decide-panel";
 import { DraftPanel } from "./draft-panel";
 import { EditPanel, isFormField } from "./edit-panel";
@@ -41,9 +42,11 @@ const CLAUSES = [
   {
     value: EXAMPLE_CLAUSE_IDS.first,
     label: "en.p1 (Example 1/2000): Example clause text that opens the document.",
-    text: "Example clause text that opens the document.",
   },
 ];
+
+/** The clause texts the page sends once, which the citation rows check a quote against. */
+const TEXTS = { [EXAMPLE_CLAUSE_IDS.first]: "Example clause text that opens the document." };
 
 function done(
   message: string,
@@ -111,7 +114,9 @@ describe("EditPanel", () => {
     });
     const user = userEvent.setup();
     const { container } = render(
-      <EditPanel action={action} form={FORM} blocked={null} ontology={ONTOLOGY} />,
+      <ClauseTextsProvider texts={TEXTS}>
+        <EditPanel action={action} form={FORM} blocked={null} ontology={ONTOLOGY} />
+      </ClauseTextsProvider>,
     );
     expect(await runAxe(container)).toHaveNoViolations();
     const title = screen.getByLabelText(/^Title/);

@@ -52,13 +52,19 @@ describe("sourcePane", () => {
       wholeMarked: false,
       unmatched: [],
       quotes: 1,
-      segments: [
-        { text: "Example ", mark: false },
-        { text: "clause text that opens", mark: true },
-        { text: " the document.", mark: false },
+      // "Example " (8 code points), the quote (22), " the document." (14).
+      runs: [
+        { start: 0, end: 8, mark: false },
+        { start: 8, end: 30, mark: true },
+        { start: 30, end: 44, mark: false },
       ],
     });
     expect(document?.clauses?.[1]).toMatchObject({ quotes: 0, wholeMarked: false });
+    // Every clause shown has its text once, by id, for the pane and the forms alike.
+    expect(view.clauseTexts[EXAMPLE_CLAUSE_IDS.first]).toBe(
+      "Example clause text that opens the document.",
+    );
+    expect(Object.keys(view.clauseTexts)).toHaveLength(document?.clauses?.length ?? 0);
   });
 
   it("marks the whole clause and says so when a quote does not match it word for word", () => {
@@ -70,7 +76,7 @@ describe("sourcePane", () => {
       wholeMarked: true,
       unmatched: ["Example  clause text"],
       quotes: 1,
-      segments: [{ text: "Example clause text that opens the document.", mark: true }],
+      runs: [{ start: 0, end: 44, mark: true }],
     });
   });
 

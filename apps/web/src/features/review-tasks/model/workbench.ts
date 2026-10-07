@@ -242,7 +242,6 @@ function clauseOptions(
           Array.from(clause.text).slice(0, 60).join("") +
           (Array.from(clause.text).length > 60 ? "..." : ""),
       }),
-      text: clause.text,
     }));
   });
 }

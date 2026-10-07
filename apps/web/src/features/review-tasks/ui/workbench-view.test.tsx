@@ -110,6 +110,11 @@ describe("WorkbenchView", () => {
     expect(file.getAttribute("rel")).toBe("noopener");
     const cited = container.querySelector("li[data-clause-ref='en.p1']");
     expect(cited?.getAttribute("data-marked")).toBe("clause");
+    // The clause's text, sent once for the pane and the forms, is drawn in the pane and marked.
+    expect(
+      cited?.querySelector("[data-slot='source-clause-text'] [data-slot='highlight-mark']")
+        ?.textContent,
+    ).toBe("Example clause text that opens the document.");
     expect(cited?.querySelector("[data-slot='span-unmatched']")?.textContent).toContain(
       "Example quote the clause does not hold",
     );

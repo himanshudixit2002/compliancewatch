@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { Button, Field, Select, Textarea } from "@compliancewatch/ui";
 import { t } from "@/shared/i18n";
+import { useClauseTexts } from "./clause-texts";
 import { LIMITS, citationField, type ClauseOption } from "./form-shared";
 
 export interface CitationRowsProps {
@@ -24,8 +25,9 @@ interface Row {
 /**
  * Citations to add, one row each: a clause of a document the draft rests on, then the words of
  * it the rule rests on, typed or pasted. The rulebook verifies every quote against its clause; the
- * row says beforehand whether the clause holds the quote word for word, which the rulebook's
- * match score does not need (spacing and punctuation may differ).
+ * row says beforehand whether the clause holds the quote word for word (the clause's text from the
+ * page's `ClauseTextsProvider`), which the rulebook's match score does not need (spacing and
+ * punctuation may differ).
  */
 export function CitationRows({
   idPrefix,
@@ -37,6 +39,7 @@ export function CitationRows({
 }: CitationRowsProps) {
   const next = useRef(0);
   const [rows, setRows] = useState<Row[]>([]);
+  const texts = useClauseTexts();
   const add = () => {
     const key = next.current;
     next.current += 1;
@@ -57,8 +60,9 @@ export function CitationRows({
         const clauseName = citationField(index, "clause_id");
         const quoteName = citationField(index, "quote");
         const clause = options.find((option) => option.value === row.clauseId);
+        const text = clause === undefined ? undefined : texts[clause.value];
         const quote = row.quote.trim();
-        const found = clause !== undefined && quote !== "" && clause.text.includes(quote);
+        const found = text !== undefined && quote !== "" && text.includes(quote);
         return (
           <div
             key={row.key}
@@ -84,7 +88,7 @@ export function CitationRows({
               id={`${idPrefix}-citation-${row.key}-quote`}
               label={t("workbench.citations.quote", { n: index + 1 })}
               description={
-                clause === undefined || quote === ""
+                text === undefined || quote === ""
                   ? t("workbench.citations.quoteHelp", { max: LIMITS.quote })
                   : found
                     ? t("workbench.citations.found")

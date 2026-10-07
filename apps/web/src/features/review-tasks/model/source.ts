@@ -9,6 +9,7 @@ import { markSpans, quoteSpan, type TextSegment } from "@/shared/lib/highlight";
 import { humanise } from "@/shared/lib/humanise";
 import { withQuery } from "@/shared/lib/url";
 import type { ServiceErrorLike } from "@/shared/ui/service-error";
+import type { ClauseRun } from "../ui/clause-texts";
 import { percent } from "./queue";
 
 /**
@@ -30,8 +31,11 @@ export interface SourceClause {
   clauseRef: string;
   anchorId: string;
   page: number | null;
-  /** The text in runs, the quotes found word for word marked. */
-  segments: TextSegment[];
+  /**
+   * The text in runs by code point, the quotes found word for word marked; the text itself is in
+   * `SourcePane.clauseTexts`, sent once for the pane and the forms alike.
+   */
+  runs: ClauseRun[];
   /** A quote did not match word for word, so the whole clause is marked. */
   wholeMarked: boolean;
   /** The quotes of this clause that did not match word for word. */
@@ -75,6 +79,8 @@ export interface CitationRow {
 export interface SourcePane {
   documents: SourceDocument[];
   citations: CitationRow[];
+  /** The text of every clause shown, by clause id. */
+  clauseTexts: Record<string, string>;
 }
 
 /** An anchor unique within the page: the document and the clause reference. */
@@ -123,6 +129,18 @@ export function sourceFile(
   };
 }
 
+/** Contiguous runs of text as code point ranges, in reading order. */
+function runsOf(segments: readonly TextSegment[]): ClauseRun[] {
+  const runs: ClauseRun[] = [];
+  let start = 0;
+  for (const segment of segments) {
+    const end = start + Array.from(segment.text).length;
+    runs.push({ start, end, mark: segment.mark });
+    start = end;
+  }
+  return runs;
+}
+
 function clauseView(
   documentId: string,
   clause: RulebookDocument["clauses"][number],
@@ -141,7 +159,7 @@ function clauseView(
     clauseRef: clause.clauseRef,
     anchorId: sourceAnchorId(documentId, clause.clauseRef),
     page: clause.page,
-    segments: wholeMarked ? [{ text: clause.text, mark: true }] : markSpans(clause.text, spans),
+    runs: runsOf(wholeMarked ? [{ text: clause.text, mark: true }] : markSpans(clause.text, spans)),
     wholeMarked,
     unmatched,
     quotes: quotes.length,
@@ -181,9 +199,11 @@ export function sourcePane(input: {
     byClause.set(clauseId, list);
   }
   const anchors = new Map<string, string>();
+  const clauseTexts: Record<string, string> = {};
   const documents = input.documentIds.map((documentId): SourceDocument => {
     const read = input.documents.get(documentId);
     const document = read?.ok === true ? read.value : null;
+    for (const clause of document?.clauses ?? []) clauseTexts[clause.clauseId] = clause.text;
     const facts = input.facts.get(documentId) ?? null;
     const clauses =
       document === null
@@ -206,6 +226,7 @@ export function sourcePane(input: {
   });
   return {
     documents,
+    clauseTexts,
     citations: input.citations.map((citation) => {
       const anchor = anchors.get(citation.clauseId);
       return {
