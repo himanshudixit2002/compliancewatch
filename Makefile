@@ -109,7 +109,7 @@ DB_URL = postgresql+psycopg://$$db_user:$$db_password@localhost:$${POSTGRES_PORT
 
 db-roles: check-docker ## Create or refresh each service's database role cw_<schema> and its dev password on the running Postgres (infra/dev/postgres/roles.sql); safe to repeat
 	@cat infra/dev/postgres/roles.sql infra/dev/postgres/dev-passwords.sql | \
-	  $(COMPOSE) exec -T postgres sh -c 'psql -q -1 -v ON_ERROR_STOP=1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"'
+	  $(COMPOSE) exec -T postgres sh -c 'psql -q -1 -v ON_ERROR_STOP=1 -f - -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"'
 	@echo "roles cw_<schema> of the ten service schemas: their own schema and INSERT on audit; row-level security applies to them (dev passwords: the role names)"
 
 dev-llm: check-docker ## Build and start the fake LLM gateway container (compose profile: llm)
@@ -151,10 +151,13 @@ dev-backup: check-docker ## pg_dump the dev database into var/backups/<timestamp
 	@mkdir -p var/backups; stamp=$$(date -u +%Y%m%dT%H%M%SZ); \
 	$(COMPOSE) exec -T postgres pg_dump -U $${POSTGRES_USER:-cw} -Fc $${POSTGRES_DB:-compliancewatch} > var/backups/$$stamp.dump && echo "wrote var/backups/$$stamp.dump"
 
+# A dump taken before the services' roles existed restores without their grants, so the roles
+# are refreshed after every restore.
 dev-restore: check-docker ## Restore the dev database from a dump: make dev-restore FILE=var/backups/x.dump
 	@[ -n "$(FILE)" ] || { echo "usage: make dev-restore FILE=var/backups/<stamp>.dump"; exit 1; }
 	$(COMPOSE) exec -T postgres psql -U $${POSTGRES_USER:-cw} -d postgres -c "DROP DATABASE IF EXISTS $${POSTGRES_DB:-compliancewatch} WITH (FORCE)" -c "CREATE DATABASE $${POSTGRES_DB:-compliancewatch}"
 	$(COMPOSE) exec -T postgres pg_restore -U $${POSTGRES_USER:-cw} -d $${POSTGRES_DB:-compliancewatch} --no-owner < $(FILE) && echo "restored $(FILE)"
+	@$(MAKE) --no-print-directory db-roles
 
 compose-config: check-docker-cli ## Validate docker-compose.yml (CLI only, no daemon needed)
 	$(COMPOSE) $(PROFILES) config --quiet && echo "docker-compose.yml OK"
@@ -574,6 +577,8 @@ web-stack: check-uv ## UI-only stack, no worker: every service on SERVICE_PORT_B
 	  echo $$! > "$$pidfile"; \
 	  echo "  $$svc  http://localhost:$$port  (log $(WEB_STACK_DIR)/$$svc.log)"; \
 	done; \
+	if [ "$$kept" -gt 0 ] && [ "$(STORE)" = "postgres" ]; then \
+	  echo "  the $$kept services that were running already keep the database login they started with; make web-stack-down first, and the next make web-stack STORE=postgres starts every service$$as"; fi; \
 	record=$(WEB_STACK_DIR)/store; now="store=$(STORE)"; now="$$now$$(printf '\nbase=%s' "$$base")"; \
 	prev=""; [ -f "$$record" ] && prev=$$(cat "$$record"); \
 	if [ "$$kept" -eq 0 ] || [ "$$prev" = "$$now" ]; then printf '%s\n' "$$now" > "$$record"; \
@@ -874,7 +879,9 @@ product-logs: ## Show a product process's log: make product-logs PROC=app|worker
 # PRODUCT_WORKER_PORT, with the settings make product passes its processes (x-mvp-env). The image
 # is built first unless MVP_BUILD=0 (CI builds it with buildx and its cache). cw_app is created
 # before the release (make product-role: its default privileges cover the tables the release
-# makes), and the seed calendar is loaded with the image's rulebook-seed afterwards. make
+# makes), and the seed calendar is loaded with the image's rulebook-seed afterwards; make db-roles
+# runs once more at the end, since the release made each schema's alembic_version after make dev
+# ran it. make
 # product-seed and make product-check then run against it unchanged: the same ports, cw_app, and
 # the sink in var/product, which the containers write as you (CW_MVP_USER is your uid and gid).
 # It uses make product's ports, so one of the two runs at a time. make product-image-down removes
@@ -914,6 +921,7 @@ product-image: check-docker ## The local product from the image: make dev, the i
 	echo "  worker health      http://127.0.0.1:$(PRODUCT_WORKER_PORT)/health   (/loops lists consumers, relays, jobs, task queues)"; \
 	echo "  sink               $(PRODUCT_DIR)/sink.jsonl"; \
 	echo "Next: make product-seed, then make product-check; make product-image-down stops it"
+	@$(MAKE) --no-print-directory db-roles
 
 product-image-down: check-docker ## Remove the image product's containers (mvp-release, mvp-app, mvp-worker); the dev stack keeps running
 	$(MVP_COMPOSE) rm --stop --force mvp-worker mvp-app mvp-release
