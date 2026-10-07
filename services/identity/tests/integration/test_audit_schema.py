@@ -1,6 +1,7 @@
-"""Migrations 0005 and 0006 on Postgres: ``audit.event`` on top of identity's chain, the schema
-0005 creates when missing, the read scopes of 0006, the catalog lint's view of the table, a
-write and the audit trail's reads through a plain role, and the downgrades. Needs Docker.
+"""Migrations 0005 to 0007 on Postgres: ``audit.event`` on top of identity's chain, the schema
+0005 creates when missing, the read scopes of 0006, the subject index of 0007, the catalog
+lint's view of the table, a write and the audit trail's reads through a plain role, and the
+downgrades. Needs Docker.
 
 The role owns nothing and is not a superuser, and is granted what ``make product-role`` grants
 ``cw_app`` (infra/dev/postgres/50-app-role.sql). The policies, the trigger and the writer in the
@@ -99,12 +100,13 @@ def test_the_migration_creates_the_schema_and_the_table(engine: Engine) -> None:
     assert {index["name"] for index in found.get_indexes(AUDIT_TABLE, AUDIT_SCHEMA)} == {
         "ix_audit_event_tenant_time",
         "ix_audit_event_action_time",
+        "ix_audit_event_subject_time",
     }
     with engine.connect() as connection:
         version: str = connection.execute(
             text(f"SELECT version_num FROM {SCHEMA}.alembic_version")
         ).scalar_one()
-    assert version == "0006"
+    assert version == "0007"
 
 
 def test_the_table_and_py_common_agree(engine: Engine) -> None:
@@ -195,9 +197,14 @@ def test_the_trail_reads_each_scope_through_the_plain_role(app_engine: Engine) -
     )
 
 
-def test_downgrade_drops_the_read_scopes_then_the_table_and_keeps_the_schema(
+def test_downgrade_drops_the_index_the_read_scopes_then_the_table_and_keeps_the_schema(
     alembic_config: Config, engine: Engine
 ) -> None:
+    command.downgrade(alembic_config, "0006")
+    assert {index["name"] for index in inspect(engine).get_indexes(AUDIT_TABLE, AUDIT_SCHEMA)} == {
+        "ix_audit_event_tenant_time",
+        "ix_audit_event_action_time",
+    }
     command.downgrade(alembic_config, "0005")
     with engine.connect() as connection:
         policies = set(

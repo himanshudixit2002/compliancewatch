@@ -9,7 +9,8 @@ to the one table.
 - The schema ``audit`` is created when it is missing: ``infra/dev/postgres/init.sql`` makes it
   in the dev stack, the migration in every other environment. The downgrade keeps it.
 - Indexes: (tenant_id, occurred_at) for a tenant's trail, (action, occurred_at) for one kind of
-  action across tenants.
+  action across tenants, and (subject_type, subject_id, occurred_at) for one subject's history
+  (``create_audit_subject_index``, identity's migration 0007).
 - Row-level security, enabled and forced. ``event_tenant_isolation``
   (``py_common.migrations.enable_tenant_rls``) admits the rows of the tenant ``app.tenant_id``
   names, to read and to write; ``event_platform_insert`` lets any session insert a row of no
@@ -19,9 +20,12 @@ to the one table.
   ``event_platform_read`` admits the rows of no tenant while ``app.audit_scope`` is
   ``regulatory``, and ``event_export_read`` admits every row while it is ``export``. Permissive
   policies combine with OR, so a regulatory session that also names a tenant reads that tenant's
-  rows and the platform's. Only identity sets the scope, after its own role checks (the audit
-  trail route and ``identity-admin audit-export``), and only ``cw_identity`` holds SELECT on the
-  table among the service roles (infra/dev/postgres/roles.sql); a writer's role reads nothing.
+  rows and the platform's. Only identity's code sets the scope, after its own role checks (the
+  audit trail route and ``identity-admin audit-export``). Among the per-service roles only
+  ``cw_identity`` holds SELECT on the table (infra/dev/postgres/roles.sql), so there a writer's
+  role reads nothing. The MVP's one image runs every service as ``cw_app``, which holds SELECT
+  on ``audit`` too (infra/dev/postgres/50-app-role.sql): there any service's code could name a
+  scope, and the scopes hold by code convention, as defence in depth, not as a role boundary.
 - Append-only: a trigger refuses UPDATE and DELETE (``create_append_only_guard`` without the
   erasure exception). Rows outlive a tenant's erasure, which will pseudonymise them rather than
   delete them (not built yet); the guide keeps them seven years (section 9).
@@ -68,6 +72,7 @@ AUDIT_TABLE: Final = "event"
 QUALIFIED_TABLE: Final = f"{AUDIT_SCHEMA}.{AUDIT_TABLE}"
 TENANT_TIME_INDEX: Final = "ix_audit_event_tenant_time"
 ACTION_TIME_INDEX: Final = "ix_audit_event_action_time"
+SUBJECT_TIME_INDEX: Final = "ix_audit_event_subject_time"
 PLATFORM_INSERT_POLICY: Final = "event_platform_insert"
 PLATFORM_ROW: Final = "tenant_id IS NULL"
 """The WITH CHECK of ``event_platform_insert``: a row of no tenant."""
@@ -143,6 +148,12 @@ def _columns() -> list[SchemaItem]:
 audit_event = Table(AUDIT_TABLE, metadata, *_columns(), schema=AUDIT_SCHEMA, comment=AUDIT_COMMENT)
 Index(TENANT_TIME_INDEX, audit_event.c.tenant_id, audit_event.c.occurred_at)
 Index(ACTION_TIME_INDEX, audit_event.c.action, audit_event.c.occurred_at)
+Index(
+    SUBJECT_TIME_INDEX,
+    audit_event.c.subject_type,
+    audit_event.c.subject_id,
+    audit_event.c.occurred_at,
+)
 
 
 def create_audit_table(op: Operations) -> None:
@@ -184,6 +195,22 @@ def drop_audit_read_policies(op: Operations) -> None:
     """Reverse ``create_audit_read_policies``."""
     op.execute(f"DROP POLICY IF EXISTS {EXPORT_READ_POLICY} ON {QUALIFIED_TABLE}")
     op.execute(f"DROP POLICY IF EXISTS {PLATFORM_READ_POLICY} ON {QUALIFIED_TABLE}")
+
+
+def create_audit_subject_index(op: Operations) -> None:
+    """The index on (subject_type, subject_id, occurred_at): one subject's history, such as a
+    rule version's, without a scan of every tenant's rows. Call from identity's migration 0007."""
+    op.create_index(
+        SUBJECT_TIME_INDEX,
+        AUDIT_TABLE,
+        ["subject_type", "subject_id", "occurred_at"],
+        schema=AUDIT_SCHEMA,
+    )
+
+
+def drop_audit_subject_index(op: Operations) -> None:
+    """Reverse ``create_audit_subject_index``."""
+    op.drop_index(SUBJECT_TIME_INDEX, table_name=AUDIT_TABLE, schema=AUDIT_SCHEMA)
 
 
 def drop_audit_table(op: Operations) -> None:

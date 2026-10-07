@@ -37,11 +37,14 @@ from py_common.audit.schema import (
     EXPORT_READ_POLICY,
     PLATFORM_INSERT_POLICY,
     PLATFORM_READ_POLICY,
+    SUBJECT_TIME_INDEX,
     TENANT_TIME_INDEX,
     audit_event,
     create_audit_read_policies,
+    create_audit_subject_index,
     create_audit_table,
     drop_audit_read_policies,
+    drop_audit_subject_index,
     drop_audit_table,
     metadata,
 )
@@ -403,3 +406,14 @@ def test_the_read_scopes_are_select_policies_on_the_audit_scope_setting() -> Non
         f"DROP POLICY IF EXISTS {EXPORT_READ_POLICY} ON audit.event",
         f"DROP POLICY IF EXISTS {PLATFORM_READ_POLICY} ON audit.event",
     ]
+
+
+def test_the_subject_index_comes_in_a_migration_of_its_own() -> None:
+    assert SUBJECT_TIME_INDEX not in emitted(create_audit_table)
+    created = [s.strip() for s in emitted(create_audit_subject_index).split(";") if s.strip()]
+    assert created == [
+        f"CREATE INDEX {SUBJECT_TIME_INDEX} ON audit.event (subject_type, subject_id, occurred_at)"
+    ]
+    dropped = [s.strip() for s in emitted(drop_audit_subject_index).split(";") if s.strip()]
+    assert dropped == [f"DROP INDEX audit.{SUBJECT_TIME_INDEX}"]
+    assert SUBJECT_TIME_INDEX in {index.name for index in audit_event.indexes}
