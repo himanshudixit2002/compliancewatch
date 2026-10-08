@@ -62,7 +62,9 @@ describe("useWriteAction and WriteOutcome", () => {
     const { container } = render(<Panel action={action} />);
     await userEvent.setup().click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Example done."));
-    expect(document.activeElement?.getAttribute("data-slot")).toBe("example-outcome");
+    await waitFor(() =>
+      expect(document.activeElement?.getAttribute("data-slot")).toBe("example-outcome"),
+    );
     expect(await runAxe(container)).toHaveNoViolations();
   });
 

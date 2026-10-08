@@ -70,7 +70,7 @@ describe("CitationsEditor", () => {
     expect(screen.getByText("Not found in its clause: score 0.40")).toBeDefined();
     expect(screen.getByText("en.p1 of example: score 0.40")).toBeDefined();
     expect((screen.getByLabelText(/^Quote/) as HTMLTextAreaElement).value).toBe("Example quote");
-    expect(container.contains(document.activeElement)).toBe(true);
+    await waitFor(() => expect(container.contains(document.activeElement)).toBe(true));
     expect(await runAxe(container)).toHaveNoViolations();
   });
 

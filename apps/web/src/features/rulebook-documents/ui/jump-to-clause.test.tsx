@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { runAxe } from "@compliancewatch/ui/test/axe";
 import { afterEach, describe, expect, it } from "vitest";
@@ -39,7 +39,7 @@ describe("JumpToClause", () => {
     await user.selectOptions(screen.getByLabelText("Clause"), "clause-en.p2");
     await user.click(screen.getByRole("button", { name: "Go to the clause" }));
     expect(window.location.hash).toBe("#clause-en.p2");
-    expect(document.activeElement?.id).toBe("clause-en.p2");
+    await waitFor(() => expect(document.activeElement?.id).toBe("clause-en.p2"));
     const form = screen.getByRole("form", { name: "Jump to a clause" });
     expect(await runAxe(form)).toHaveNoViolations();
     expect(container).toBeDefined();
@@ -52,7 +52,7 @@ describe("JumpToClause", () => {
 });
 
 describe("ScrollToMarked", () => {
-  it("brings the marked clause into view and focus when the address has no fragment", () => {
+  it("brings the marked clause into view and focus when the address has no fragment", async () => {
     const scrolled: string[] = [];
     Element.prototype.scrollIntoView = function scrollIntoView(this: Element) {
       scrolled.push(this.id);
@@ -64,7 +64,7 @@ describe("ScrollToMarked", () => {
       </>,
     );
     expect(scrolled).toEqual(["clause-en.p2"]);
-    expect(document.activeElement?.id).toBe("clause-en.p2");
+    await waitFor(() => expect(document.activeElement?.id).toBe("clause-en.p2"));
   });
 
   it("leaves the position to the fragment when the address has one", () => {

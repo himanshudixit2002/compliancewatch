@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { runAxe } from "@compliancewatch/ui/test/axe";
 import { describe, expect, it, vi } from "vitest";
 import { businessFromDto, onboardingFromDto, reviewTaskFromDto } from "@/entities/business/mappers";
@@ -70,7 +70,7 @@ describe("QuestionStep", () => {
     expect(
       screen.getByRole("link", { name: "Stop here and see the summary" }).getAttribute("href"),
     ).toBe("/done");
-    expect(document.activeElement).toBe(document.body);
+    await waitFor(() => expect(document.activeElement).toBe(document.body));
     expect(await runAxe(container)).toHaveNoViolations();
   });
 
@@ -86,7 +86,7 @@ describe("QuestionStep", () => {
       </main>,
     );
     expect(screen.getByText("Saved your answer about Example kind.")).toBeDefined();
-    expect(document.activeElement?.tagName).toBe("H1");
+    await waitFor(() => expect(document.activeElement?.tagName).toBe("H1"));
     expect(screen.getByText("No review task is open on this business.")).toBeDefined();
     expect(await runAxe(container)).toHaveNoViolations();
   });

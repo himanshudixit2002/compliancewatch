@@ -29,13 +29,17 @@ describe("FanOutControls", () => {
     expect(await runAxe(container)).toHaveNoViolations();
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Pause" }));
-    const dialog = screen.getByRole("dialog", { name: "Pause the fan-out of example_rule v2?" });
+    const dialog = await screen.findByRole("dialog", {
+      name: "Pause the fan-out of example_rule v2?",
+    });
     expect(dialog.textContent).toContain("releasing the global hold does not restart it");
     await user.type(within(dialog).getByRole("textbox"), "Example flips look wrong");
     await user.click(within(dialog).getByRole("button", { name: "Pause" }));
     await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Example pause done"));
     expect(sent).toEqual([{ sent: "pause", control: "pause", reason: "Example flips look wrong" }]);
-    expect(document.activeElement?.getAttribute("data-slot")).toBe("control-outcome");
+    await waitFor(() =>
+      expect(document.activeElement?.getAttribute("data-slot")).toBe("control-outcome"),
+    );
   });
 
   it("cancels in a destructive dialog that says the decisions stay", async () => {
@@ -50,7 +54,9 @@ describe("FanOutControls", () => {
     );
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Cancel the run" }));
-    const dialog = screen.getByRole("dialog", { name: "Cancel the fan-out of example_rule v2?" });
+    const dialog = await screen.findByRole("dialog", {
+      name: "Cancel the fan-out of example_rule v2?",
+    });
     expect(dialog.textContent).toContain("The decisions it made stay");
     expect(dialog.getAttribute("data-destructive")).toBe("true");
     await user.type(within(dialog).getByRole("textbox"), "Example wrong threshold");
@@ -71,7 +77,9 @@ describe("FanOutControls", () => {
     );
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Resume" }));
-    const dialog = screen.getByRole("dialog", { name: "Resume the fan-out of example_rule v2?" });
+    const dialog = await screen.findByRole("dialog", {
+      name: "Resume the fan-out of example_rule v2?",
+    });
     await user.type(
       within(dialog).getByLabelText(/Reason \(optional\)/),
       "  Example looked again  ",
@@ -91,7 +99,7 @@ describe("FanOutControls", () => {
     );
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Pause" }));
-    const dialog = screen.getByRole("dialog");
+    const dialog = await screen.findByRole("dialog");
     await user.type(within(dialog).getByRole("textbox"), "Example long enough reason");
     await user.click(within(dialog).getByRole("button", { name: "Pause" }));
     await waitFor(() =>
