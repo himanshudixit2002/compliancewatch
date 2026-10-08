@@ -1689,6 +1689,14 @@ class MemoryKnowledgeStore:
         with self._lock:
             return list(self._tables.outbox)
 
+    def write_audit(self, entry: AuditEntry) -> None:
+        """Commit one entry of the entry's tenant to the log, outside a unit of work: a unit of
+        the rulebook belongs to no tenant, and a tenant's erasure writes one of that tenant."""
+        with self._lock:
+            sink = MemoryAuditSink(self._audit, tenant_id=entry.tenant_id)
+            sink.write(entry)
+            sink.commit()
+
     def audit_entries(self, action: str | None = None) -> list[AuditEntry]:
         """The committed audit log, oldest first; one action's when it is named."""
         with self._lock:

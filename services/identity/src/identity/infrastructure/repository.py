@@ -12,6 +12,7 @@ from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager
 from datetime import datetime
 from typing import Any, Self
+from uuid import UUID
 
 from sqlalchemy import (
     Connection,
@@ -31,7 +32,7 @@ from sqlalchemy.pool import NullPool
 
 from domain_kernel.access import Role, Scope
 from domain_kernel.events import DomainEvent
-from domain_kernel.ids import ConsentId, TenantId, UserId
+from domain_kernel.ids import ConsentId, EventId, TenantId, UserId
 from identity.domain.billing import (
     Customer,
     StartAttempt,
@@ -171,6 +172,9 @@ class SqlAlchemyDataRequestRepository:
                 status=request.status.value,
                 services_done=list(request.services_done),
                 completed_at=request.completed_at,
+                deletion_event_id=_event_uuid(request),
+                second_pass_at=request.second_pass_at,
+                second_pass_done=list(request.second_pass_done),
             )
             .execution_options(synchronize_session=False)
         )
@@ -219,6 +223,23 @@ class SqlAlchemyDataRequestRepository:
         )
         return [_to_data_request(row) for row in rows]
 
+    def open_deletion(self) -> DataRequest | None:
+        if self._tenant is None:
+            return None
+        row = self._session.scalars(
+            select(DataRequestRow)
+            .where(
+                DataRequestRow.tenant_id == self._tenant.value,
+                DataRequestRow.kind == DataRequestKind.DELETION.value,
+                DataRequestRow.status != DataRequestStatus.COMPLETED.value,
+            )
+            .order_by(DataRequestRow.requested_at.desc(), DataRequestRow.id.desc())
+            .limit(1)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).one_or_none()
+        return None if row is None else _to_data_request(row)
+
 
 def _data_request_row(request: DataRequest) -> DataRequestRow:
     return DataRequestRow(
@@ -233,7 +254,14 @@ def _data_request_row(request: DataRequest) -> DataRequestRow:
         status=request.status.value,
         services_done=list(request.services_done),
         completed_at=request.completed_at,
+        deletion_event_id=_event_uuid(request),
+        second_pass_at=request.second_pass_at,
+        second_pass_done=list(request.second_pass_done),
     )
+
+
+def _event_uuid(request: DataRequest) -> UUID | None:
+    return None if request.deletion_event_id is None else request.deletion_event_id.value
 
 
 def _to_data_request(row: DataRequestRow) -> DataRequest:
@@ -249,6 +277,9 @@ def _to_data_request(row: DataRequestRow) -> DataRequest:
         status=DataRequestStatus(row.status),
         services_done=tuple(sorted(set(row.services_done))),
         completed_at=row.completed_at,
+        deletion_event_id=None if row.deletion_event_id is None else EventId(row.deletion_event_id),
+        second_pass_at=row.second_pass_at,
+        second_pass_done=tuple(sorted(set(row.second_pass_done))),
     )
 
 
@@ -317,6 +348,16 @@ class SqlAlchemyTenantRepository:
             .execution_options(populate_existing=True)
         ).one_or_none()
         return None if row is None else _to_tenant(row)
+
+    def save(self, tenant: Tenant) -> None:
+        if tenant.id != self._tenant:
+            return
+        self._session.execute(
+            update(TenantRow)
+            .where(TenantRow.id == tenant.id.value)
+            .values(status=tenant.status.value, name=tenant.name)
+            .execution_options(synchronize_session=False)
+        )
 
 
 class SqlAlchemyUserRepository:
@@ -660,8 +701,8 @@ class OutboxSink:
         self._connection = connection
         self._writer = writer
 
-    def publish(self, event: DomainEvent) -> None:
-        self._writer.write(self._connection, event)
+    def publish(self, event: DomainEvent, *, not_before: datetime | None = None) -> None:
+        self._writer.write(self._connection, event, available_at=not_before)
 
 
 class SqlAlchemyUnitOfWork:
@@ -686,10 +727,39 @@ class SqlAlchemyUnitOfWork:
         self.audit = PostgresAuditSink(connection)
 
 
+class ConnectionUnitOfWorkFactory:
+    """Units of work inside the transaction of ``connection``, such as a consumer's: a unit
+    neither commits nor rolls back, so what it writes commits with what the owner of the
+    connection writes (the ``processed_event`` row)."""
+
+    def __init__(self, connection: Connection, writer: OutboxWriter) -> None:
+        self._connection = connection
+        self._writer = writer
+
+    def __call__(self, tenant_id: TenantId | None) -> AbstractContextManager[UnitOfWork]:
+        return self._open(tenant_id)
+
+    @contextmanager
+    def _open(self, tenant_id: TenantId | None) -> Iterator[UnitOfWork]:
+        if not self._connection.in_transaction():
+            # Begun here, the session joins it and the owner of the connection still ends it.
+            self._connection.begin()
+        with Session(bind=self._connection, expire_on_commit=False) as session:
+            yield SqlAlchemyUnitOfWork(session, tenant_id, self._writer)
+            session.flush()
+
+
 class PostgresUnitOfWorkFactory:
     def __init__(self, engine: Engine, *, writer: OutboxWriter | None = None) -> None:
         self._engine = engine
         self._writer = writer or OutboxWriter()
+
+    @staticmethod
+    def on_connection(
+        connection: Connection, *, writer: OutboxWriter | None = None
+    ) -> ConnectionUnitOfWorkFactory:
+        """Units of work in the transaction ``connection`` holds (a consumer's)."""
+        return ConnectionUnitOfWorkFactory(connection, writer or OutboxWriter())
 
     @classmethod
     def from_url(cls, database_url: str) -> Self:

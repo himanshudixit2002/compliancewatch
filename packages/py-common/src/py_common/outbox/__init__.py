@@ -15,7 +15,7 @@ consume them once.
   origin; ``python -m py_common.outbox.replay`` (``make replay``) is its command line. Import it
   from its module: the package does not load it, so ``-m`` runs it cleanly.
 - ``consumer``: ``IdempotentConsumer`` processes each event id once per consumer group and
-  dead-letters what its handler cannot process.
+  dead-letters what its handler cannot process, or refuses (``EventRefusedError``).
 - ``sync``: ``SyncProcessedStore`` and ``sync_handler`` run a handler written against a sync
   connection in the consumer's transaction, on a thread of its own; ``read_first_store`` and
   ``read_then_write`` run a handler that reads other services before it writes, with no
@@ -23,7 +23,13 @@ consume them once.
 """
 
 from py_common.outbox.admin import DeadKey, DeadRows, OutboxAdmin, OutboxRow, payload_summary
-from py_common.outbox.consumer import ConsumerConfig, IdempotentConsumer, InboundRecord, Outcome
+from py_common.outbox.consumer import (
+    ConsumerConfig,
+    EventRefusedError,
+    IdempotentConsumer,
+    InboundRecord,
+    Outcome,
+)
 from py_common.outbox.producer import AiokafkaProducer, MessageProducer
 from py_common.outbox.relay import OutboxRelay, RelayConfig, RelayStats, backoff_seconds
 from py_common.outbox.schema import (
@@ -61,6 +67,7 @@ __all__ = [
     "ConsumerConfig",
     "DeadKey",
     "DeadRows",
+    "EventRefusedError",
     "IdempotentConsumer",
     "InboundRecord",
     "MessageProducer",

@@ -123,6 +123,7 @@ def build_app(
         readiness_checks=[("store", wiring.store_ready)],
         problem_status=PROBLEM_STATUS,
         authenticator=authenticator,
+        erased_tenants=wiring.erased_tenants,
     )
     app.state.wiring = wiring
     install_pending_metrics(app, wiring)

@@ -64,6 +64,7 @@
   "signIn.submit": "Sign in",
   "signIn.pending": "Signing in",
   "signIn.unavailableNoForm": "The configured provider offers no sign-in method this app can show yet.",
+  "signIn.refusal.tenantDeleting": "This account's data is being deleted at its owner's request, so nobody can sign in to it.",
   "account.title": "Account",
   "account.intro": "What your session carries. Name, phone and email arrive with the identity service.",
   "account.facts": "Session facts",

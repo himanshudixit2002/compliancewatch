@@ -27,8 +27,8 @@ to the one table.
   on ``audit`` too (infra/dev/postgres/50-app-role.sql): there any service's code could name a
   scope, and the scopes hold by code convention, as defence in depth, not as a role boundary.
 - Append-only: a trigger refuses UPDATE and DELETE (``create_append_only_guard`` without the
-  erasure exception). Rows outlive a tenant's erasure, which will pseudonymise them rather than
-  delete them (not built yet); the guide keeps them seven years (section 9).
+  erasure exception). Rows outlive a tenant's erasure, already masked when written, and each
+  service's erasure adds a ``tenant.erased`` row; the guide keeps them seven years (section 9).
 
 A later change to the table goes in a helper of its own, called from a new migration, so
 identity's migration keeps creating the table it created.

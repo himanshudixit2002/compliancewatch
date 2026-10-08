@@ -188,6 +188,15 @@ def test_the_purge_deletes_what_expired(store: MemoryIdempotencyStore, clock: Cl
     assert len(store) == 0
 
 
+def test_an_erasure_forgets_the_tenant_s_keys(store: MemoryIdempotencyStore) -> None:
+    store.begin(TENANT, request())
+    store.begin(TENANT, request(key="a-second-key"))
+    store.begin(OTHER_TENANT, request())
+    assert (store.held_by(TENANT), store.held_by(OTHER_TENANT)) == (2, 1)
+    assert store.forget(TENANT) == 2
+    assert (store.held_by(TENANT), store.held_by(OTHER_TENANT)) == (0, 1)
+
+
 # ---- the errors -------------------------------------------------------------------------------
 
 

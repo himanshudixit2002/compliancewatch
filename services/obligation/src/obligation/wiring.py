@@ -4,6 +4,7 @@ the api package never imports infrastructure (import-linter keeps api and infras
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
+from domain_kernel.erasure import ErasedTenants
 from obligation.application.changes import ApplyDeadlineChange, CloseObligation, WithdrawRule
 from obligation.application.export import ExportTenantData
 from obligation.application.materialise import MaterialiseObligations
@@ -36,3 +37,5 @@ class Wiring:
     assign: AssignObligation
     add_comment: AddComment
     export_tenant_data: ExportTenantData
+    erased_tenants: ErasedTenants
+    """The tenants the obligation service has erased: its routes answer them 410."""

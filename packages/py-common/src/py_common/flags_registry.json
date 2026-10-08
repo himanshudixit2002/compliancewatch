@@ -121,6 +121,26 @@
       ]
     },
     {
+      "name": "identity.tenant_erasure",
+      "type": "bool",
+      "default": false,
+      "owner": "identity-partner",
+      "description": "Lets the erasure consumers erase a tenant that asked for deletion: identity deletes its users at the identity provider and in its store, pseudonymises its consent records and billing customer and marks the tenant erased; profile, obligation, notification and the applicability engine delete the tenant's rows; the rulebook lists the regulatory data it keeps. Each answers with tenant.data.erased and identity completes the request once all have. Off, a deletion request is still recorded, the tenant can no longer sign in and the event is emitted, but every consumer only logs, so the request stays pending and turns overdue (DataRequestOverdue) after 30 days; identity-admin erasure resend sends it again once the flag is on. With CW_TENANT_ERASURE_TENANTS it applies to the listed tenants only.",
+      "removal": "Once counsel has reviewed the data map and its exceptions and a staging erasure drill has erased a synthetic tenant to zero rows in every service; then erasure is always on.",
+      "expires": "2027-06-30",
+      "targeting": "tenant",
+      "env": "CW_TENANT_ERASURE_ENABLED",
+      "tenants_env": "CW_TENANT_ERASURE_TENANTS",
+      "services": [
+        "identity",
+        "profile",
+        "obligation",
+        "notification",
+        "applicability-engine",
+        "rulebook"
+      ]
+    },
+    {
       "name": "llm_gateway.provider",
       "type": "string",
       "default": "fake",

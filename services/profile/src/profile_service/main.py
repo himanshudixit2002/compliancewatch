@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from starlette.concurrency import run_in_threadpool
 
 import ontology as ontology_package
+from domain_kernel.erasure import ErasedTenants
 from domain_kernel.errors import DomainError, InvalidAttributeValueError, UnknownAttributeError
 from domain_kernel.ontology import Ontology, OntologyWording
 from profile_service import __version__
@@ -70,6 +71,7 @@ from profile_service.wiring import Wiring
 from py_common.app import create_app, module_app
 from py_common.auth import TokenSource, service_auth_from
 from py_common.auth.fastapi import Authenticator
+from py_common.erasure import PostgresErasedTenants
 from py_common.flags import configure_flags
 from py_common.idempotency import IdempotencyStore, MemoryIdempotencyStore
 from py_common.idempotency.sqlalchemy import SqlAlchemyIdempotencyStore
@@ -119,9 +121,11 @@ def wire(
     unit_of_work: UnitOfWorkFactory
     ping: Callable[[], bool]
     idempotency: IdempotencyStore
+    erased: ErasedTenants
     if settings.profile_store == "memory":
         memory = MemoryStore()
         unit_of_work, ping, idempotency = memory, memory.ping, MemoryIdempotencyStore()
+        erased = memory.erased
     else:
         recorder = (
             None
@@ -131,6 +135,7 @@ def wire(
         postgres = PostgresUnitOfWorkFactory.from_url(settings.database_url, eval_cases=recorder)
         unit_of_work, ping = postgres, postgres.ping
         idempotency = SqlAlchemyIdempotencyStore(postgres.engine)
+        erased = PostgresErasedTenants.pooled(settings.database_url)
 
     async def store_ready() -> bool:
         return await run_in_threadpool(ping)
@@ -156,6 +161,7 @@ def wire(
         add_registration=AddRegistration(unit_of_work, prefill, entitlements=entitlements),
         onboarding=OnboardingChecklist(unit_of_work, loaded),
         export_data=ExportTenantData(unit_of_work),
+        erased_tenants=erased,
     )
 
 
@@ -201,6 +207,7 @@ def build_app(
         readiness_checks=[("store", wiring.store_ready), ("ontology", _ontology_ready(wiring))],
         problem_status=PROBLEM_STATUS,
         authenticator=authenticator,
+        erased_tenants=wiring.erased_tenants,
     )
     app.state.wiring = wiring
     return app

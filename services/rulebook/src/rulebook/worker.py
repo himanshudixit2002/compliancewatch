@@ -21,7 +21,15 @@ process that hosts several services adds to its own:
   registered takes it in. With the flag off no group reads the topic, so the candidates wait
   there (it keeps a month) and the group, once it starts, reads them from the beginning.
 
-Both write through Postgres, so the worker needs ``CW_RULEBOOK_STORE=postgres``. The outbox relay
+- a consumer in group ``rulebook.erasure`` of ``tenant.deletion.requested``
+  (``py_common.erasure``), always: while the flag ``identity.tenant_erasure`` is off for the
+  tenant it only logs ``erasure.off``; on, it checks the event with identity like every
+  service's erasure (one identity did not send is refused, audited and dead-lettered), then
+  erases nothing, since the rulebook holds regulatory data of no tenant, and answers
+  ``tenant.data.erased`` (service rulebook) with the tables it keeps, its ``tenant.erased`` audit
+  entry and its erased marker (``infrastructure.erasure``).
+
+They write through Postgres, so the worker needs ``CW_RULEBOOK_STORE=postgres``. The outbox relay
 that publishes the moves and the rejections runs on its own (``make relay SERVICE=rulebook``) or
 in the combined worker.
 """
@@ -34,6 +42,13 @@ from typing import Final
 from sqlalchemy import Connection
 
 from cw_contracts.events.rule_candidate_created_v1 import RuleCandidateCreatedV1
+from py_common.erasure import (
+    Enabled,
+    ErasureVerifier,
+    erasure_component,
+    erasure_switch,
+    verifier_from,
+)
 from py_common.events import EventMessage
 from py_common.logging import get_logger
 from py_common.outbox import sync_handler
@@ -51,10 +66,12 @@ from rulebook.application.alignment import Clock, default_clock
 from rulebook.application.intake import IngestRuleCandidate
 from rulebook.application.publication import ApplyDueTransitions
 from rulebook.domain.repository import KnowledgeUnitOfWorkFactory
+from rulebook.infrastructure.erasure import PostgresRulebookEraser
 from rulebook.infrastructure.knowledge_repository import PostgresKnowledgeUnitOfWorkFactory
 from rulebook.settings import RulebookSettings
 
 SERVICE_NAME = "rulebook-worker"
+ERASURE_SERVICE = "rulebook"
 TRANSITIONS_JOB = "rulebook-transitions"
 TRANSITIONS_AT = time(0, 5, tzinfo=IST)
 """00:05 IST: replacements take effect at the start of their day in India."""
@@ -134,9 +151,15 @@ def candidate_handler(
     return sync_handler(handle)
 
 
-def components(settings: RulebookSettings) -> WorkerComponents:
-    """The daily transitions sweep while publishing is on, and the candidate intake while its
-    flag is on; nothing while both are off."""
+def components(
+    settings: RulebookSettings,
+    *,
+    erasure: Enabled | None = None,
+    verifier: ErasureVerifier | None = None,
+) -> WorkerComponents:
+    """The daily transitions sweep while publishing is on, the candidate intake while its flag
+    is on, and the erasure consumer always; ``erasure`` replaces its flag and ``verifier``
+    identity's check."""
     if settings.rulebook_store != "postgres":
         raise ValueError("the rulebook worker needs CW_RULEBOOK_STORE=postgres")
     periodic: tuple[PeriodicComponent, ...] = ()
@@ -155,7 +178,13 @@ def components(settings: RulebookSettings) -> WorkerComponents:
                 group_id=CANDIDATES_GROUP_ID, topics=CANDIDATE_TOPICS, handler=candidate_handler()
             ),
         )
-    return WorkerComponents(consumers=consumers, periodic=periodic)
+    erasure_consumer = erasure_component(
+        ERASURE_SERVICE,
+        PostgresRulebookEraser,
+        enabled=erasure or erasure_switch(settings),
+        verifier=verifier or verifier_from(settings),
+    )
+    return WorkerComponents(consumers=(*consumers, erasure_consumer), periodic=periodic)
 
 
 def main() -> None:

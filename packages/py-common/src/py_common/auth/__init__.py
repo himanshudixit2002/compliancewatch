@@ -3,7 +3,7 @@
 - ``keys``: ES256 signing keys, ``KeySet`` and its public JWKS, ``load_signing_keys``.
 - ``tokens``: ``TokenIssuer`` (the identity service's), ``TokenVerifier`` and the key sources
   ``JwksUrlSource`` (cached) and ``StaticKeySource``.
-- ``errors``: the 401, 403 and 503 problems, mapped for every service by py-common.
+- ``errors``: the 401, 403, 410 and 503 problems, mapped for every service by py-common.
 - ``service_tokens``: ``ServiceTokenSource`` (this service's own token, cached),
   ``IssuerTokenSource`` (minted in the process by identity's issuer), ``BearerAuth`` for
   ``httpx2`` clients and ``service_auth_from(settings, token_source=None)``.
@@ -31,6 +31,7 @@ from py_common.auth.errors import (
     AuthTokenInvalidError,
     AuthTokenRequiredError,
     ServiceTokenUnavailableError,
+    TenantErasedError,
 )
 from py_common.auth.keys import (
     ALGORITHM,
@@ -74,6 +75,7 @@ __all__ = [
     "ServiceTokenUnavailableError",
     "SigningKey",
     "StaticKeySource",
+    "TenantErasedError",
     "TokenIssuer",
     "TokenSource",
     "TokenVerifier",

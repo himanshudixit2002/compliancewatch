@@ -48,6 +48,7 @@ TABLES = {
     "outbox_event",
     "processed_event",
     "idempotency_key",
+    "erased_tenant",
     "alembic_version",
 }
 

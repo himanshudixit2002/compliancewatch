@@ -55,6 +55,7 @@ def test_role_and_scope_values_are_the_token_claim_values() -> None:
         "identity:channel-consents",
         "entitlements:read",
         "data:export",
+        "erasure:verify",
     }
 
 

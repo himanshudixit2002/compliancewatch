@@ -5,8 +5,8 @@ Design reference: Project Foundation guide, sections 7 and 14.
 
 - **Owns:** Obligations, evidence metadata, the append-only change log of every obligation (`obligation_change`); builds obligations from the RuleVersion template, computes due dates, schedules reminders
 - **Owning team:** Core Product (guide section 14)
-- **Consumes:** applicability.decided; rule.published, rule.superseded, rule.withdrawn and rule.deadline_changed; user actions (start, complete, waive, assign, comment)
-- **Emits / publishes:** obligation.created, obligation.rescheduled, obligation.closed and obligation.due_soon (through the outbox)
+- **Consumes:** applicability.decided; rule.published, rule.superseded, rule.withdrawn and rule.deadline_changed; tenant.deletion.requested (group `obligation.erasure`); user actions (start, complete, waive, assign, comment)
+- **Emits / publishes:** obligation.created, obligation.rescheduled, obligation.closed, obligation.due_soon and tenant.data.erased (through the outbox)
 
 ## What is here
 
@@ -157,9 +157,9 @@ Design reference: Project Foundation guide, sections 7 and 14.
 - `migrations/versions/20260929_0002_obligation_change.py`: the `obligation_change` table,
   with the same forced row-level security (`py_common.migrations.enable_tenant_rls`) and an
   append-only trigger (`create_append_only_guard(..., allow_erasure_delete=True)`): UPDATE is
-  always refused, and DELETE only in a transaction that has set `app.erasure` to `on`. A tenant
-  erasure (not built yet; a later work package adds it) must set `app.erasure=on` and delete the
-  change rows before the obligations.
+  always refused, and DELETE only in a transaction that has set `app.erasure` to `on`. The
+  tenant erasure (see Erasure) sets `app.erasure=on` and deletes the change rows before the
+  obligations.
 - `migrations/versions/20261006_0004_rule_version_cache.py`: `rule_version_ref`, the rule
   version cache, rule-level and so without tenant_id or row-level security (exempt in
   infra/scripts/migration_lint.toml), with the verified citations as JSON; and
@@ -216,6 +216,26 @@ read, whichever event reached the service first; the detail carries the citation
 second call to the citations route is needed. A deadline change of a period that has no
 obligation yet is not remembered: an obligation made later for that period takes the version's
 own due date.
+
+## Erasure
+
+The worker's consumer of tenant.deletion.requested, group `obligation.erasure`, only logs
+`erasure.off` while the flag `identity.tenant_erasure` (`CW_TENANT_ERASURE_ENABLED`, per tenant with
+`CW_TENANT_ERASURE_TENANTS`; off by default) is off for the tenant. On, it first checks the event
+with identity (`GET /v1/identity/erasures/{tenant_id}` at `CW_IDENTITY_URL`, the service client with
+`erasure:verify`, 5 s): one identity did not send for the tenant's open deletion request, or one for
+the internal tenant, erases nothing and is refused (a `tenant.erasure_refused` audit row,
+dead-lettered at once); identity unreachable is retried, then dead-lettered. Otherwise, under the
+tenant's setting and `app.erasure` (the only way past the append-only guards of the changes and
+comments), it deletes the tenant's `obligation_change`, `obligation_comment`, `obligation_reminder`,
+`obligation`, `obligation_decision`, its row of the `obligation_tenant` directory, its idempotency
+keys and its published events, and answers tenant.data.erased (service obligation) with the row
+counts, a `tenant.erased` audit row and its erased marker (`erased_tenant`, migration 0006), in the
+transaction that marks the event processed (`infrastructure.erasure`). It keeps `rule_version_ref`,
+the rule-level cache of rule versions, which names no tenant. From then on every route answers the
+tenant 410 `tenant-erased`, and the consumer of applicability.decided marks the tenant's decisions
+processed and writes nothing (outcome `erased_tenant`), under the erasure's lock, so the sweep and
+the window, which visit the directory, never see the tenant again.
 
 ## API
 

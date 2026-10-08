@@ -9,6 +9,11 @@ service at ``--internal-url`` or ``CW_MVP_INTERNAL_URL``):
 - the outbox relay of its schema, when the schema has an ``outbox_event`` table;
 - the daily idempotency purge of its schema, when the schema has an ``idempotency_key`` table.
 
+The process's flags are configured once, from the shared settings, before any component is
+built (``py_common.erasure.configure_flags_once``), and every service's erasure consumer reads the
+flag ``identity.tenant_erasure`` through the one switch (``erasure_switch``), so no flag is read
+while another service swaps the provider.
+
 ``CW_WORKER_KAFKA_ENABLED`` turns the relays and the consumers on, ``CW_WORKER_TEMPORAL_ENABLED``
 the Temporal workers, which share one client; periodic jobs run either way, behind their
 service's own switch where it has one. So obligation's consumer of applicability.decided runs
@@ -45,6 +50,7 @@ from cw_mvp import __version__
 from cw_mvp.registry import REGISTRY, ServiceEntry, check_overrides, service_settings
 from cw_mvp.settings import WORKER_SERVICE_NAME, MvpSettings
 from cw_mvp.worker_health import HealthServer, WorkerHealth, health_app, heartbeat
+from py_common.erasure import configure_flags_once
 from py_common.idempotency.purge import purge_job
 from py_common.idempotency.schema import IDEMPOTENCY_TABLE
 from py_common.logging import configure_logging, get_logger
@@ -127,6 +133,7 @@ async def build_registry(
     and the tables each schema has."""
     overrides = service_overrides or {}
     check_overrides(overrides, registry)
+    configure_flags_once(root)
     url = internal_url or root.mvp_internal_url
     kafka, temporal = root.worker_kafka_enabled, root.worker_temporal_enabled
     hosted = ComponentRegistry()

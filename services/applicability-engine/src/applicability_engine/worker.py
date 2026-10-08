@@ -6,7 +6,8 @@ process that hosts several services adds to its own: two consumers and a Tempora
 
 The consumer in group ``applicability-engine.profiles`` of profile.updated: each event becomes
 ``ApplyProfileUpdate`` in two steps, so no HTTP call is made inside a database transaction
-(``py_common.outbox.sync.read_then_write``):
+(``py_common.outbox.sync.read_then_write``), and an event of a tenant the engine has erased
+writes nothing (``py_common.erasure.skip_erased_write``, outcome ``erased_tenant``):
 
 - the reads, with no transaction open: the changed node's snapshot and the registrations under
   it at the profile service (``CW_PROFILE_URL``) and, with ``CW_APPLICABILITY_RECOMPUTE_ENABLED``
@@ -32,10 +33,19 @@ off a publication records a ``disabled`` run and starts nothing. A withdrawal ca
 its version that has not finished. A message it cannot handle goes to
 ``<topic>.applicability-engine.rules.dlq``.
 
+The consumer in group ``applicability-engine.erasure`` of ``tenant.deletion.requested``
+(``py_common.erasure``): while the flag ``identity.tenant_erasure`` is off for the tenant it only
+logs ``erasure.off``; on, it checks the event with identity (one identity did not send is
+refused, audited and dead-lettered), then deletes the tenant's review items, decisions,
+directory entries, idempotency keys and published events
+(``infrastructure.erasure.PostgresEngineEraser``), keeps the rule-level fan-out runs, and writes
+``tenant.data.erased`` (service applicability-engine), its ``tenant.erased`` audit entry and the
+erased marker with the ``processed_event`` row.
+
 The Temporal worker on task queue ``applicability`` runs ``FanOutWorkflow`` and its activities
 (``application.fanout_activities``) on the same stores and readers.
 
-Both consumers and the activities write through Postgres, so the worker needs
+The consumers and the activities write through Postgres, so the worker needs
 ``CW_APPLICABILITY_ENGINE_STORE=postgres``. The outbox relay that publishes the decisions runs on
 its own (``make relay SERVICE=applicability-engine``), or in the combined worker.
 """
@@ -63,6 +73,7 @@ from applicability_engine.application.rule_events import (
 from applicability_engine.domain.fanout import FAN_OUT_TASK_QUEUE, FanOutRun
 from applicability_engine.domain.ports import FanOutWorkflows
 from applicability_engine.domain.repository import FanOutUnitOfWorkFactory, UnitOfWorkFactory
+from applicability_engine.infrastructure.erasure import PostgresEngineEraser
 from applicability_engine.infrastructure.repository import (
     PostgresBusinessDirectory,
     PostgresFanOutUnitOfWorkFactory,
@@ -79,6 +90,16 @@ from cw_contracts.events.rule_withdrawn_v1 import RuleWithdrawnV1
 from domain_kernel.ids import BusinessId, CorrelationId, EventId, RuleVersionId, TenantId
 from domain_kernel.ontology import Ontology
 from ontology import load as load_ontology
+from py_common.erasure import (
+    Enabled,
+    ErasedOn,
+    ErasureVerifier,
+    erased_on_connection,
+    erasure_component,
+    erasure_switch,
+    skip_erased_write,
+    verifier_from,
+)
 from py_common.events import EventMessage
 from py_common.logging import get_logger
 from py_common.outbox import read_first_store, read_then_write
@@ -99,6 +120,7 @@ PUBLISHED_TOPIC: Final = "rule.published"
 WITHDRAWN_TOPIC: Final = "rule.withdrawn"
 RULE_TOPICS: Final = (PUBLISHED_TOPIC, WITHDRAWN_TOPIC)
 SERVICE_NAME: Final = "applicability-engine-worker"
+ERASURE_SERVICE: Final = "applicability-engine"
 
 log = get_logger(__name__)
 
@@ -132,9 +154,11 @@ def profile_handler(
     recompute: ApplyProfileUpdate,
     *,
     units_on: UnitsOnConnection = PostgresUnitOfWorkFactory.on_connection,
+    erased_on: ErasedOn = erased_on_connection,
 ) -> Handler:
     """The handler of profile.updated: read with no transaction open, then write on the
-    consumer's connection. ``units_on`` makes the units there; tests pass the memory store's."""
+    consumer's connection, unless the tenant is erased here. ``units_on`` and ``erased_on`` make
+    the units and the erased markers there; tests pass the memory store's."""
 
     def read(message: EventMessage) -> RecomputePlan | None:
         if message.topic != PROFILE_TOPIC:
@@ -150,7 +174,7 @@ def profile_handler(
         done = recompute.apply(plan, units_on(connection))
         _log_recomputed(message, done)
 
-    return read_then_write(read, write)
+    return read_then_write(read, skip_erased_write(ERASURE_SERVICE, write, erased_on=erased_on))
 
 
 def _log_recomputed(message: EventMessage, done: Recomputed) -> None:
@@ -268,10 +292,13 @@ def components(
     readers: Readers | None = None,
     workflows: FanOutWorkflows | None = None,
     ontology: Ontology | None = None,
+    erasure: Enabled | None = None,
+    verifier: ErasureVerifier | None = None,
 ) -> WorkerComponents:
-    """The two consumers and the fan-out's Temporal worker; ``readers`` replaces the profile and
-    rulebook clients and ``workflows`` the Temporal client that starts fan-outs. Both consumers
-    share the readers, so a rule event drops the listing the recompute caches."""
+    """The three consumers and the fan-out's Temporal worker; ``readers`` replaces the profile
+    and rulebook clients, ``workflows`` the Temporal client that starts fan-outs, ``erasure``
+    the flag of the erasure consumer and ``verifier`` identity's check. The profile and rule
+    consumers share the readers, so a rule event drops the listing the recompute caches."""
     if settings.applicability_engine_store != "postgres":
         raise ValueError(
             "the applicability-engine worker needs CW_APPLICABILITY_ENGINE_STORE=postgres"
@@ -301,6 +328,12 @@ def components(
                 topics=RULE_TOPICS,
                 handler=rules_handler(rule_events_of(settings, readers, workflows)),
                 store_factory=read_first_store,
+            ),
+            erasure_component(
+                ERASURE_SERVICE,
+                PostgresEngineEraser,
+                enabled=erasure or erasure_switch(settings),
+                verifier=verifier or verifier_from(settings),
             ),
         ),
         temporal=(

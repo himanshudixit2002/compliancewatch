@@ -7,6 +7,7 @@ import {
   parseFakeSignInForm,
   roleOptionsFor,
   signInFormOptions,
+  signInRefusalKey,
   tenantKindMessageKey,
 } from "./sign-in";
 
@@ -110,5 +111,13 @@ describe("parseFakeSignInForm", () => {
       displayName: ["Expected a text value."],
       roles: ["Expected a text value."],
     });
+  });
+});
+
+describe("signInRefusalKey", () => {
+  it("gives a tenant being deleted its plain reason and nothing for other problems", () => {
+    expect(signInRefusalKey("identity-tenant-deleting")).toBe("signIn.refusal.tenantDeleting");
+    expect(signInRefusalKey("identity-mfa-required")).toBeUndefined();
+    expect(signInRefusalKey("toString")).toBeUndefined();
   });
 });

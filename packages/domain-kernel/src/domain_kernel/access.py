@@ -61,6 +61,8 @@ class Scope(StrEnum):
     """Read what a tenant's plan entitles it to."""
     DATA_EXPORT = "data:export"
     """Read a tenant's data for an export or erasure request."""
+    ERASURE_VERIFY = "erasure:verify"
+    """Check a tenant's deletion event against identity before erasing it."""
 
 
 class PrincipalKind(StrEnum):

@@ -31,6 +31,7 @@ from profile_service.domain.repository import (
     VersionCursor,
 )
 from py_common.audit import MemoryAuditSink
+from py_common.erasure import MemoryErasedTenants
 
 
 class MemoryProfileRepository:
@@ -256,10 +257,16 @@ class MemoryStore:
         self.events: list[DomainEvent] = []
         self.eval_cases: list[Mapping[str, object]] = []
         self.audit: list[AuditEntry] = []
+        self.erased = MemoryErasedTenants()
         self._lock = threading.Lock()
 
     def __call__(self, tenant_id: TenantId) -> AbstractContextManager[UnitOfWork]:
         return self._unit(tenant_id)
+
+    @property
+    def lock(self) -> threading.Lock:
+        """What a unit of work holds from open to commit; an eraser holds it too."""
+        return self._lock
 
     @contextmanager
     def _unit(self, tenant_id: TenantId) -> Iterator[UnitOfWork]:

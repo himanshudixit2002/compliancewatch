@@ -7,6 +7,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from domain_kernel.access import MAX_CLIENT_ID_CHARS, Principal, Role, Scope
+from domain_kernel.erasure import ErasureCheck
 from domain_kernel.events import utc_now
 from identity.application.channel_consents import ChannelConsentSummary
 from identity.application.consents import ConsentSummary
@@ -525,7 +526,10 @@ class UsersOut(BaseModel):
 
 class DataRequestIn(Strict):
     kind: Literal["export", "deletion"] = Field(
-        description="export; deletion is refused (422) until the erasure cascade exists"
+        description=(
+            "export, a copy of the tenant's data; deletion, its erasure in every service, after "
+            "which nobody signs in to the tenant"
+        )
     )
     reason: str = Field(default="", max_length=MAX_REASON_CHARS)
     tenant_id: UUID | None = Field(
@@ -545,12 +549,40 @@ class DataRequestOut(BaseModel):
     requested_at: datetime
     deadline_at: datetime = Field(description="30 days after it was made")
     status: DataRequestStatus
-    overdue: bool = Field(description="Past its deadline and not completed")
-    services_done: list[str]
+    overdue: bool = Field(
+        description=(
+            "Past its deadline and still owed: an export never answered, or a deletion not "
+            "completed"
+        )
+    )
+    services_done: list[str] = Field(
+        description=(
+            "The services whose data an export of it held, or that erased the tenant in a "
+            "deletion's first pass"
+        )
+    )
     services_pending: list[str] = Field(
-        description="The services whose data an export of it has not held yet"
+        description=(
+            "The services whose data an export of it has not held yet, or that have not answered "
+            "a deletion's current pass"
+        )
     )
     completed_at: datetime | None
+    erasure_pass: int | None = Field(
+        default=None,
+        description=(
+            "A deletion's pass the services answer: 1, then 2 once every service has answered "
+            "the first and identity has scheduled the second; null for an export"
+        ),
+    )
+    second_pass_at: datetime | None = Field(
+        default=None,
+        description="When a deletion's second pass goes out to the services; null until then",
+    )
+    second_pass_done: list[str] = Field(
+        default_factory=list,
+        description="The services that have answered a deletion's second pass",
+    )
 
     @classmethod
     def from_request(
@@ -568,8 +600,38 @@ class DataRequestOut(BaseModel):
             services_done=list(request.services_done),
             services_pending=list(request.pending(services)),
             completed_at=request.completed_at,
+            erasure_pass=request.erasure_pass,
+            second_pass_at=request.second_pass_at,
+            second_pass_done=list(request.second_pass_done),
         )
 
 
 class DataRequestsOut(BaseModel):
     items: list[DataRequestOut]
+
+
+class ErasureCheckOut(BaseModel):
+    """What identity holds of a tenant's deletion, which every erasure is checked against."""
+
+    tenant_id: UUID
+    status: TenantStatus = Field(description="The tenant's status at identity")
+    internal: bool = Field(description="Whether it is the regulatory team's internal tenant")
+    deletion_event_id: UUID | None = Field(
+        description=(
+            "The tenant.deletion.requested identity last sent for the tenant's open deletion "
+            "request; null when it has none"
+        )
+    )
+
+    @classmethod
+    def from_check(cls, check: ErasureCheck) -> "ErasureCheckOut":
+        if check.tenant_status is None:
+            raise ValueError("a check of a tenant identity does not hold has no answer")
+        return cls(
+            tenant_id=check.tenant_id.value,
+            status=TenantStatus(check.tenant_status),
+            internal=check.internal,
+            deletion_event_id=None
+            if check.deletion_event_id is None
+            else check.deletion_event_id.value,
+        )

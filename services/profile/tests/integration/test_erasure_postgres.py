@@ -1,0 +1,211 @@
+"""Profile's erasure on Postgres, as its own role cw_profile under forced row-level security:
+the tenant's rows go in the order of the foreign keys, another tenant's stay, and the answer, its
+audit entry and the erased marker commit with the erasure (the role inserts audit rows; it reads
+none). The catalog then shows that every table of the schema with a tenant column is erased or
+retained with a reason, and holds no row of the tenant unless retained. Needs Docker."""
+
+from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from uuid import uuid4
+
+import pytest
+from alembic import command
+from alembic.config import Config
+from sqlalchemy import Engine, create_engine, text
+from testcontainers.community.postgres import PostgresContainer
+
+import ontology as ontology_package
+from domain_kernel.erasure import DeletionRequest
+from domain_kernel.ids import CorrelationId, EventId, TenantId
+from profile_service.application.attributes import SetAttributes
+from profile_service.application.registration import RegisterNodes
+from profile_service.domain.events import ChangeSource
+from profile_service.domain.model import AttributeChange, ValueState
+from profile_service.infrastructure.erasure import TABLES, PostgresProfileEraser
+from profile_service.infrastructure.repository import PostgresUnitOfWorkFactory
+from profile_service.testing import GSTIN_KARNATAKA
+from py_common.audit.testing import install_audit_table
+from py_common.db_roles import apply_roles, as_role
+from py_common.erasure import (
+    ConnectionErasedTenants,
+    count_rows,
+    erase_and_record,
+    erasure_component,
+)
+from py_common.erasure_testing import FakeIdentity, assert_nothing_left
+from py_common.events import EventMessage, encode
+from py_common.outbox import (
+    ConsumerConfig,
+    IdempotentConsumer,
+    InboundRecord,
+    Outcome,
+    read_first_store,
+)
+from py_common.outbox.testing import FakeProducer
+
+SERVICE_DIR = Path(__file__).resolve().parents[2]
+IMAGE = "pgvector/pgvector:0.8.6-pg16"
+SCHEMA = "profile"
+NOW = datetime(2000, 4, 1, 9, 0, tzinfo=UTC)
+
+
+@pytest.fixture(scope="module")
+def database_url() -> Iterator[str]:
+    with PostgresContainer(IMAGE, driver="psycopg") as postgres:
+        base_url = postgres.get_connection_url()
+        admin = create_engine(base_url, isolation_level="AUTOCOMMIT")
+        with admin.connect() as connection:
+            connection.execute(text(f"CREATE SCHEMA {SCHEMA}"))
+        admin.dispose()
+        database_url = f"{base_url}?options=-csearch_path%3D{SCHEMA}%2Cpublic"
+        with pytest.MonkeyPatch.context() as env:
+            env.setenv("CW_DATABASE_URL", database_url)
+            env.setenv("CW_DB_SCHEMA", SCHEMA)
+            command.upgrade(Config(str(SERVICE_DIR / "alembic.ini")), "head")
+        owner = create_engine(database_url)
+        with owner.begin() as connection:
+            install_audit_table(connection)
+        owner.dispose()
+        apply_roles(database_url)
+        yield database_url
+
+
+@pytest.fixture(scope="module")
+def engine(database_url: str) -> Iterator[Engine]:
+    engine = create_engine(as_role(database_url, SCHEMA))
+    yield engine
+    engine.dispose()
+
+
+def stocked(factory: PostgresUnitOfWorkFactory, tenant: TenantId, name: str) -> None:
+    register = RegisterNodes(factory, clock=lambda: NOW)
+    registered = register.registration(
+        tenant, GSTIN_KARNATAKA, f"{name} Bengaluru", entity_name=name
+    )
+    entity = registered.node.parent_id
+    assert entity is not None
+    SetAttributes(factory, ontology_package.load(), clock=lambda: NOW).run(
+        tenant,
+        entity,
+        [
+            AttributeChange("state_codes", ["29"]),
+            AttributeChange("employee_count", state=ValueState.NOT_APPLICABLE),
+        ],
+        source=ChangeSource.USER_INPUT,
+    )
+
+
+def counts(engine: Engine, tenant: TenantId) -> dict[str, int]:
+    with engine.begin() as connection:
+        connection.execute(text("SELECT set_config('app.tenant_id', :t, true)"), {"t": str(tenant)})
+        return {table: count_rows(connection, table, tenant) for table in TABLES}
+
+
+def test_the_tenant_s_profile_goes_and_another_s_stays(engine: Engine, database_url: str) -> None:
+    factory = PostgresUnitOfWorkFactory(engine)
+    tenant, other = TenantId.new(), TenantId.new()
+    stocked(factory, tenant, "Example Traders")
+    stocked(factory, other, "Example Other")
+    before = counts(engine, tenant)
+    assert before["profile_node"] == 2
+    assert before["profile_attribute"] > 0
+    assert before["review_task"] == 1
+    request = DeletionRequest(
+        event_id=EventId.new(),
+        tenant_id=tenant,
+        correlation_id=CorrelationId.new(),
+        requested_at=NOW,
+        deadline_at=NOW + timedelta(days=30),
+    )
+    with engine.begin() as connection:
+        answer = erase_and_record(
+            "profile", PostgresProfileEraser(connection), request, clock=lambda: NOW
+        )
+    assert {table: answer.tables[table] for table in TABLES} == before
+    assert counts(engine, tenant) == dict.fromkeys(TABLES, 0)
+    assert counts(engine, other) == before, "another tenant's profile stays"
+    with engine.begin() as connection:
+        topics = connection.execute(
+            text("SELECT topic FROM outbox_event WHERE tenant_id = :t"), {"t": tenant.value}
+        ).scalars()
+        assert "tenant.data.erased" in list(topics)
+
+    owner = create_engine(database_url)
+    with owner.connect() as connection:
+        retained = assert_nothing_left(connection, SCHEMA, tenant, answer)
+    owner.dispose()
+    assert retained["erased_tenant.tenant_id"] == 1, "the marker"
+    assert retained["outbox_event.tenant_id"] >= 1, "the answer waits for the relay"
+    with engine.begin() as connection:
+        assert ConnectionErasedTenants(connection).is_erased(tenant)
+        assert not ConnectionErasedTenants(connection).is_erased(other)
+    with engine.begin() as connection:
+        again = erase_and_record(
+            "profile", PostgresProfileEraser(connection), request, clock=lambda: NOW
+        )
+    assert sum(again.tables.values()) == 0, "run again it finds nothing"
+
+
+async def test_a_refused_event_is_audited_and_erases_nothing(
+    engine: Engine, database_url: str
+) -> None:
+    factory = PostgresUnitOfWorkFactory(engine)
+    tenant = TenantId.new()
+    stocked(factory, tenant, "Example Kept")
+    before = counts(engine, tenant)
+    component = erasure_component(
+        "profile",
+        PostgresProfileEraser,
+        enabled=lambda _: True,
+        verifier=FakeIdentity(EventId.new()),
+        clock=lambda: NOW,
+    )
+    consumer = IdempotentConsumer(
+        group_id=component.group_id,
+        store=read_first_store(engine, component.group_id),
+        handler=component.handler,
+        producer=FakeProducer(),
+        config=ConsumerConfig(max_handler_attempts=2, retry_backoff_seconds=0),
+    )
+    message = EventMessage(
+        event_id=uuid4(),
+        topic="tenant.deletion.requested",
+        schema_version="1.0.1",
+        occurred_at=NOW,
+        tenant_id=tenant.value,
+        correlation_id=uuid4(),
+        causation_id=None,
+        payload={
+            "requested_by": None,
+            "requested_at": NOW.isoformat(),
+            "deadline_at": (NOW + timedelta(days=30)).isoformat(),
+            "retain_audit": True,
+        },
+    )
+    record = InboundRecord(
+        topic=message.topic, partition=0, offset=0, key=b"k", value=encode(message)
+    )
+    assert await consumer.process(record) is Outcome.REFUSED
+    assert counts(engine, tenant) == before, "nothing erased"
+    owner = create_engine(database_url)
+    with owner.connect() as connection:
+        refused = connection.execute(
+            text(
+                "SELECT actor_label, after->>'refused' FROM audit.event "
+                "WHERE tenant_id = :t AND action = 'tenant.erasure_refused'"
+            ),
+            {"t": tenant.value},
+        ).all()
+        processed = connection.execute(
+            text("SELECT count(*) FROM processed_event WHERE consumer_group = :g"),
+            {"g": component.group_id},
+        ).scalar_one()
+    owner.dispose()
+    assert [tuple(row) for row in refused] == [
+        (
+            "system:profile",
+            "the event is not the one identity sent for the tenant's open deletion request",
+        )
+    ]
+    assert processed == 0, "a refused event is never marked processed"

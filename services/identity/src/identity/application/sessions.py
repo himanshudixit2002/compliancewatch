@@ -6,6 +6,11 @@ an access token carrying the user's session version. ``IssueServiceToken`` check
 client's secret and mints a token with the client's scopes. ``check_session`` is what the identity
 service's own routes run on a user's token: the session version must still be the user's, so a
 change of roles or a disabled user takes effect here at once.
+
+A tenant that asked for its deletion signs nobody in (``TenantDeletingError``, 403
+identity-tenant-deleting) and its tokens open no identity route, but for reading its data
+requests (``deleting_ok``), so the owner can follow the erasure until the token expires. An
+erased tenant has no users left to sign in.
 """
 
 import hmac
@@ -17,6 +22,7 @@ from identity.domain.errors import (
     MfaRequiredError,
     ServiceClientInvalidError,
     SessionRevokedError,
+    TenantDeletingError,
     TenantInactiveError,
     UserDisabledError,
     UserNotProvisionedError,
@@ -54,9 +60,12 @@ def user_principal(user: User, *, mfa: bool) -> Principal:
     )
 
 
-def check_session(uow: UnitOfWork, principal: Principal) -> tuple[Tenant, User]:
+def check_session(
+    uow: UnitOfWork, principal: Principal, *, deleting_ok: bool = False
+) -> tuple[Tenant, User]:
     """The tenant and user a user's access token names, in a unit of work of that tenant.
-    ``SessionRevokedError`` when the user is gone, disabled, or has another session version."""
+    ``SessionRevokedError`` when the user is gone, disabled, or has another session version;
+    ``TenantDeletingError`` when the tenant asked for its deletion, unless ``deleting_ok``."""
     user_id = principal.user_id
     if principal.kind is not PrincipalKind.USER or user_id is None:
         raise SessionRevokedError()
@@ -69,7 +78,9 @@ def check_session(uow: UnitOfWork, principal: Principal) -> tuple[Tenant, User]:
         or user.session_version != principal.session_version
     ):
         raise SessionRevokedError()
-    if not tenant.is_active:
+    if tenant.is_deleting and not deleting_ok:
+        raise TenantDeletingError()
+    if not tenant.is_active and not tenant.is_deleting:
         raise TenantInactiveError()
     return tenant, user
 
@@ -99,6 +110,8 @@ class ExchangeSession:
             user = uow.users.get(entry.user_id)
         if tenant is None or user is None:
             raise UserNotProvisionedError()
+        if tenant.is_deleting:
+            raise TenantDeletingError()
         if not tenant.is_active:
             raise TenantInactiveError()
         if not user.is_active:

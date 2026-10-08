@@ -395,7 +395,7 @@ def test_upgrade_refuses_to_add_foreign_keys_over_existing_rows(
         command.upgrade(alembic_config, "head")
     _execute(engine, "DELETE FROM clause_entity")
     command.upgrade(alembic_config, "head")
-    assert _version(engine) == "0011"
+    assert _version(engine) == "0012"
 
 
 def _version(engine: Engine) -> str:
@@ -418,4 +418,4 @@ def test_migration_0008_admits_statutes_and_keeps_them_on_the_way_down(
     _insert(engine, statute, _clause(statute))
     with pytest.raises(IntegrityError, match="ck_document_doc_type"):
         command.downgrade(alembic_config, "0007")
-    assert _version(engine) == "0011", "the refused downgrade changed nothing"
+    assert _version(engine) == "0012", "the refused downgrade changed nothing"

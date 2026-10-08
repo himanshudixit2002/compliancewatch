@@ -36,6 +36,7 @@ from notification.domain.repository import (
     WorkEntry,
 )
 from py_common.audit import MemoryAuditSink
+from py_common.erasure import MemoryErasedTenants
 from py_common.logging import get_logger
 
 log = get_logger(__name__)
@@ -492,6 +493,7 @@ class MemoryStore:
         self.sink = sink or LogEventSink()
         self.work_index = MemoryWorkIndex(self)
         self.audit: list[AuditEntry] = []
+        self.erased = MemoryErasedTenants()
 
     @property
     def events(self) -> list[DomainEvent]:

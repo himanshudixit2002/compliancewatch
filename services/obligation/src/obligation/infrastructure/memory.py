@@ -26,6 +26,7 @@ from obligation.domain.reminders import Reminder
 from obligation.domain.repository import ExportAfter, ListingAfter, UnitOfWork
 from obligation.domain.rule_versions import AppliedDecision, RuleVersionRef
 from py_common.audit import MemoryAuditSink
+from py_common.erasure import MemoryErasedTenants
 
 DecisionKey = tuple[BusinessId, RuleVersionId]
 
@@ -325,10 +326,16 @@ class MemoryStore:
         self.rule_versions: dict[RuleVersionId, RuleVersionRef] = {}
         self.decisions: dict[DecisionKey, AppliedDecision] = {}
         self.audit: list[AuditEntry] = []
+        self.erased = MemoryErasedTenants()
         self._lock = threading.Lock()
 
     def ping(self) -> bool:
         return True
+
+    @property
+    def lock(self) -> threading.Lock:
+        """What a unit of work holds from open to commit; an eraser holds it too."""
+        return self._lock
 
     def __call__(self, tenant_id: TenantId) -> AbstractContextManager[UnitOfWork]:
         return self._unit(tenant_id)

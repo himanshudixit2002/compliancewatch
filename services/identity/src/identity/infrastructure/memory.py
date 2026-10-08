@@ -43,6 +43,7 @@ from identity.domain.repository import UnitOfWork
 from identity.domain.service_clients import ServiceClient
 from identity.domain.tenancy import SubjectEntry, Tenant, TenantKind, User
 from py_common.audit import MemoryAuditSink
+from py_common.erasure import MemoryErasedTenants
 
 
 class RowSecurityViolationError(RuntimeError):
@@ -111,6 +112,13 @@ class MemoryDataRequestRepository:
         mine = [r for r in self._requests.values() if r.tenant_id == self._tenant]
         return sorted(mine, key=lambda r: (r.requested_at, r.id.value), reverse=True)
 
+    def open_deletion(self) -> DataRequest | None:
+        """The newest deletion request not completed; already locked, as ``lock`` is."""
+        for request in self.list():
+            if request.is_deletion and not request.is_completed:
+                return request
+        return None
+
 
 def _page[T](
     rows: Iterable[T],
@@ -146,6 +154,10 @@ class MemoryTenantRepository:
     def lock(self, tenant_id: TenantId) -> Tenant | None:
         """``get``: memory units of work run one at a time, so the row is already locked."""
         return self.get(tenant_id)
+
+    def save(self, tenant: Tenant) -> None:
+        if tenant.id == self._tenant and tenant.id in self._tenants:
+            self._tenants[tenant.id] = tenant
 
 
 class MemoryUserRepository:
@@ -304,9 +316,12 @@ class MemoryBillingRepository:
 class MemorySink:
     def __init__(self) -> None:
         self.pending: list[DomainEvent] = []
+        self.not_before: dict[UUID, datetime] = {}
 
-    def publish(self, event: DomainEvent) -> None:
+    def publish(self, event: DomainEvent, *, not_before: datetime | None = None) -> None:
         self.pending.append(event)
+        if not_before is not None:
+            self.not_before[event.event_id.value] = not_before
 
 
 class MemoryUnitOfWork:
@@ -342,6 +357,7 @@ class MemoryUnitOfWork:
         store.data_requests.clear()
         store.data_requests.update(self._data_requests)
         store.events.extend(self.events.pending)
+        store.not_before.update(self.events.not_before)
         self.audit.commit()
 
 
@@ -355,11 +371,19 @@ class MemoryStore:
         self.billing = MemoryBillingLedger()
         self.data_requests: dict[DataRequestId, DataRequest] = {}
         self.events: list[DomainEvent] = []
+        self.not_before: dict[UUID, datetime] = {}
+        """When the relay would send an event held back (a deletion's second pass), by id."""
         self.audit: list[AuditEntry] = []
+        self.erased = MemoryErasedTenants()
         self._lock = threading.Lock()
 
     def __call__(self, tenant_id: TenantId | None) -> AbstractContextManager[UnitOfWork]:
         return self._open(tenant_id)
+
+    @property
+    def lock(self) -> threading.Lock:
+        """What a unit of work holds from open to commit; an eraser holds it too."""
+        return self._lock
 
     @contextmanager
     def _open(self, tenant_id: TenantId | None) -> Iterator[UnitOfWork]:
