@@ -53,6 +53,12 @@ export interface ClientContext {
   session: ClientPrincipal | null;
   /** Admin lookups only: the tenant to act for instead of the session's. */
   tenantId?: string;
+  /**
+   * Send the session's bearer with another tenant's header too: for routes that read the
+   * tenant from the header without comparing it with the token (the engine's review routes,
+   * whose regulatory caller names the tenant reviewed and must be named by a token to settle).
+   */
+  bearerWithOverride?: true;
   fetchImpl?: FetchImpl;
 }
 
@@ -86,7 +92,13 @@ function tenantHeaders(ctx: ClientContext): Record<string, string> {
 function authHeaders(ctx: ClientContext): Record<string, string> {
   const token = ctx.session?.cwToken;
   if (token === undefined || token === "") return {};
-  if (ctx.tenantId !== undefined && ctx.tenantId !== ctx.session?.tenantId) return {};
+  if (
+    ctx.tenantId !== undefined &&
+    ctx.tenantId !== ctx.session?.tenantId &&
+    ctx.bearerWithOverride !== true
+  ) {
+    return {};
+  }
   return { [AUTHORIZATION_HEADER]: `Bearer ${token}` };
 }
 
@@ -151,13 +163,14 @@ export function applicabilityEngineClient(ctx: ClientContext): ApplicabilityEngi
 /**
  * The engine's admin routes that belong to no tenant: the fan-outs, the global hold and dry
  * runs. A fan-out runs over every tenant, so no tenant header goes out, whoever is signed in; the
- * admin tools check the role before they call (the engine checks it again once tokens are read).
+ * session's bearer does, since outside header mode the engine settles a control or a dry run
+ * only for an admin a token names. The admin tools check the role before they call.
  */
 export function applicabilityEngineAdminClient(
-  ctx: Pick<ClientContext, "fetchImpl"> = {},
+  ctx: Partial<Pick<ClientContext, "session" | "fetchImpl">> = {},
 ): ApplicabilityEngineClient {
   return createServiceClient<applicabilityEngine.paths>(
-    optionsFor("applicability-engine", ctx, {}),
+    optionsFor("applicability-engine", ctx, authHeaders({ session: ctx.session ?? null })),
   );
 }
 

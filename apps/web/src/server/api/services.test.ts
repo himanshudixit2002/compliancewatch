@@ -119,6 +119,13 @@ describe("tenant-scoped clients", () => {
     // A session without a token (none issued) sends none.
     await profileClient(ctx(owner, fake)).GET("/v1/profile/ping");
     expect(fake.requests[9]?.headers[AUTHORIZATION_HEADER]).toBeUndefined();
+    // A route that reads the tenant from the header and the caller from the token gets both.
+    await applicabilityEngineClient({
+      ...ctx({ ...analyst, cwToken: "cw.user-2.0" }, fake, OTHER_TENANT),
+      bearerWithOverride: true,
+    }).GET("/v1/applicability-engine/ping");
+    expect(fake.requests[10]?.headers[AUTHORIZATION_HEADER]).toBe("Bearer cw.user-2.0");
+    expect(fake.requests[10]?.headers[TENANT_HEADER]).toBe(OTHER_TENANT);
   });
 
   it("send no tenant header without a session", async () => {
@@ -137,6 +144,16 @@ describe("tenant-scoped clients", () => {
 });
 
 describe("applicabilityEngineAdminClient", () => {
+  it("sends the session's bearer and no tenant header on the engine's admin routes", async () => {
+    const fake = fakeFetch([{ path: "/v1/applicability-engine/fan-out-hold", body: {} }]);
+    await applicabilityEngineAdminClient({
+      session: { ...analyst, cwToken: "cw.user-2.0" },
+      fetchImpl: fake.fetchImpl,
+    }).GET("/v1/applicability-engine/fan-out-hold");
+    expect(fake.requests[0]?.headers[AUTHORIZATION_HEADER]).toBe("Bearer cw.user-2.0");
+    expect(fake.requests[0]?.headers[TENANT_HEADER]).toBeUndefined();
+  });
+
   it("sends no tenant header on the engine's admin routes, whoever is signed in", async () => {
     const fake = fakeFetch([{ path: "/v1/applicability-engine/fan-out-hold", body: {} }]);
     await applicabilityEngineAdminClient({ fetchImpl: fake.fetchImpl }).GET(

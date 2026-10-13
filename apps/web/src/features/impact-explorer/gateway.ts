@@ -13,14 +13,18 @@ import type { DryRunPort } from "./ports";
 
 /**
  * The dry run over the engine's admin client: no tenant header (the scope names a tenant when it
- * narrows to one), never cached (a dry run reads the profiles as they are now). The admin role is
- * checked by the action before the call; the engine checks it again once it reads tokens.
+ * narrows to one), the session's bearer (a dry run needs an admin a token names outside header
+ * mode), never cached (a dry run reads the profiles as they are now). The admin role is checked
+ * by the action before the call; the engine checks it again.
  */
 export class ImpactExplorerGateway implements DryRunPort {
   private readonly engine: ApplicabilityEngineClient;
 
-  constructor(ctx: Pick<ClientContext, "fetchImpl">) {
-    this.engine = applicabilityEngineAdminClient({ fetchImpl: ctx.fetchImpl });
+  constructor(ctx: Partial<Pick<ClientContext, "session" | "fetchImpl">>) {
+    this.engine = applicabilityEngineAdminClient({
+      session: ctx.session ?? null,
+      fetchImpl: ctx.fetchImpl,
+    });
   }
 
   async dryRun(request: DryRunRequest): Promise<Result<DryRunReport>> {
@@ -32,7 +36,7 @@ export class ImpactExplorerGateway implements DryRunPort {
 }
 
 export function impactExplorerGateway(
-  ctx: Pick<ClientContext, "fetchImpl"> = {},
+  ctx: Partial<Pick<ClientContext, "session" | "fetchImpl">> = {},
 ): ImpactExplorerGateway {
   return new ImpactExplorerGateway(ctx);
 }
