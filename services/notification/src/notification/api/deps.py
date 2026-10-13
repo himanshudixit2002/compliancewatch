@@ -43,6 +43,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from domain_kernel.access import (
     TENANT_MEMBER_ROLES,
     Principal,
+    PrincipalKind,
     Role,
     Scope,
 )
@@ -56,7 +57,7 @@ from notification.domain.errors import (
 )
 from notification.wiring import Wiring
 from py_common.audit import audit_actor, current_correlation_id
-from py_common.auth.errors import AuthTokenRequiredError
+from py_common.auth.errors import AuthForbiddenError, AuthTokenRequiredError
 from py_common.auth.fastapi import (
     TENANT_HEADER_DESCRIPTION,
     CurrentPrincipal,
@@ -99,7 +100,12 @@ class OptInCaller:
         return resolve_tenant(self.principal, self.offered_tenant)
 
     def require_service(self, source: str) -> None:
-        """Outside header mode, a change only a service records needs its token."""
+        """Outside header mode, a change only a service records needs its token; a person's
+        token never records one, whatever the mode."""
+        if self.principal.kind is PrincipalKind.USER:
+            raise AuthForbiddenError(
+                f"a preference with source {source} is recorded by a service, not by a person"
+            )
         if not self.principal.is_authenticated and not self.header_mode:
             raise AuthTokenRequiredError(
                 f"a preference with source {source} is recorded by a service: send its token"
@@ -171,8 +177,12 @@ ExportTenant = Annotated[TenantId, Depends(data_export_scope(SERVICE_NAME, Tenan
 PreferenceCaller = Annotated[OptInCaller, Depends(preference_caller)]
 Wired = Annotated[Wiring, Depends(wiring)]
 
-PreferenceAccess = Depends(require_roles(scopes={Scope.NOTIFICATION_PREFERENCES}))
-"""A service token needs notification:preferences; without a token the routes work as before."""
+PreferenceAccess = Depends(
+    require_roles(TENANT_MEMBER_ROLES, scopes={Scope.NOTIFICATION_PREFERENCES})
+)
+"""A tenant member's token (the web app's settings and onboarding pages set and read a person's
+preference for them) or a service token with notification:preferences; without a token the
+routes work as before. A person's token records web sources only (``OptInCaller``)."""
 
 BotAccess = Depends(
     shared_token_or_roles(

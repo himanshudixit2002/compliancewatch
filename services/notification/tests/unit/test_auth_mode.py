@@ -128,6 +128,12 @@ def test_dual_mode_needs_the_preferences_scope_from_a_bearer(dual_mode: TestClie
     for caller in (OWNER, SENDER):
         refused = dual_mode.put(PREFERENCE, json=OPT_IN, headers=caller)
         assert (refused.status_code, problem(refused)) == (403, "auth-forbidden")
+    # A tenant member's token sets and reads a preference given on the web, for their tenant.
+    on_the_web = {"opted_in": False, "source": "web_settings"}
+    assert dual_mode.put(PREFERENCE, json=on_the_web, headers=OWNER).status_code == 200
+    read = dual_mode.get(PREFERENCE, headers=OWNER)
+    assert read.status_code == 200
+    assert (read.json()["opted_in"], read.json()["source"]) == (False, "web_settings")
     bad = dual_mode.get(PREFERENCE, headers=bearer("not-a-token"))
     assert (bad.status_code, problem(bad)) == (401, "auth-token-invalid")
 
