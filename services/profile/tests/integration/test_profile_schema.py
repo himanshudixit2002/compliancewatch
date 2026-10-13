@@ -1,6 +1,7 @@
 """Migration 0001 on Postgres: four tenant tables with row-level security, the unit of work
 with the outbox, and the use cases end to end through the profile's own role, cw_profile as
-infra/dev/postgres/roles.sql makes it, which is not a superuser. Needs Docker."""
+infra/dev/postgres/roles.sql makes it, which is not a superuser; and migration 0005, a review
+task's closure, by an answer and by a resolve. Needs Docker."""
 
 from collections.abc import Iterator
 from pathlib import Path
@@ -13,16 +14,24 @@ from testcontainers.community.postgres import PostgresContainer
 
 import ontology as ontology_package
 from domain_kernel.financial_year import FinancialYear
+from domain_kernel.identifiers import Pan
 from domain_kernel.ids import TenantId
 from profile_service.application.attributes import (
     BuildSnapshot,
     ConfirmFinancialYear,
     SetAttributes,
 )
-from profile_service.application.audit import ATTRIBUTES_CHANGED, REGISTERED
+from profile_service.application.audit import ATTRIBUTES_CHANGED, REGISTERED, REVIEW_TASK_CLOSED
 from profile_service.application.registration import RegisterNodes
+from profile_service.application.review_tasks import ResolveReviewTask
+from profile_service.domain.errors import ReviewTaskClosedError
 from profile_service.domain.events import ChangeSource
-from profile_service.domain.model import AttributeChange, ValueState
+from profile_service.domain.model import (
+    AttributeChange,
+    ReviewClosedBy,
+    ReviewOutcome,
+    ValueState,
+)
 from profile_service.infrastructure.repository import (
     JsonLinesEvalRecorder,
     PostgresUnitOfWorkFactory,
@@ -113,7 +122,9 @@ def test_migration_creates_the_tables_with_row_level_security(engine: Engine) ->
                 {"s": SCHEMA},
             ).scalars()
         )
-    assert policies == [
+    # The directory role's read policies come from roles.sql, applied after the migrations by
+    # the app_engine fixture, so only the migrations' own policies are pinned here.
+    assert [name for name in policies if not name.endswith("_directory")] == [
         "idempotency_key_purge_expired",
         "idempotency_key_tenant_isolation",
         "profile_attribute_tenant_isolation",
@@ -122,6 +133,22 @@ def test_migration_creates_the_tables_with_row_level_security(engine: Engine) ->
         "review_task_tenant_isolation",
     ]
     assert forced == [True, True, True, True]
+    with engine.connect() as connection:
+        closure = sorted(
+            connection.execute(
+                text(
+                    "SELECT conname FROM pg_constraint WHERE conrelid = 'review_task'::regclass "
+                    "AND conname LIKE 'ck_review_task_%'"
+                )
+            ).scalars()
+        )
+    assert closure == [
+        "ck_review_task_answered",
+        "ck_review_task_closed",
+        "ck_review_task_closed_by",
+        "ck_review_task_outcome",
+        "ck_review_task_reason",
+    ]
 
 
 def test_use_cases_end_to_end_with_the_outbox(
@@ -222,3 +249,68 @@ def test_downgrade_and_upgrade(migrated: Config, engine: Engine) -> None:
     assert set(inspect(engine).get_table_names(schema=SCHEMA)) == {"alembic_version"}
     command.upgrade(migrated, "head")
     assert set(inspect(engine).get_table_names(schema=SCHEMA)) == TABLES
+
+
+def test_a_review_task_closes_by_an_answer_and_by_a_resolve_under_the_role(
+    app_engine: Engine, engine: Engine
+) -> None:
+    ontology = ontology_package.load()
+    factory = PostgresUnitOfWorkFactory(app_engine)
+    tenant, other = TenantId.new(), TenantId.new()
+    entity_id = RegisterNodes(factory).entity(tenant, Pan("ZZZZZ9999Z"), "Example").node.id
+    confirm = ConfirmFinancialYear(factory, ontology)
+    (task_id,) = confirm.run(tenant, FY)
+    result = SetAttributes(factory, ontology).run(
+        tenant,
+        entity_id,
+        [AttributeChange("turnover_band", "upto_10_lakh", as_of_fy=FY)],
+        source=ChangeSource.USER_INPUT,
+    )
+    assert result.closed_review_tasks == (task_id,)
+    with factory(tenant) as uow:
+        closed = uow.profiles.get_review_task(task_id)
+        assert uow.profiles.open_review_tasks(entity_id) == []
+        assert [task.id for task in uow.profiles.review_tasks(entity_id)] == [task_id]
+    assert closed is not None
+    assert (closed.open, closed.closed_by, closed.outcome) == (
+        False,
+        ReviewClosedBy.ANSWER,
+        ReviewOutcome.ANSWERED,
+    )
+    assert confirm.run(tenant, FY) == (), "an answered year is not asked about again"
+    (dismissable,) = confirm.run(tenant, FY.next())
+    resolve = ResolveReviewTask(factory)
+    resolved = resolve.run(
+        tenant, entity_id, dismissable, outcome=ReviewOutcome.DISMISSED, note="Example: dormant"
+    )
+    assert (resolved.closed_by, resolved.outcome, resolved.note) == (
+        ReviewClosedBy.RESOLVE,
+        ReviewOutcome.DISMISSED,
+        "Example: dormant",
+    )
+    with pytest.raises(ReviewTaskClosedError):
+        resolve.run(tenant, entity_id, dismissable, outcome=ReviewOutcome.CONFIRMED)
+    assert confirm.run(tenant, FY.next()) == (), "a dismissed task stays dismissed"
+    with factory(other) as uow:
+        assert uow.profiles.get_review_task(task_id) is None, "row-level security hides it"
+    with engine.connect() as connection:
+        directory_policies = sorted(
+            connection.execute(
+                text(
+                    "SELECT policyname FROM pg_policies WHERE schemaname = :s "
+                    "AND policyname LIKE '%\\_directory'"
+                ),
+                {"s": SCHEMA},
+            ).scalars()
+        )
+    assert directory_policies == ["profile_attribute_directory", "profile_node_directory"], (
+        "roles.sql gave cw_profile_directory its read policies"
+    )
+    with engine.connect() as connection:
+        entries = read_audit_entries(connection, action=REVIEW_TASK_CLOSED)
+    mine = [entry for entry in entries if entry.tenant_id == tenant]
+    assert [(entry.subject_id, entry.after["closed_by"]) for entry in mine] == [  # type: ignore[index]
+        (str(task_id), "answer"),
+        (str(dismissable), "resolve"),
+    ]
+    assert mine[1].reason == "Example: dormant"

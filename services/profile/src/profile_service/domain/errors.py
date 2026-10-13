@@ -14,6 +14,27 @@ class ProfileNodeNotFoundError(DomainError, LookupError):
         self.node_id = node_id
 
 
+class ReviewTaskNotFoundError(DomainError, LookupError):
+    type_slug = "profile-review-task-not-found"
+    title = "Profile review task not found"
+
+    def __init__(self, task_id: str) -> None:
+        super().__init__(f"review task {task_id} does not exist for this node")
+        self.task_id = task_id
+
+
+class ReviewTaskClosedError(DomainError):
+    """The task closed already: an answer or a resolve settled it (409)."""
+
+    type_slug = "profile-review-task-closed"
+    title = "Profile review task is closed"
+
+    def __init__(self, task_id: str, closed_by: str) -> None:
+        super().__init__(f"review task {task_id} is closed already (by {closed_by})")
+        self.task_id = task_id
+        self.closed_by = closed_by
+
+
 class InvalidHierarchyError(DomainError, ValueError):
     type_slug = "profile-hierarchy-invalid"
     title = "Profile hierarchy is invalid"

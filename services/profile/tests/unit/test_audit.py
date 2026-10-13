@@ -21,6 +21,7 @@ from profile_service.application.audit import (
     ATTRIBUTES_CHANGED,
     PREFILLED,
     REGISTERED,
+    REVIEW_TASK_CLOSED,
     SUBJECT,
 )
 from profile_service.application.businesses import Answer, CreateBusiness, UpdateBusiness
@@ -183,14 +184,25 @@ def test_a_business_update_writes_each_changed_node(ontology: Ontology) -> None:
             Answer(AttributeChange("registration_type", "regular")),
         ],
     )
-    assert [(e.action, e.subject_id, dict(e.after or {})) for e in store.audit] == [
-        (ATTRIBUTES_CHANGED, str(business.business.id), {"employee_count": known(7)}),
-        (
-            ATTRIBUTES_CHANGED,
-            str(business.business.registrations[0].id),
-            {"registration_type": known("regular")},
-        ),
+    changed = [e for e in store.audit if e.action == ATTRIBUTES_CHANGED]
+    assert [(e.subject_id, dict(e.after or {})) for e in changed] == [
+        (str(business.business.id), {"employee_count": known(7)}),
+        (str(business.business.registrations[0].id), {"registration_type": known("regular")}),
     ]
+    # The registration type answered the verify_registration task the manual lookup opened.
+    (closed,) = [e for e in store.audit if e.action == REVIEW_TASK_CLOSED]
+    assert closed.subject_type == "review_task"
+    assert closed.after is not None
+    assert (closed.after["closed_by"], closed.after["attribute_key"], closed.after["reason"]) == (
+        "answer",
+        "registration_type",
+        "verify_registration",
+    )
+    assert [e.action for e in store.audit] == [
+        ATTRIBUTES_CHANGED,
+        ATTRIBUTES_CHANGED,
+        REVIEW_TASK_CLOSED,
+    ], "the closure follows the answer, in its unit of work"
     store.audit.clear()
     update.run(TENANT, business.business.id, name="Example Renamed")
     assert store.audit == [], "a rename changes no attribute"

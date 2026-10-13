@@ -12,11 +12,18 @@ names the year a moment falls in.
 Every save that changes a value writes one ``profile_node.attributes_changed`` audit entry with
 the values it changed, before and after (``application.audit``); the pre-fill writes
 ``profile_node.prefilled`` through the same path.
+
+An answer closes the review task that asked for it: when a save stores a known or a
+does-not-apply value for the attribute (and year) an open task of the node asks about, the task
+closes with ``closed_by`` answer in the same transaction, with its ``review_task.closed`` entry
+(``close_answered``). An unsure answer closes nothing. A person closes a task explicitly through
+``application.review_tasks.ResolveReviewTask``.
 """
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from typing import Final
 
 from domain_kernel._validation import require_aware
 from domain_kernel.events import utc_now
@@ -24,7 +31,11 @@ from domain_kernel.financial_year import FinancialYear
 from domain_kernel.ids import BusinessId, TenantId, UserId
 from domain_kernel.ontology import Ontology
 from domain_kernel.profiles import ProfileSnapshot
-from profile_service.application.audit import ATTRIBUTES_CHANGED, record_attributes
+from profile_service.application.audit import (
+    ATTRIBUTES_CHANGED,
+    record_attributes,
+    record_review_task_closed,
+)
 from profile_service.domain.errors import ProfileNodeNotFoundError
 from profile_service.domain.events import ChangeSource
 from profile_service.domain.model import (
@@ -37,12 +48,18 @@ from profile_service.domain.model import (
 )
 from profile_service.domain.repository import UnitOfWork, UnitOfWorkFactory
 
+ANSWERS: Final = frozenset({ValueState.KNOWN, ValueState.NOT_APPLICABLE})
+"""The states that answer a review task's question; unsure leaves it open."""
+
 
 @dataclass(frozen=True, slots=True)
 class SetResult:
     node: ProfileNode
     changed: tuple[str, ...]
     review_tasks: tuple[BusinessId, ...]
+    """The review tasks the save opened."""
+    closed_review_tasks: tuple[BusinessId, ...] = ()
+    """The open tasks of the node the save answered, closed with it."""
 
 
 class SetAttributes:
@@ -112,10 +129,33 @@ def apply_changes(
     uow.profiles.save(outcome.node)
     uow.events.publish(outcome.event)
     record_attributes(uow, audit_action, node, outcome.node, now)
+    closed = close_answered(uow, node, outcome.node, now)
     tasks = tuple(open_review(uow, tenant_id, request, now) for request in outcome.reviews)
     for request in outcome.reviews:
         uow.eval_cases.record(_eval_case(outcome.node, request, now))
-    return SetResult(outcome.node, outcome.event.changed_attributes, tasks)
+    return SetResult(outcome.node, outcome.event.changed_attributes, tasks, closed)
+
+
+def close_answered(
+    uow: UnitOfWork, before: ProfileNode, after: ProfileNode, now: datetime
+) -> tuple[BusinessId, ...]:
+    """Close the open tasks of the node whose attribute (and year) the save answered: a known or
+    a does-not-apply value stored where there was none, or another one. Each closure writes its
+    ``review_task.closed`` entry in ``uow``."""
+    answered = {
+        storage_key
+        for storage_key, record in after.attributes.items()
+        if record.state in ANSWERS and before.attributes.get(storage_key) != record
+    }
+    closed: list[BusinessId] = []
+    for task in uow.profiles.open_review_tasks(after.id):
+        if task.storage_key not in answered:
+            continue
+        done = task.answered(now)
+        uow.profiles.save_review_task(done)
+        record_review_task_closed(uow, done)
+        closed.append(done.id)
+    return tuple(closed)
 
 
 class NextQuestion:
@@ -159,7 +199,10 @@ def financial_year_in_india(at: datetime) -> FinancialYear:
 class ConfirmFinancialYear:
     """Open one ``confirm_financial_year`` task per entity and missing per-year attribute.
 
-    Idempotent: a task still open for the same entity, attribute and year is not opened again.
+    Idempotent: a task for the same entity, attribute and year, open or closed, is not opened
+    again, so a rerun opens nothing and a task a person dismissed stays dismissed; a year's
+    value, once known, is not missing. The worker's schedule runs it for every tenant once the
+    year has turned (``profile_service.application.fy_schedule``).
     """
 
     def __init__(
@@ -177,7 +220,7 @@ class ConfirmFinancialYear:
         now = self._clock()
         opened: list[BusinessId] = []
         with self._unit_of_work(tenant_id) as uow:
-            existing = {task.dedupe_key for task in uow.profiles.open_review_tasks()}
+            existing = {task.dedupe_key for task in uow.profiles.review_tasks()}
             for entity in uow.profiles.entities():
                 for key in entity.missing_for_year(self._ontology, fy):
                     request = ReviewRequest(entity.id, key, ReviewReason.CONFIRM_FINANCIAL_YEAR, fy)

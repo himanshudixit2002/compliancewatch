@@ -9,7 +9,13 @@ from domain_kernel.audit import AuditSink
 from domain_kernel.events import DomainEvent
 from domain_kernel.ids import BusinessId, TenantId
 from domain_kernel.ontology import AttributeLevel
-from profile_service.domain.model import NodeAttribute, ProfileNode, ProfileVersion, ReviewTask
+from profile_service.domain.model import (
+    AttributeUsage,
+    NodeAttribute,
+    ProfileNode,
+    ProfileVersion,
+    ReviewTask,
+)
 
 type NodeCursor = tuple[datetime, BusinessId]
 """Where a page of nodes or review tasks ends: (created_at, id) of the last one."""
@@ -62,7 +68,21 @@ class ProfileRepository(Protocol):
 
     def add_review_task(self, task: ReviewTask) -> None: ...
 
-    def open_review_tasks(self, node_id: BusinessId | None = None) -> Sequence[ReviewTask]: ...
+    def open_review_tasks(self, node_id: BusinessId | None = None) -> Sequence[ReviewTask]:
+        """The tenant's open tasks, oldest first; of one node with ``node_id``."""
+        ...
+
+    def review_tasks(self, node_id: BusinessId | None = None) -> Sequence[ReviewTask]:
+        """The tenant's tasks, open and closed, oldest first; of one node with ``node_id``."""
+        ...
+
+    def get_review_task(self, task_id: BusinessId) -> ReviewTask | None:
+        """The tenant's task with this id, open or closed; None for another tenant's."""
+        ...
+
+    def save_review_task(self, task: ReviewTask) -> None:
+        """Store the closure of ``task``."""
+        ...
 
     # The data export reads every row of the tenant a page at a time, each section in a stable
     # order (oldest first, then the key), starting after the cursor of the previous page.
@@ -116,3 +136,20 @@ class UnitOfWork(Protocol):
 
 class UnitOfWorkFactory(Protocol):
     def __call__(self, tenant_id: TenantId) -> AbstractContextManager[UnitOfWork]: ...
+
+
+class AttributeUsageReader(Protocol):
+    """How many nodes of every tenant hold each attribute in each state, for the regulatory
+    team's ontology browser: counts only, never a value or a tenant (in Postgres the SECURITY
+    DEFINER function ``profile.attribute_usage()``, ``infra/dev/postgres/roles.sql``)."""
+
+    def usage(self) -> Sequence[AttributeUsage]:
+        """One entry per (key, state) that any node holds, in the order of (key, state)."""
+        ...
+
+
+class TenantDirectory(Protocol):
+    """The tenants that have profile nodes, which the worker's financial year schedule visits
+    one unit of work at a time: ids only (in Postgres ``profile.tenant_directory()``)."""
+
+    def tenants(self) -> Sequence[TenantId]: ...
