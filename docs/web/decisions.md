@@ -1259,3 +1259,78 @@ between are aligned, by a table of at most 250,000 cells (500 lines a side). Pas
 between are listed as removed, then added: still correct, only coarser, and the shared start and
 end stay shared. Consequences: one rulebook read per drafted task; a long field whose changes are
 spread out diffs coarsely between its first and last change rather than slowly.
+
+## D-067: No supabase-js; the provider adapters are fetch over the identity provider's REST API
+
+2026-10-14. Supabase Auth's client library wants the anon key in the browser and keeps a session
+of its own there, which this app never does (D-001, ADR-019). The adapter
+(`server/auth/supabase.ts`) talks to GoTrue's REST API with fetch, server-side, with the anon
+key from `CW_WEB_SUPABASE_URL` and `CW_WEB_SUPABASE_ANON_KEY`; the fake adapter talks to
+identity's development route the same way. Both sit behind one port (`server/auth/provider.ts`),
+whose every method answers a `Result` with a web-local problem for a refusal, so a form shows a
+provider's refusal as it shows a service's. Consequences: one module per adapter with no
+dependency, every GoTrue call checked against recorded response shapes until a project exists,
+and the anon key never in a client bundle; a change in GoTrue's API is this app's to notice.
+
+## D-068: A verified provider session waits in `cw_pending`, never in a URL
+
+2026-10-14. Between a sign-in and the step that still stands between the person and a session
+(sign-up for a person identity does not know, the second factor for a role that needs one) the
+verified provider session has to go somewhere. A URL would put it in logs, history and the
+Referer of the next page. It goes in `cw_pending` (`server/auth/pending.ts`): the same JWE as
+the session cookie, httpOnly, five minutes, carrying the provider session, the contact, `next`
+and the sign-up form a CA firm's first admin filled before verifying the factor. The email
+link's `token_hash` is the one exception by nature: single-use at the provider, read by the
+callback handler alone. Consequences: a sign-up or a factor must complete within five minutes
+or start again (the sign-in page says so); the proxy lets the pending cookie alone through to
+`/account/mfa`.
+
+## D-069: The bearer on every call made for a session, `x-tenant-id` kept equal to its tenant
+
+2026-10-14. The services read `Authorization: Bearer` in dual and token mode and the tenant
+header in header mode, and a token naming one tenant with a header naming another is a 403.
+`server/api/services.ts` sends both on every call made for a session, the header equal to the
+token's tenant, so the same call is right in every mode until W13 runs every service in token
+mode and `web.tenant_header_off` stops the header. An admin lookup of another tenant
+(`ctx.tenantId`) is the one call that cannot carry both: it goes without the bearer, which the
+services' tenant routes take in header and dual mode, until the admin routes name the tenant
+themselves. The clients built without a session (the rulebook, the pipeline, the engine's admin
+routes) keep their shared tokens and send no bearer. Consequences: `make web-stack AUTH=dual`
+for the browser tests and CI, header mode for the user's stack and the product; a 401
+`auth-token-invalid` from any service on a call that carried the bearer ends the request on the
+sign-in page (`server/auth/signed-out.ts`).
+
+## D-070: The client address comes from trusted proxy headers only; none is denied
+
+2026-10-14. Next's proxy has no socket address (`NextRequest.ip` went in Next 15), so the
+`/admin` allow-list can read the client address only from `x-real-ip` or `x-forwarded-for`,
+which anyone can send unless a proxy in front overwrites them. It reads them only when
+`CW_WEB_TRUST_FORWARDED_IP` says that proxy is there (Vercel's is), `x-real-ip` first, then the
+first `x-forwarded-for` hop; otherwise the address is unknown. An unknown address passes an
+empty list outside prod (where the list opens the tools to everyone, said once at start) and
+nothing else. Consequences: the e2e run sets the list and the trust and claims an address on
+every request, so the gate runs for real; a deployment on another host sets the trust
+deliberately or runs with an empty list.
+
+## D-071: `/sign-in?reason=signed-out` clears the cookie without asking identity
+
+2026-10-14. A render that meets a revoked token cannot clear the cookie (Next 16 writes cookies
+in actions, handlers and the proxy only), so it redirects to the sign-in page with the reason and
+the proxy clears the cookie there. The proxy could first ask identity whether the session is
+really gone, but a service that refuses the token while identity still accepts it (stale keys,
+a clock) would then bounce the person between the page and the sign-in page for ever. The
+cookie goes on that path unconditionally: a cross-site link to it can sign a person out, which
+costs them a new sign-in and nothing else, and no link can sign anyone in. Consequences: the
+sign-in page says the session ended; a revoked session is gone on the next navigation.
+
+## D-072: The development sign-in is a persona identity makes, not a session the web mints
+
+2026-10-14. The foundation's fake adapter minted the session cookie locally, so nothing on the
+real path (the exchange, the token, `/me`, the user routes) ran in local runs or browser tests.
+Now identity's development route (`POST /v1/identity/dev/provider-tokens`, fake provider, local
+and test only) takes the form's tenant kind, roles, name and optional tenant id, makes the
+tenant and the user, and signs the provider token, which goes through the same exchange as a
+real sign-in. Consequences: the browser tests' personas are real users with real tokens, their
+cookies carry a bearer every service reads in dual mode, a persona's roles can be changed and
+revoked like anyone's, and the local product (header mode) signs in the same way with the
+account page saying what identity cannot answer there.

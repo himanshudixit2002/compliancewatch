@@ -72,13 +72,13 @@ client.
 Everything comes from `server/env.ts` (`getEnv()`, parsed with zod at the first request, never
 at build time; `loadEnv(record)` in tests). The data layer reads:
 
-| Variable                      | Default                             | Meaning                                                                                  |
-| ----------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------- |
-| `CW_WEB_<SERVICE>_URL`        | `http://localhost:8001` ... `:8010` | one per service, in the Makefile's `SERVICES` order; a trailing slash is dropped         |
-| `CW_WEB_REQUEST_TIMEOUT_MS`   | `10000` (at most `120000`)          | the time limit of every call; past it the call is a `network` error                      |
-| `CW_WEB_RULEBOOK_WRITE_TOKEN` | unset                               | the shared `x-cw-write-token` of the rulebook and the pipeline; unset means the write clients answer "not configured" |
-| `CW_WEB_PIPELINE_UPLOAD_MAX_BYTES` | `25000000` (at most `100000000`) | the largest file the upload handler forwards: the pipeline's `CW_PIPELINE_UPLOAD_MAX_BYTES`, which it must equal |
-| `CW_WEB_SEED_STATE_PATH`      | `../../var/seed/last.json`          | the file the seed writes, relative to `apps/web`; the sign-in form offers its tenant     |
+| Variable                           | Default                             | Meaning                                                                                                               |
+| ---------------------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `CW_WEB_<SERVICE>_URL`             | `http://localhost:8001` ... `:8010` | one per service, in the Makefile's `SERVICES` order; a trailing slash is dropped                                      |
+| `CW_WEB_REQUEST_TIMEOUT_MS`        | `10000` (at most `120000`)          | the time limit of every call; past it the call is a `network` error                                                   |
+| `CW_WEB_RULEBOOK_WRITE_TOKEN`      | unset                               | the shared `x-cw-write-token` of the rulebook and the pipeline; unset means the write clients answer "not configured" |
+| `CW_WEB_PIPELINE_UPLOAD_MAX_BYTES` | `25000000` (at most `100000000`)    | the largest file the upload handler forwards: the pipeline's `CW_PIPELINE_UPLOAD_MAX_BYTES`, which it must equal      |
+| `CW_WEB_SEED_STATE_PATH`           | `../../var/seed/last.json`          | the file the seed writes, relative to `apps/web`; the sign-in form offers its tenant                                  |
 
 `<SERVICE>` is `IDENTITY`, `PROFILE`, `RULEBOOK`, `APPLICABILITY_ENGINE`, `OBLIGATION`,
 `NOTIFICATION`, `QA`, `LLM_GATEWAY`, `EVAL` or `PIPELINE`. A second working copy puts its
@@ -92,20 +92,20 @@ lists every variable; none is `NEXT_PUBLIC_*`.
 `server/api/services.ts` holds the factories the gateways use; each takes a `ClientContext`
 `{ session, tenantId?, fetchImpl? }`:
 
-| Factory                                       | Service      | Tenant header                     | Other headers                                     |
-| --------------------------------------------- | ------------ | --------------------------------- | ------------------------------------------------- |
-| `identityClient(ctx)`                         | identity     | yes                               |                                                   |
-| `profileClient(ctx)`                          | profile      | yes                               |                                                   |
-| `notificationClient(ctx)`                     | notification | yes                               |                                                   |
-| `llmGatewayClient(ctx)`                       | llm-gateway  | yes                               |                                                   |
-| `obligationClient(ctx)`                       | obligation   | yes                               |                                                   |
-| `qaClient(ctx)`                               | qa           | yes                               |                                                   |
-| `applicabilityEngineClient(ctx)`              | applicability-engine | yes                       |                                                   |
-| `applicabilityEngineAdminClient(ctx)`         | applicability-engine | never (fan-outs, the hold and dry runs belong to no tenant) |                    |
-| `rulebookClient(ctx?)`                        | rulebook     | never (records shared by tenants) |                                                   |
-| `rulebookAdmin(ctx)` returns `Result<Client>` | rulebook     | never                             | `x-cw-write-token`, after a regulatory-role check |
-| `pipelineClient(ctx)`                         | pipeline     | never (no record of the pipeline belongs to a tenant) |                               |
-| `pipelineWriteClient(ctx, capability)` returns `Result<Client>` (`server/api/pipeline-write.ts`) | pipeline | never | `x-cw-write-token`, after an admin capability check |
+| Factory                                                                                          | Service              | Tenant header                                               | Other headers                                       |
+| ------------------------------------------------------------------------------------------------ | -------------------- | ----------------------------------------------------------- | --------------------------------------------------- |
+| `identityClient(ctx)`                                                                            | identity             | yes                                                         |                                                     |
+| `profileClient(ctx)`                                                                             | profile              | yes                                                         |                                                     |
+| `notificationClient(ctx)`                                                                        | notification         | yes                                                         |                                                     |
+| `llmGatewayClient(ctx)`                                                                          | llm-gateway          | yes                                                         |                                                     |
+| `obligationClient(ctx)`                                                                          | obligation           | yes                                                         |                                                     |
+| `qaClient(ctx)`                                                                                  | qa                   | yes                                                         |                                                     |
+| `applicabilityEngineClient(ctx)`                                                                 | applicability-engine | yes                                                         |                                                     |
+| `applicabilityEngineAdminClient(ctx)`                                                            | applicability-engine | never (fan-outs, the hold and dry runs belong to no tenant) |                                                     |
+| `rulebookClient(ctx?)`                                                                           | rulebook             | never (records shared by tenants)                           |                                                     |
+| `rulebookAdmin(ctx)` returns `Result<Client>`                                                    | rulebook             | never                                                       | `x-cw-write-token`, after a regulatory-role check   |
+| `pipelineClient(ctx)`                                                                            | pipeline             | never (no record of the pipeline belongs to a tenant)       |                                                     |
+| `pipelineWriteClient(ctx, capability)` returns `Result<Client>` (`server/api/pipeline-write.ts`) | pipeline             | never                                                       | `x-cw-write-token`, after an admin capability check |
 
 Every request carries:
 
@@ -119,6 +119,13 @@ Every request carries:
   tenant other than the session's, and only admin lookups use it: the notification console, the
   decision review and the profile review task lookup read the tenant their lookup names
   ([admin-tools.md](admin-tools.md)).
+- `Authorization: Bearer <identity token>` (`session.cwToken`) on the tenant-scoped services
+  for every call made for a session whose tenant is the token's; an admin lookup of another
+  tenant goes without it, as do the clients built without a session (D-069,
+  [auth.md](auth.md)). A 401 that says the token is no longer good (`auth-token-invalid`,
+  `identity-session-revoked`) on such a call ends the request on the sign-in page, unless the
+  caller asked `call()` to report it instead (`{ revoked: "report" }`: the proxy and the sign-in
+  flows).
 - The time limit: `AbortSignal.timeout(CW_WEB_REQUEST_TIMEOUT_MS)`, combined with the request's
   own signal. A client may take a longer one (`timeoutMs`: the pipeline's writes that start a
   workflow wait for at least 30 seconds, an upload 120) and may time only the wait for the
@@ -244,20 +251,20 @@ error summary, since the disabled submit button has dropped it.
 Tenant data is never cached; a handful of records every tenant sees the same way are
 (`server/cache.ts`, decision D-018).
 
-| Read                                                          | Fetch options                                       | Tag builder                                                                           |
-| ------------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| billing plans                                                 | `cachedRead([tags.identity.plans()])`               | `identity:plans`                                                                      |
-| rulebook rules                                                | `cachedRead([tags.rulebook.rules()])`               | `rulebook:rules`                                                                      |
-| a rulebook document                                           | `cachedRead([tags.rulebook.document(id)])`          | `rulebook:document:<id>`                                                              |
-| a rulebook clause                                             | `cachedRead([tags.rulebook.clause(id)])`            | `rulebook:clause:<id>`                                                                |
-| rule versions, citations, relations, entities                 | `uncachedRead()`                                    | none: versions move through review outside this server, and an action renders the page again |
-| the entity and relation review queues                         | `uncachedRead()`                                    | none: the pipeline fills them and decisions empty them outside this server (D-036, D-055) |
-| the review tasks, a task, the review stats                    | `uncachedRead()`                                    | none: the intake opens tasks and analysts claim and decide them outside this server |
-| the pipeline's sources, runs, documents, tasks and dead outbox | `uncachedRead()`                                   | none: crawls, ingests, the relay and people's writes move them outside this server   |
-| notification templates                                        | `cachedRead([tags.notification.templates()])`       | `notification:templates`                                                              |
-| the ontology (`server/ontology.ts`)                           | `cachedRead([tags.profile.ontology()], 3600)`       | `profile:ontology`                                                                    |
-| gateway prompts and models                                    | `cachedRead([tags.llm.prompts()])`, ...             | `llm-gateway:prompts`, `llm-gateway:models`                                           |
-| anything keyed by the tenant (profile, consents, obligations) | `uncachedRead()` (`cache: "no-store"`)              | none; `tags.identity.consents` and `tags.profile.node` exist, the reads stay uncached |
+| Read                                                           | Fetch options                                 | Tag builder                                                                                  |
+| -------------------------------------------------------------- | --------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| billing plans                                                  | `cachedRead([tags.identity.plans()])`         | `identity:plans`                                                                             |
+| rulebook rules                                                 | `cachedRead([tags.rulebook.rules()])`         | `rulebook:rules`                                                                             |
+| a rulebook document                                            | `cachedRead([tags.rulebook.document(id)])`    | `rulebook:document:<id>`                                                                     |
+| a rulebook clause                                              | `cachedRead([tags.rulebook.clause(id)])`      | `rulebook:clause:<id>`                                                                       |
+| rule versions, citations, relations, entities                  | `uncachedRead()`                              | none: versions move through review outside this server, and an action renders the page again |
+| the entity and relation review queues                          | `uncachedRead()`                              | none: the pipeline fills them and decisions empty them outside this server (D-036, D-055)    |
+| the review tasks, a task, the review stats                     | `uncachedRead()`                              | none: the intake opens tasks and analysts claim and decide them outside this server          |
+| the pipeline's sources, runs, documents, tasks and dead outbox | `uncachedRead()`                              | none: crawls, ingests, the relay and people's writes move them outside this server           |
+| notification templates                                         | `cachedRead([tags.notification.templates()])` | `notification:templates`                                                                     |
+| the ontology (`server/ontology.ts`)                            | `cachedRead([tags.profile.ontology()], 3600)` | `profile:ontology`                                                                           |
+| gateway prompts and models                                     | `cachedRead([tags.llm.prompts()])`, ...       | `llm-gateway:prompts`, `llm-gateway:models`                                                  |
+| anything keyed by the tenant (profile, consents, obligations)  | `uncachedRead()` (`cache: "no-store"`)        | none; `tags.identity.consents` and `tags.profile.node` exist, the reads stay uncached        |
 
 `cachedRead(tags, seconds = 300)` gives the call `next: { revalidate, tags }`; it refuses an
 empty tag list, since nothing could invalidate the entry. Tags are built only through
@@ -310,18 +317,18 @@ profile client; every call is tenant-scoped (x-tenant-id from the session), unca
 through `entities/business/mappers.ts`, and `mapBody` reports a success without a body as a
 server error instead of mapping nothing.
 
-| Port method             | Route                                                                      |
-| ----------------------- | -------------------------------------------------------------------------- |
-| `list({ q, limit, cursor })` | `GET /v1/businesses` (the tenant's businesses by name, a page at a time) |
-| `create(input, headers)`     | `POST /v1/businesses` with Idempotency-Key (`profile.create-business`)   |
-| `get(id)`                    | `GET /v1/businesses/{business_id}` (the entity, its values, registrations) |
-| `update(id, changes)`        | `PATCH /v1/businesses/{business_id}` (answers across the business, all or none) |
-| `onboarding(id)`             | `GET /v1/businesses/{business_id}/onboarding` (the next question, progress) |
+| Port method                           | Route                                                                                               |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `list({ q, limit, cursor })`          | `GET /v1/businesses` (the tenant's businesses by name, a page at a time)                            |
+| `create(input, headers)`              | `POST /v1/businesses` with Idempotency-Key (`profile.create-business`)                              |
+| `get(id)`                             | `GET /v1/businesses/{business_id}` (the entity, its values, registrations)                          |
+| `update(id, changes)`                 | `PATCH /v1/businesses/{business_id}` (answers across the business, all or none)                     |
+| `onboarding(id)`                      | `GET /v1/businesses/{business_id}/onboarding` (the next question, progress)                         |
 | `addRegistration(id, input, headers)` | `POST /v1/businesses/{business_id}/registrations` with Idempotency-Key (`profile.add-registration`) |
-| `node(id)`                   | `GET /v1/profile/nodes/{node_id}` (a location, or a parent in a lineage) |
-| `addLocation(input)`         | `POST /v1/profile/locations` (natural key: the label under its registration) |
-| `snapshot(id, fy?)`          | `GET /v1/profile/nodes/{node_id}/snapshot?fy=` (no per-year values without `fy`) |
-| `reviewTasks(id)`            | `GET /v1/profile/nodes/{node_id}/review-tasks`                            |
+| `node(id)`                            | `GET /v1/profile/nodes/{node_id}` (a location, or a parent in a lineage)                            |
+| `addLocation(input)`                  | `POST /v1/profile/locations` (natural key: the label under its registration)                        |
+| `snapshot(id, fy?)`                   | `GET /v1/profile/nodes/{node_id}/snapshot?fy=` (no per-year values without `fy`)                    |
+| `reviewTasks(id)`                     | `GET /v1/profile/nodes/{node_id}/review-tasks`                                                      |
 
 A business id is the id of its legal entity node. An answer is `{ key, state, value?, asOfFy?,
 nodeId? }`: `state` is `known`, `unsure` or `not_applicable`, the value travels only with

@@ -13,13 +13,13 @@ pipeline's events, the flags and the checkout's processes in one window.
 
 ## Prerequisites
 
-| Tool | Install | Notes |
-| --- | --- | --- |
-| Docker | Docker Desktop, or `brew install colima docker docker-compose docker-buildx` then `colima start --cpu 4 --memory 8 --disk 60` | Homebrew's `docker-compose` and `docker-buildx` are CLI plugins (`docker build` needs buildx for the `--mount=type=cache` instructions in the Dockerfiles): `~/.docker/config.json` needs `{"cliPluginsExtraDirs": ["/opt/homebrew/lib/docker/cli-plugins"]}` (brew prints this). The default 2 GB Colima VM is too small for Redpanda + Temporal + Postgres. |
-| uv | `brew install uv` | `uv sync` downloads a managed CPython 3.12 (`.python-version`); the Homebrew `python3` is never used. |
-| pnpm + Node 22.22.2+ | `brew install pnpm node` | `package.json` pins `pnpm@11.15.0`; pnpm switches itself to that version. jsdom 30, the unit tests' DOM, needs Node 22.22.2 or later on the 22 line. |
-| pre-commit (optional but expected) | `brew install pre-commit` or `uv tool install pre-commit`, then `make hooks` | Installs the pre-commit and commit-msg hooks (ruff, prettier, gitleaks, conventional commits). |
-| actionlint, gitleaks (optional) | `brew install actionlint gitleaks` | `make ci-lint` validates the workflows locally. |
+| Tool                               | Install                                                                                                                       | Notes                                                                                                                                                                                                                                                                                                                                                         |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Docker                             | Docker Desktop, or `brew install colima docker docker-compose docker-buildx` then `colima start --cpu 4 --memory 8 --disk 60` | Homebrew's `docker-compose` and `docker-buildx` are CLI plugins (`docker build` needs buildx for the `--mount=type=cache` instructions in the Dockerfiles): `~/.docker/config.json` needs `{"cliPluginsExtraDirs": ["/opt/homebrew/lib/docker/cli-plugins"]}` (brew prints this). The default 2 GB Colima VM is too small for Redpanda + Temporal + Postgres. |
+| uv                                 | `brew install uv`                                                                                                             | `uv sync` downloads a managed CPython 3.12 (`.python-version`); the Homebrew `python3` is never used.                                                                                                                                                                                                                                                         |
+| pnpm + Node 22.22.2+               | `brew install pnpm node`                                                                                                      | `package.json` pins `pnpm@11.15.0`; pnpm switches itself to that version. jsdom 30, the unit tests' DOM, needs Node 22.22.2 or later on the 22 line.                                                                                                                                                                                                          |
+| pre-commit (optional but expected) | `brew install pre-commit` or `uv tool install pre-commit`, then `make hooks`                                                  | Installs the pre-commit and commit-msg hooks (ruff, prettier, gitleaks, conventional commits).                                                                                                                                                                                                                                                                |
+| actionlint, gitleaks (optional)    | `brew install actionlint gitleaks`                                                                                            | `make ci-lint` validates the workflows locally.                                                                                                                                                                                                                                                                                                               |
 
 GNU make 3.81 (the macOS default) is enough.
 
@@ -36,20 +36,20 @@ make test
 
 ## Ports and URLs
 
-| What | Host | Notes |
-| --- | --- | --- |
-| Postgres 16 + pgvector | `localhost:5432`, user/password/db `cw`/`cw`/`compliancewatch` | one schema per service plus `audit`; `make dev-psql` |
-| Redis 7 | `localhost:6379` | |
-| Kafka API (Redpanda) | `localhost:19092` | containers use `redpanda:9092`; schema registry `http://localhost:18081`; admin `localhost:19644`; topics are auto-created, dead letters go to `<topic>.dlq` |
-| Temporal | `localhost:7233` | UI `http://localhost:8233` |
-| Langfuse (profile `observability`) | `http://localhost:3010` | `make dev-observability`; login `dev@compliancewatch.local` / `dev-password`, keys `pk-lf-dev` / `sk-lf-dev` |
-| OpenTelemetry collector (profile `observability`) | `localhost:4317` gRPC, `4318` HTTP, health `http://localhost:13133` | set `CW_OTEL_ENDPOINT=http://localhost:4317` in `.env` to export traces and metrics |
-| Prometheus (profile `observability`) | `http://localhost:9090` | scrapes the collector; 2 days of retention |
-| Grafana (profile `observability`) | `http://localhost:3030` | anonymous admin; dashboard "ComplianceWatch services", Explore for Tempo traces |
-| Fake LLM gateway (profile `llm`) | `http://localhost:8090` | `make dev-llm`; the `services/llm-gateway` image with the fake provider and an in-memory ledger, no key |
-| Services (`make run`) | `localhost:8001` .. `8010` | identity, profile, rulebook, applicability-engine, obligation, notification, qa, llm-gateway, eval, pipeline; containers listen on 8000 |
-| Web app | `http://localhost:3000` | `pnpm --filter web dev`; `/admin` for the internal tools |
-| WhatsApp bot | `http://localhost:8080` | `pnpm --filter whatsapp-bot dev`; `/health`, `GET/POST /webhook` |
+| What                                              | Host                                                                | Notes                                                                                                                                                        |
+| ------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Postgres 16 + pgvector                            | `localhost:5432`, user/password/db `cw`/`cw`/`compliancewatch`      | one schema per service plus `audit`; `make dev-psql`                                                                                                         |
+| Redis 7                                           | `localhost:6379`                                                    |                                                                                                                                                              |
+| Kafka API (Redpanda)                              | `localhost:19092`                                                   | containers use `redpanda:9092`; schema registry `http://localhost:18081`; admin `localhost:19644`; topics are auto-created, dead letters go to `<topic>.dlq` |
+| Temporal                                          | `localhost:7233`                                                    | UI `http://localhost:8233`                                                                                                                                   |
+| Langfuse (profile `observability`)                | `http://localhost:3010`                                             | `make dev-observability`; login `dev@compliancewatch.local` / `dev-password`, keys `pk-lf-dev` / `sk-lf-dev`                                                 |
+| OpenTelemetry collector (profile `observability`) | `localhost:4317` gRPC, `4318` HTTP, health `http://localhost:13133` | set `CW_OTEL_ENDPOINT=http://localhost:4317` in `.env` to export traces and metrics                                                                          |
+| Prometheus (profile `observability`)              | `http://localhost:9090`                                             | scrapes the collector; 2 days of retention                                                                                                                   |
+| Grafana (profile `observability`)                 | `http://localhost:3030`                                             | anonymous admin; dashboard "ComplianceWatch services", Explore for Tempo traces                                                                              |
+| Fake LLM gateway (profile `llm`)                  | `http://localhost:8090`                                             | `make dev-llm`; the `services/llm-gateway` image with the fake provider and an in-memory ledger, no key                                                      |
+| Services (`make run`)                             | `localhost:8001` .. `8010`                                          | identity, profile, rulebook, applicability-engine, obligation, notification, qa, llm-gateway, eval, pipeline; containers listen on 8000                      |
+| Web app                                           | `http://localhost:3000`                                             | `pnpm --filter web dev`; `/admin` for the internal tools                                                                                                     |
+| WhatsApp bot                                      | `http://localhost:8080`                                             | `pnpm --filter whatsapp-bot dev`; `/health`, `GET/POST /webhook`                                                                                             |
 
 Every host port is a variable in `.env` (`POSTGRES_PORT`, `REDIS_PORT`, `REDPANDA_KAFKA_PORT`, `REDPANDA_SCHEMA_REGISTRY_PORT`, `REDPANDA_ADMIN_PORT`, `TEMPORAL_PORT`, `TEMPORAL_UI_PORT`, `LANGFUSE_PORT`, `OTEL_GRPC_PORT`, `OTEL_HTTP_PORT`, `OTEL_HEALTH_PORT`, `PROMETHEUS_PORT`, `GRAFANA_PORT`, `FAKE_LLM_PORT`). Other projects on this machine use 5432, 6379, 9092, 8080 and 3000 when they run; change the port in `.env`, not in `docker-compose.yml`.
 
@@ -132,11 +132,11 @@ curl -s http://localhost:8002/v1/ontology | jq '.attributes[0].question, .operat
 `CW_AUTH_MODE` decides how every Python service reads its caller (the py-common README,
 "Authentication", has the details):
 
-| Mode | What a service does |
-| --- | --- |
-| `header` (the default) | Reads no token. The tenant comes from `x-tenant-id` and shared secrets guard the service-to-service routes, as in the examples above. |
-| `dual` | Verifies a bearer token when a request carries one and enforces its tenant, roles and scopes; a request without one is served as in `header` mode. |
-| `token` | Needs a bearer token wherever a caller is read: every tenant route and every service-to-service route. Shared secrets open nothing. `CW_ENV=prod` accepts only this mode. |
+| Mode                   | What a service does                                                                                                                                                       |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `header` (the default) | Reads no token. The tenant comes from `x-tenant-id` and shared secrets guard the service-to-service routes, as in the examples above.                                     |
+| `dual`                 | Verifies a bearer token when a request carries one and enforces its tenant, roles and scopes; a request without one is served as in `header` mode.                        |
+| `token`                | Needs a bearer token wherever a caller is read: every tenant route and every service-to-service route. Shared secrets open nothing. `CW_ENV=prod` accepts only this mode. |
 
 Locally, identity signs people in with a fake identity provider (`CW_AUTH_PROVIDER=fake`, the
 default), so no account is needed. With both services on memory stores, no container is needed
@@ -370,7 +370,10 @@ opt-in confirmation sent to it, and one
 recorded CBIC notification with its clauses, mentions and relation candidate for the admin
 review queues), records it in `var/seed/last.json` for the development sign-in, and exits
 non-zero when a step fails; run it again after every `make web-stack`, since memory stores start
-empty. `make web-e2e` after the seed also runs the seeded-tenant sign-in test, which is skipped
+empty. The web app signs in through identity (`docs/web/auth.md`): on the stack the
+development form makes a persona identity keeps, and `make web-stack AUTH=dual` lets identity's
+`/me` and user routes read the app's token (the browser tests run so; a stack in header mode
+signs in too, with the account page saying what identity cannot answer there). `make web-e2e` after the seed also runs the seeded-tenant sign-in test, which is skipped
 without it; CI's `web-e2e` job starts the stack and seeds it before Playwright in the same order.
 
 ## Not in the stack yet
