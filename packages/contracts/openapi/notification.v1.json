@@ -1085,6 +1085,38 @@
         "title": "RecipientRole",
         "type": "string"
       },
+      "ResendIn": {
+        "additionalProperties": false,
+        "description": "Why a failed notification is sent again, and, when the admin wants to be sure of the\naddress, which one.",
+        "properties": {
+          "reason": {
+            "description": "Why it is resent (a support case, a provider outage); written to the audit trail",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "recipient": {
+            "anyOf": [
+              {
+                "maxLength": 254,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The address the admin means (a WhatsApp number or an email address): it must be the notification's own, else nothing is queued (422); left out, the notification goes to its address",
+            "title": "Recipient"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "ResendIn",
+        "type": "object"
+      },
       "SendIn": {
         "additionalProperties": false,
         "properties": {
@@ -1893,6 +1925,7 @@
     },
     "/v1/notification/notifications/{notification_id}/resend": {
       "post": {
+        "description": "The resend is written to the tenant's audit trail as ``notification.resent`` with the\nreason and the actor. ``recipient``, when given, must be the notification's own address\n(422 otherwise). A retry with the same ``Idempotency-Key`` and body gets the first answer\nback (``Idempotent-Replayed: true``); the same key with another body is a 422.",
         "operationId": "resend_notification_v1_notification_notifications__notification_id__resend_post",
         "parameters": [
           {
@@ -1923,8 +1956,32 @@
               "description": "Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope.",
               "title": "X-Tenant-Id"
             }
+          },
+          {
+            "description": "A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours",
+              "maxLength": 128,
+              "minLength": 8,
+              "pattern": "^[!-~]+$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResendIn"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
@@ -1935,6 +1992,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
           },
           "401": {
             "content": {
@@ -1985,6 +2052,16 @@
               }
             },
             "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Required"
           }
         },
         "security": [
@@ -1992,7 +2069,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Queue a notification that failed for good again; 409 in any other state",
+        "summary": "Queue a notification that failed for good again, for a reason (tenant admins, admins); 409 in any other state",
         "tags": [
           "notification"
         ]
