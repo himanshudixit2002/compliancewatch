@@ -242,6 +242,7 @@ describe("the MFA actions with the supabase adapter", () => {
     vi.stubEnv("CW_WEB_AUTH_PROVIDER", "supabase");
     vi.stubEnv("CW_WEB_SUPABASE_URL", "https://project.supabase.test");
     vi.stubEnv("CW_WEB_SUPABASE_ANON_KEY", "anon-key-synthetic");
+    vi.stubEnv("CW_WEB_PUBLIC_URL", "https://app.example.test");
     resetEnvCache();
     return gotrue;
   }

@@ -30,6 +30,7 @@ describe("providerFor", () => {
         CW_WEB_AUTH_PROVIDER: "supabase",
         CW_WEB_SUPABASE_URL: "https://project.supabase.test",
         CW_WEB_SUPABASE_ANON_KEY: "anon-test-value",
+        CW_WEB_PUBLIC_URL: "https://app.example.test",
       }),
     );
     expect(result.ok).toBe(true);

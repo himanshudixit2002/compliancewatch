@@ -9,14 +9,16 @@ import { homeFor, mfaHref, signInHref, signUpHref } from "@/shared/config/nav";
 import { safeNext, withQuery } from "@/shared/lib/url";
 
 /**
- * Where the email link comes back: `?token_hash=<hash>&type=magiclink[&next=<path>]`. The
+ * Where the email link comes back: `?token_hash=<hash>&type=email&next=<path or empty>`. The
  * handler exchanges the hash with the provider, then runs the same exchange as the code step:
  * a session cookie and a redirect, the sign-up or second-factor step with the pending cookie,
  * or the sign-in page saying the link is not valid any more. GET, since a mail client opens a
  * link; the hash is single-use at the provider and never lands in a page of this app. Every
  * redirect is a relative Location, so the browser stays on the host it used: under `next start`
  * Next builds `request.nextUrl` from the server's bind address, not from that host (as the
- * sign-out handler says).
+ * sign-out handler says). The link's address (`callbackUrl` in features/auth/queries.ts) always
+ * carries `next`, empty when there is nowhere to return to, so the provider's email template can
+ * append the hash with `&` (services/identity/README.md, "Supabase: manual steps").
  */
 export const dynamic = "force-dynamic";
 

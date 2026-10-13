@@ -82,6 +82,11 @@ const schema = z
     // sent to a browser (server/auth/supabase.ts); required only when the provider is supabase.
     CW_WEB_SUPABASE_URL: httpUrl.optional(),
     CW_WEB_SUPABASE_ANON_KEY: z.string().min(1).optional(),
+    // This deployment's own origin (https://app.example.com), from which the email link's
+    // callback address is built (features/auth/queries.ts); required with the supabase provider,
+    // so no request header decides where a sign-in link comes back to. The fake adapter, which
+    // sends nothing, takes the host the browser asked for instead.
+    CW_WEB_PUBLIC_URL: httpUrl.optional(),
     CW_WEB_SESSION_SECRET: sessionSecret.optional(),
     CW_WEB_SESSION_TTL_SECONDS: positiveInt.max(86_400).default(28_800),
     // How the proxy keeps a session current (src/proxy.ts): the identity token is refreshed
@@ -128,7 +133,8 @@ const schema = z
       });
     }
     if (env.CW_WEB_AUTH_PROVIDER === "supabase") {
-      for (const name of ["CW_WEB_SUPABASE_URL", "CW_WEB_SUPABASE_ANON_KEY"] as const) {
+      const required = ["CW_WEB_SUPABASE_URL", "CW_WEB_SUPABASE_ANON_KEY", "CW_WEB_PUBLIC_URL"];
+      for (const name of required as (keyof typeof env)[]) {
         if (env[name] === undefined) {
           ctx.addIssue({
             code: "custom",

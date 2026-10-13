@@ -73,7 +73,7 @@ sequenceDiagram
     B->>W: POST sendEmailLink {email}
     W->>P: send a link to /auth/callback?next= (the fake hands it back instead)
     W-->>B: 303 /sign-in/email-sent
-    B->>W: GET /auth/callback?token_hash=&type=magiclink&next=
+    B->>W: GET /auth/callback?token_hash=&type=email&next=
     W->>P: exchange the hash
     P-->>W: provider session
     W->>I: POST /v1/identity/sessions
@@ -83,8 +83,15 @@ sequenceDiagram
 
 The callback is a route handler (`app/auth/callback/route.ts`): the hash is single-use at the
 provider and never lands in a page of this app; an invalid or expired one returns to
-`/sign-in?error=link-expired`. With the fake adapter in local and test nothing is sent: the
-email-sent page shows the link, read from `cw_pending`.
+`/sign-in?error=link-expired`, and every redirect from it is a relative Location, so the person
+stays on the host they used. The link's address (`callbackUrl`, `features/auth/queries.ts`) is
+`CW_WEB_PUBLIC_URL` plus the handler's route with `next` always in the query, so the Supabase
+project's Magic Link and Confirm signup templates can append
+`&token_hash={{ .TokenHash }}&type=email` to `{{ .RedirectTo }}` (the default templates link to
+GoTrue's own verify route, which never reaches this callback; `services/identity/README.md`,
+step 3a). With the fake adapter in local
+and test nothing is sent: the link is built on the host the browser asked for, and the
+email-sent page shows it, read from `cw_pending`.
 
 ### The second factor
 
@@ -173,22 +180,22 @@ recipients cookie, and answers a relative 303 to `/sign-in`. It refuses another 
 httpOnly, SameSite=Lax, Secure outside local, path `/`, eight hours
 (`CW_WEB_SESSION_TTL_SECONDS`).
 
-| Claim                         | From identity's answer                         | Notes                                                                                    |
-| ----------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `userId`                      | `user_id` (the token's `sub`)                  |                                                                                          |
-| `tenantId`, `tenantKind`      | `tenant_id` (the token's `tid`), `tenant_kind` | the kind decides which screens and roles apply                                           |
-| `roles`                       | `roles`                                        | brought up to date by the re-read                                                        |
-| `displayName`                 | `display_name`                                 | "User <first eight of the id>" when the person gave none                                 |
-| `mfa`                         | `mfa`                                          | the fake asserts it (the account page says so); Supabase verifies it                     |
-| `sv`                          | `session_version`                              | identity's per-user version; a bump revokes older sessions                               |
-| `provider`                    | the adapter                                    | `fake` or `supabase`                                                                     |
-| `issuedAt`, `expiresAt`       | now, now plus the lifetime                     | a refresh never extends them                                                             |
-| `cwToken`, `cwTokenExpiresAt` | `access_token`, now plus `expires_in`          | the bearer for the services (ES256 JWT with `sub`, `kind`, `tid`, `roles`, `sv`, `mfa`)  |
-| `providerRefreshToken`        | the provider session's refresh token           | what a refresh and a provider sign-out use; the fake's encodes the contact and the level |
+| Claim                                            | From identity's answer                         | Notes                                                                                                                          |
+| ------------------------------------------------ | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `userId`                                         | `user_id` (the token's `sub`)                  |                                                                                                                                |
+| `tenantId`, `tenantKind`                         | `tenant_id` (the token's `tid`), `tenant_kind` | the kind decides which screens and roles apply                                                                                 |
+| `roles`                                          | `roles`                                        | brought up to date by the re-read                                                                                              |
+| `displayName`                                    | `display_name`                                 | "User <first eight of the id>" when the person gave none                                                                       |
+| `mfa`                                            | `mfa`                                          | the fake asserts it (the account page says so); Supabase verifies it                                                           |
+| `sv`                                             | `session_version`                              | identity's per-user version; a bump revokes older sessions                                                                     |
+| `provider`                                       | the adapter                                    | `fake` or `supabase`                                                                                                           |
+| `issuedAt`, `expiresAt`                          | now, now plus the lifetime                     | a refresh never extends them                                                                                                   |
+| `cwToken`, `cwTokenExpiresAt`                    | `access_token`, now plus `expires_in`          | the bearer for the services (ES256 JWT with `sub`, `kind`, `tid`, `roles`, `sv`, `mfa`)                                        |
+| `providerRefreshToken`                           | the provider session's refresh token           | what a refresh and a provider sign-out use; the fake's encodes the contact and the level                                       |
 | `providerAccessToken`, `providerAccessExpiresAt` | the provider session's access token and expiry | what the factor calls and the re-exchange use; a refresh rotates both tokens, and the new pair is written back at once (D-073) |
-| `checkedAt`                   | now                                            | when `/me` was last read                                                                 |
-| `refreshNotBefore`            | absent                                         | set by the proxy after a rate-limited refresh: no retry before then                      |
-| `analyticsConsent`            | kept across refreshes                          | the analytics consent the onboarding recorded                                            |
+| `checkedAt`                                      | now                                            | when `/me` was last read                                                                                                       |
+| `refreshNotBefore`                               | absent                                         | set by the proxy after a rate-limited refresh: no retry before then                                                            |
+| `analyticsConsent`                               | kept across refreshes                          | the analytics consent the onboarding recorded                                                                                  |
 
 No email, phone or tenant name travels in the cookie: the account page reads them from `/me`
 on each visit.
@@ -200,15 +207,15 @@ a URL (D-068).
 
 ## The providers
 
-| Step             | Fake (`CW_WEB_AUTH_PROVIDER=fake`, local and test)                                                                                           | Supabase (`supabase`, with `CW_WEB_SUPABASE_URL` and `CW_WEB_SUPABASE_ANON_KEY`)                                              |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| Phone code       | nothing is sent; any six digits pass; `POST /dev/provider-tokens {phone}` signs the token                                                    | `POST /auth/v1/otp {phone}`, then `POST /auth/v1/verify {type sms, phone, token}`                                             |
-| Email link       | the link is shown on the email-sent page instead of sent                                                                                     | `POST /auth/v1/otp {email, create_user}` with `redirect_to`, then `POST /auth/v1/verify {type magiclink, token_hash}`         |
-| Refresh          | the contact and the level are in the refresh token; a new token is signed                                                                    | `POST /auth/v1/token?grant_type=refresh_token`                                                                                |
-| Sign-out         | nothing                                                                                                                                      | `POST /auth/v1/logout?scope=local` with a fresh access token                                                                  |
-| Second factor    | one confirm button; the token is signed at aal2 (`mfaMode: "confirm"`)                                                                       | TOTP: the factors from `GET /auth/v1/user`, then `POST /auth/v1/factors`, `/factors/{id}/challenge`, `/factors/{id}/verify`, `DELETE /factors/{id}` (`"totp"`) |
-| Development form | a persona (tenant kind, roles, name, optional tenant id) made by identity on the spot; its address is `<uuid5>@fake.compliancewatch.invalid`; a regulatory persona without a tenant id joins the one development internal tenant (identity keeps one) | none                                                                                                                          |
-| Refusals         | identity's own problems pass through (a persona the kind lacks, the last admin)                                                              | 429 rate limited (Retry-After), `otp_expired` expired, 400/422 invalid code, 401/403 expired or invalid link, 5xx unavailable |
+| Step             | Fake (`CW_WEB_AUTH_PROVIDER=fake`, local and test)                                                                                                                                                                                                    | Supabase (`supabase`, with `CW_WEB_SUPABASE_URL` and `CW_WEB_SUPABASE_ANON_KEY`)                                                                               |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Phone code       | nothing is sent; any six digits pass; `POST /dev/provider-tokens {phone}` signs the token                                                                                                                                                             | `POST /auth/v1/otp {phone}`, then `POST /auth/v1/verify {type sms, phone, token}`                                                                              |
+| Email link       | the link is shown on the email-sent page instead of sent                                                                                                                                                                                              | `POST /auth/v1/otp {email, create_user}` with `redirect_to`, then `POST /auth/v1/verify {type email, token_hash}`                                              |
+| Refresh          | the contact and the level are in the refresh token; a new token is signed                                                                                                                                                                             | `POST /auth/v1/token?grant_type=refresh_token`                                                                                                                 |
+| Sign-out         | nothing                                                                                                                                                                                                                                               | `POST /auth/v1/logout?scope=local` with a fresh access token                                                                                                   |
+| Second factor    | one confirm button; the token is signed at aal2 (`mfaMode: "confirm"`)                                                                                                                                                                                | TOTP: the factors from `GET /auth/v1/user`, then `POST /auth/v1/factors`, `/factors/{id}/challenge`, `/factors/{id}/verify`, `DELETE /factors/{id}` (`"totp"`) |
+| Development form | a persona (tenant kind, roles, name, optional tenant id) made by identity on the spot; its address is `<uuid5>@fake.compliancewatch.invalid`; a regulatory persona without a tenant id joins the one development internal tenant (identity keeps one) | none                                                                                                                                                           |
+| Refusals         | identity's own problems pass through (a persona the kind lacks, the last admin)                                                                                                                                                                       | 429 rate limited (Retry-After), `otp_expired` expired, 400/422 invalid code, 401/403 expired or invalid link, 5xx unavailable                                  |
 
 The Supabase adapter is checked against recorded response shapes only
 (`src/test/gotrue-fixtures.ts`) until the project exists; the first live run is in the release
@@ -239,6 +246,10 @@ it).
   provider's single-use token and lands only in the callback handler; everything else travels
   in `cw_pending`.
 - **A forged `next`** cannot leave the site: `safeNext` accepts only a same-origin path.
+- **A forged host in the email link's `redirect_to`**: with Supabase the link's address is built
+  from `CW_WEB_PUBLIC_URL`, never from `Host` or `x-forwarded-host`, so a request that names
+  another host cannot have a person's sign-in link sent back there; the Supabase project's Site
+  URL and redirect allow-list name no other host either (`infra/deploy/README.md`).
 - **A forged client address**: the allow-list reads `x-real-ip` and `x-forwarded-for` only when
   `CW_WEB_TRUST_FORWARDED_IP` says the deployment's proxy sets them (Vercel does); elsewhere the
   address is unknown and a non-empty list admits nobody (D-070).
@@ -259,6 +270,7 @@ make web-dev                                                        # CW_WEB_AUT
 `/sign-in` offers the development sign-in (a persona), a phone code (any six digits) and an
 email link (shown on the next page). The user's own stack keeps header mode; sign-in works
 there too, with the account page saying that identity reads no token and the re-read deferred.
-Supabase needs `CW_WEB_AUTH_PROVIDER=supabase`, the project's URL and anon key on the web app,
-and identity's own `CW_AUTH_PROVIDER=supabase` with the service-role key
-(`services/identity/README.md`, "Supabase: manual steps").
+Supabase needs `CW_WEB_AUTH_PROVIDER=supabase`, the project's URL and anon key and the
+deployment's own origin (`CW_WEB_PUBLIC_URL`) on the web app, and identity's own
+`CW_AUTH_PROVIDER=supabase` with the service-role key (`services/identity/README.md`, "Supabase:
+manual steps", including the email template step).

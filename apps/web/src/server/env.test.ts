@@ -88,16 +88,22 @@ describe("loadEnv", () => {
       );
     }
     expect(() => loadEnv({ CW_WEB_ENV: "prod", CW_WEB_AUTH_PROVIDER: "supabase" })).toThrow(
-      /CW_WEB_SUPABASE_URL: required when CW_WEB_AUTH_PROVIDER is supabase; CW_WEB_SUPABASE_ANON_KEY: required/,
+      /CW_WEB_SUPABASE_URL: required when CW_WEB_AUTH_PROVIDER is supabase; CW_WEB_SUPABASE_ANON_KEY: required.*; CW_WEB_PUBLIC_URL: required/,
     );
     const supabase = loadEnv({
       CW_WEB_ENV: "prod",
       CW_WEB_AUTH_PROVIDER: "supabase",
       CW_WEB_SUPABASE_URL: "https://project.supabase.test/",
       CW_WEB_SUPABASE_ANON_KEY: "anon-test-value",
+      CW_WEB_PUBLIC_URL: "https://app.example.test/",
     });
     expect(supabase.CW_WEB_SUPABASE_URL).toBe("https://project.supabase.test");
     expect(supabase.CW_WEB_SUPABASE_ANON_KEY).toBe("anon-test-value");
+    expect(supabase.CW_WEB_PUBLIC_URL).toBe("https://app.example.test");
+    expect(() =>
+      loadEnv({ CW_WEB_AUTH_PROVIDER: "fake", CW_WEB_PUBLIC_URL: "app.example.test" }),
+    ).toThrow(/CW_WEB_PUBLIC_URL/);
+    expect(loadEnv({ CW_WEB_AUTH_PROVIDER: "fake" }).CW_WEB_PUBLIC_URL).toBeUndefined();
     expect(() => loadEnv({ CW_WEB_AUTH_PROVIDER: "nope" })).toThrow(/CW_WEB_AUTH_PROVIDER/);
   });
 

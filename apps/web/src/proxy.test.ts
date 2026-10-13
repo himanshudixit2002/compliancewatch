@@ -322,6 +322,7 @@ describe("proxy", () => {
     vi.stubEnv("CW_WEB_AUTH_PROVIDER", "supabase");
     vi.stubEnv("CW_WEB_SUPABASE_URL", "https://project.supabase.test");
     vi.stubEnv("CW_WEB_SUPABASE_ANON_KEY", "anon");
+    vi.stubEnv("CW_WEB_PUBLIC_URL", "https://app.example.test");
     resetEnvCache();
     const cookie = `cw_session=${await cookieWithoutToken()}`;
     const closed = await proxy(request("/admin/review", { cookie }));

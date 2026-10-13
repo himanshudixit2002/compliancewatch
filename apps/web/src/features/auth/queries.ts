@@ -63,17 +63,26 @@ export function pendingSignIn(): Promise<PendingSignIn | null> {
 }
 
 /**
- * Where the email link comes back to: this deployment's origin, from the host the browser
- * asked for (the forwarded host behind a trusted proxy), over https outside local, and the
- * callback handler's route. The path to return to after signing in rides along as `next`.
+ * Where the email link comes back to: the callback handler's route on this deployment's origin,
+ * `CW_WEB_PUBLIC_URL` (required with the supabase provider: a request header must not decide
+ * where a sign-in link is sent back to) or, for the fake adapter, which sends nothing, the host
+ * the browser asked for (the forwarded host behind a trusted proxy) over https outside local.
+ * The path to return to after signing in rides along as `next`, always present (empty when
+ * there is none), so the provider's email template can append the hash with `&`.
  */
 export async function callbackUrl(next?: string, env: WebEnv = getEnv()): Promise<string> {
+  const origin = env.CW_WEB_PUBLIC_URL ?? (await requestOrigin(env));
+  const url = new URL(hrefFor(screenById("system.auth-callback")), origin);
+  url.searchParams.set("next", next ?? "");
+  return url.toString();
+}
+
+/** The origin the browser asked for, from the request's headers (the fake adapter only). */
+async function requestOrigin(env: WebEnv): Promise<string> {
   const incoming = await headers();
   const trust = env.CW_WEB_TRUST_FORWARDED_IP;
   const host = requestHost(incoming, { trustForwardedHost: trust }) ?? "localhost";
   const forwardedProto = trust ? incoming.get("x-forwarded-proto")?.split(",")[0]?.trim() : "";
   const proto = forwardedProto || (env.CW_WEB_ENV === "local" ? "http" : "https");
-  const url = new URL(`${proto}://${host}${hrefFor(screenById("system.auth-callback"))}`);
-  if (next !== undefined && next !== "") url.searchParams.set("next", next);
-  return url.toString();
+  return `${proto}://${host}`;
 }

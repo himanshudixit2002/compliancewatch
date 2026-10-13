@@ -260,6 +260,7 @@ environment variables:
 | `CW_WEB_SESSION_SECRET`                                          | secret          | 32 random bytes as base64, one per environment; rotating it signs everyone out                                                                                                                        |
 | `CW_WEB_AUTH_PROVIDER`                                           | env             | `supabase` (`fake` is refused outside local and test)                                                                                                                                                 |
 | `CW_WEB_SUPABASE_URL`, `CW_WEB_SUPABASE_ANON_KEY`                | env / secret    | the Supabase project in Mumbai (manual step 7 of `services/identity/README.md`); the anon key stays on the server, and identity holds the service-role key                                            |
+| `CW_WEB_PUBLIC_URL`                                              | env             | this deployment's own origin (`https://app.<domain>`), required with the supabase provider: the email link comes back to `<origin>/auth/callback`, built from this and never from a request header    |
 | `CW_WEB_IDENTITY_URL` and the other `CW_WEB_<SERVICE>_URL`       | env             | the services' internal addresses                                                                                                                                                                      |
 | `CW_WEB_ADMIN_IP_ALLOWLIST`                                      | env             | the office and VPN ranges (IPv4 and IPv6 CIDRs, comma separated) from which `/admin` may be opened; empty in prod answers 404 to every address, empty on staging opens it to all (said once at start) |
 | `CW_WEB_TRUST_FORWARDED_IP`                                      | env             | `true` on Vercel, whose edge sets `x-real-ip` and `x-forwarded-for`; without it the client address is unknown and a non-empty allow-list admits nobody                                                |
@@ -270,10 +271,20 @@ environment variables:
 
 Sign-in needs identity in `dual` or `token` mode (`/me` and the user routes answer a bearer
 only), `CW_AUTH_PROVIDER=supabase` on identity with the same project, and the Supabase project
-itself: Mumbai region, phone sign-in through an Indian SMS provider, email sign-in with the
-redirect URL `https://app.<domain>/auth/callback` allowed, TOTP enabled. The first live run of
-the Supabase adapter (phone, email link, the second factor) is a release-checklist item: until
-then it has met recorded responses only.
+itself: Mumbai region, phone sign-in through an Indian SMS provider, email sign-in, TOTP
+enabled, and the three settings the email link depends on (manual step 3a of
+`services/identity/README.md`): the Site URL equal to `CW_WEB_PUBLIC_URL`, a redirect allow-list
+that names no other host (an entry on another host, or a wildcard that admits one, lets a forged
+`redirect_to` carry a person's sign-in link elsewhere), and the Magic Link and Confirm signup
+email templates changed to link to `{{ .RedirectTo }}&token_hash={{ .TokenHash }}&type=email`,
+since the default templates' link lands the session in a URL fragment and never on this app's
+callback. The first
+live run of the Supabase adapter (phone, the email link with that template, the factor list from
+`/auth/v1/user`, a session kept open past ten minutes on the MFA page) is a release-checklist
+item: until then it has met recorded responses only. GoTrue's token-refresh rate limit is per
+client address and the web server is the one client; the proxy waits out a 429, but set the
+project's limit for the expected number of concurrent sessions (one refresh per session about
+every hour).
 
 ## Promotion and rollback
 
