@@ -1,4 +1,9 @@
+import { SCREENS } from "../src/shared/config/screens.ts";
 import { ANALYST, expect, test } from "./fixtures";
+
+// The registry says which screens still wait for a backend; the first of them stands in for the
+// waiting row, so a package that delivers a backend does not break this test.
+const WAITING = SCREENS.find((screen) => screen.status === "waiting" && screen.awaits.length > 0);
 
 test.describe("sitemap", () => {
   test("lists every section with routes, roles, status and awaited routes", async ({
@@ -11,7 +16,15 @@ test.describe("sitemap", () => {
     const reports = page.locator("[data-screen='admin.error-reports']");
     await expect(reports).toContainText("GET /v1/rulebook/error-reports");
     await expect(reports).toContainText("services track (WP24)");
-    await expect(reports).toContainText("Waiting for a backend");
+    await expect(reports).toContainText("Ready to build");
+    if (WAITING !== undefined) {
+      const row = page.locator(`[data-screen='${WAITING.id}']`);
+      await expect(row).toContainText("Waiting for a backend");
+      const awaited = WAITING.awaits[0];
+      if (awaited !== undefined) {
+        await expect(row).toContainText(`${awaited.method} ${awaited.path}`);
+      }
+    }
     await expect(page.locator("[data-screen='admin.review.stats']")).toContainText("Available");
     await expect(page.locator("[data-screen='system.sitemap']")).toContainText("Available");
     await expect(page.locator("[data-screen='admin.system']")).toContainText("Available");
