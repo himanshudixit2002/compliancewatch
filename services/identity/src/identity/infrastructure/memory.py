@@ -499,7 +499,8 @@ class MemoryDataRequestDirectory:
 
 class MemoryTenantDirectory:
     """``TenantDirectory`` over a ``MemoryStore``: every tenant's summary, as
-    ``identity.tenant_directory()`` answers it."""
+    ``identity.tenant_directory()`` answers it; ``query`` is matched as given, as the function
+    matches it (``ListTenants`` trims it)."""
 
     def __init__(self, store: MemoryStore) -> None:
         self._store = store
@@ -511,7 +512,7 @@ class MemoryTenantDirectory:
             if start is None:
                 return []
             tenants = [t for t in tenants if _tenant_position(t) > _tenant_position(start)]
-        wanted = query.strip().casefold()
+        wanted = query.casefold()
         if wanted:
             tenants = [t for t in tenants if wanted in t.name.casefold() or str(t.id) == wanted]
         return [self._summary(tenant) for tenant in tenants[:limit]]

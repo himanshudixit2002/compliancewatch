@@ -2,10 +2,17 @@
 
 from collections.abc import Mapping
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 from uuid import UUID
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+)
 
 from domain_kernel.audit import MAX_REASON_CHARS
 from domain_kernel.channels import Channel
@@ -244,13 +251,16 @@ class ResendIn(Strict):
     """Why a failed notification is sent again, and, when the admin wants to be sure of the
     address, which one."""
 
-    reason: str = Field(
-        min_length=1,
-        max_length=MAX_REASON_CHARS,
-        description=(
-            "Why it is resent (a support case, a provider outage); written to the audit trail"
+    reason: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_REASON_CHARS),
+        Field(
+            description=(
+                f"Why it is resent (a support case, a provider outage), 1 to {MAX_REASON_CHARS} "
+                "characters once trimmed; written to the audit trail. A blank one is a 422"
+            )
         ),
-    )
+    ]
     recipient: str | None = Field(
         default=None,
         min_length=1,

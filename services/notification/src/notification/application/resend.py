@@ -7,11 +7,14 @@ its work queue entry is due with it in the same transaction. The dispatcher then
 sends everything else: consent and suppression are checked again, and quiet hours still hold it.
 
 A resend is an admin's act on a tenant's data, so it carries a reason and is audited: the unit
-writes ``notification.resent`` with the reason, the actor, the channel and the attempts the
-failed round took, and never the address. A notification goes to one address; ``recipient``,
-when given, must be that address (normalised as the notification keeps it), else nothing is
-queued (``ResendRecipientMismatchError``, 422): the admin says which address they mean, and a
-resend never reaches another.
+writes ``notification.resent`` with the reason and the actor; before, the state, the attempts and
+the error text of the failed round (the provider's or the renderer's words, masked as every audit
+text is); after, the state, the attempts, the channel and whether a recipient was named; never
+the address. A blank reason never gets here: the route refuses it (422), and the check below is
+defence in depth. A notification goes to one address; ``recipient``, when given, must be that
+address (normalised as the notification keeps it), else nothing is queued
+(``ResendRecipientMismatchError``, 422): the admin says which address they mean, and a resend
+never reaches another.
 """
 
 from collections.abc import Callable

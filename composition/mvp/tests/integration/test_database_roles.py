@@ -468,6 +468,11 @@ def test_the_identity_directory_lists_every_tenant_with_its_plan_and_counts_for_
             text(TENANT_DIRECTORY), {"q": "%", "after": None, "lim": 10, "only": None}
         ).all()
         assert literal == [], "a LIKE wildcard is matched literally"
+        padded = connection.execute(
+            text(TENANT_DIRECTORY),
+            {"q": f"{traders.value} ", "after": None, "lim": 10, "only": None},
+        ).all()
+        assert padded == [], "q is matched as given, as the memory twin does; ListTenants trims it"
         _as_tenant(connection, stores)
         own = connection.execute(text("SELECT count(*) FROM identity.tenant")).scalar_one()
         assert own == 1, "the role itself reads its current tenant only"

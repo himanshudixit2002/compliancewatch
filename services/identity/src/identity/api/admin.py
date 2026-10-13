@@ -2,12 +2,13 @@
 
 - ``GET /admin/tenants?q&limit&cursor``: every tenant a page at a time, in the order of (name,
   id): id, kind, name, status, when it was created, the plan key and status of its newest
-  subscription (null without one) and its user counts; never a person's details. ``q`` keeps the
-  tenants whose name contains it (any case) or whose id is it.
+  subscription (null without one) and its user counts; never a person's details. ``q``, trimmed
+  of surrounding whitespace, keeps the tenants whose name contains it (any case) or whose id is it.
 - ``GET /admin/tenants/{tenant_id}``: one tenant's summary; 404 for an id identity does not know.
 - ``GET /admin/tenants/{tenant_id}/users``: the tenant's users with their roles. It needs a
   reason in the ``x-reason`` header (a GET carries no body, and a reason in the URL would reach
-  every access log); without one it is a 422. Every read is written to the tenant's audit trail
+  every access log); without one, or with only whitespace in it, it is a 422, and the reason is
+  kept trimmed of surrounding whitespace. Every read is written to the tenant's audit trail
   as ``tenant.users_read`` with the reason, the tenant id and the admin, and no personal data
   (``identity.application.admin``).
 
@@ -21,6 +22,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Query, Request
+from pydantic import StringConstraints
 
 from domain_kernel.access import Principal, Role
 from domain_kernel.ids import TenantId
@@ -37,7 +39,8 @@ router = APIRouter(prefix="/v1/identity/admin", tags=["identity"])
 
 CURSOR_SCOPE = "identity.admin.tenants"
 REASON_HEADER = "x-reason"
-"""Why a tenant's users are read, as the admin said; the trail keeps it verbatim."""
+"""Why a tenant's users are read, as the admin said; the trail keeps it, trimmed of surrounding
+whitespace."""
 
 admin_role = require_roles(Role.ADMIN)
 
@@ -57,16 +60,18 @@ async def internal_admin(
 InternalAdmin = Annotated[Principal, Depends(internal_admin)]
 Reason = Annotated[
     str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_REASON_CHARS),
     Header(
         alias=REASON_HEADER,
-        min_length=1,
-        max_length=MAX_REASON_CHARS,
         description=(
-            "Why the users are read (a support case, a security review); written to the "
-            "tenant's audit trail with the read. Required: a read without it is a 422."
+            "Why the users are read (a support case, a security review), 1 to "
+            f"{MAX_REASON_CHARS} characters once trimmed; written to the tenant's audit trail "
+            "with the read. Required: a read without it, or with only whitespace in it, is a 422."
         ),
     ),
 ]
+"""The header is validated at the edge, so a blank reason never reaches the use case: pydantic
+trims it as ``str.strip`` does, then ``min_length`` refuses what is left of a blank one (422)."""
 
 
 @router.get(
@@ -82,7 +87,10 @@ def list_tenants(
         str,
         Query(
             max_length=MAX_QUERY_CHARS,
-            description="Keep the tenants whose name contains this, any case, or whose id is it",
+            description=(
+                "Keep the tenants whose name contains this, any case, or whose id is it; "
+                "surrounding whitespace is ignored"
+            ),
         ),
     ] = "",
 ) -> Page[AdminTenantOut]:
@@ -117,6 +125,7 @@ def read_tenant_users(
     tenant_id: UUID, reason: Reason, principal: InternalAdmin, wired: Wired
 ) -> UsersOut:
     """The read is written to the tenant's audit trail as ``tenant.users_read`` with the
-    reason; 422 without the ``x-reason`` header, 404 for a tenant identity does not know."""
+    reason; 422 without the ``x-reason`` header or with only whitespace in it, 404 for a tenant
+    identity does not know."""
     users = wired.read_tenant_users.run(principal, TenantId(tenant_id), reason=reason)
     return UsersOut(items=[UserOut.from_user(user) for user in users])

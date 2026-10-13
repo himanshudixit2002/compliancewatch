@@ -2084,13 +2084,13 @@
         "operationId": "list_tenants_v1_identity_admin_tenants_get",
         "parameters": [
           {
-            "description": "Keep the tenants whose name contains this, any case, or whose id is it",
+            "description": "Keep the tenants whose name contains this, any case, or whose id is it; surrounding whitespace is ignored",
             "in": "query",
             "name": "q",
             "required": false,
             "schema": {
               "default": "",
-              "description": "Keep the tenants whose name contains this, any case, or whose id is it",
+              "description": "Keep the tenants whose name contains this, any case, or whose id is it; surrounding whitespace is ignored",
               "maxLength": 200,
               "title": "Q",
               "type": "string"
@@ -2264,7 +2264,7 @@
     },
     "/v1/identity/admin/tenants/{tenant_id}/users": {
       "get": {
-        "description": "The read is written to the tenant's audit trail as ``tenant.users_read`` with the\nreason; 422 without the ``x-reason`` header, 404 for a tenant identity does not know.",
+        "description": "The read is written to the tenant's audit trail as ``tenant.users_read`` with the\nreason; 422 without the ``x-reason`` header or with only whitespace in it, 404 for a tenant\nidentity does not know.",
         "operationId": "read_tenant_users_v1_identity_admin_tenants__tenant_id__users_get",
         "parameters": [
           {
@@ -2278,12 +2278,12 @@
             }
           },
           {
-            "description": "Why the users are read (a support case, a security review); written to the tenant's audit trail with the read. Required: a read without it is a 422.",
+            "description": "Why the users are read (a support case, a security review), 1 to 500 characters once trimmed; written to the tenant's audit trail with the read. Required: a read without it, or with only whitespace in it, is a 422.",
             "in": "header",
             "name": "x-reason",
             "required": true,
             "schema": {
-              "description": "Why the users are read (a support case, a security review); written to the tenant's audit trail with the read. Required: a read without it is a 422.",
+              "description": "Why the users are read (a support case, a security review), 1 to 500 characters once trimmed; written to the tenant's audit trail with the read. Required: a read without it, or with only whitespace in it, is a 422.",
               "maxLength": 500,
               "minLength": 1,
               "title": "X-Reason",

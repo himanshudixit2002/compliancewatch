@@ -27,6 +27,7 @@ TENANT_ID = TenantId.new()
 OTHER_TENANT_ID = TenantId.new()
 TENANT = {"x-tenant-id": str(TENANT_ID)}
 REASON = {"reason": "Example support case 2000-01: the provider was down for an hour"}
+PADDED_REASON = {"reason": f"  {REASON['reason']}\t"}
 
 
 def send_body(**changes: object) -> dict[str, object]:
@@ -88,14 +89,21 @@ def test_a_resend_needs_a_reason_and_a_key_and_replays_a_retry() -> None:
         no_reason = client.post(path, json={}, headers={**TENANT, **key()})
         assert no_reason.status_code == 422, no_reason.text
         assert no_reason.json()["type"].endswith(":request-invalid")
+        # A blank reason is refused at the edge as a missing one is, whatever whitespace it holds.
+        for blank in ("", "   ", "\t", " \t "):
+            refused = client.post(path, json={"reason": blank}, headers={**TENANT, **key()})
+            assert refused.status_code == 422, (repr(blank), refused.text)
+            assert refused.json()["type"].endswith(":request-invalid"), repr(blank)
         no_key = client.post(path, json=REASON, headers=TENANT)
         assert no_key.status_code == 428, no_key.text
         retry = key()
-        first = client.post(path, json=REASON, headers={**TENANT, **retry})
+        first = client.post(path, json=PADDED_REASON, headers={**TENANT, **retry})
         assert first.status_code == 200, first.text
-        assert (first.json()["state"], first.json()["attempts"]) == ("queued", 0)
+        assert (first.json()["state"], first.json()["attempts"]) == ("queued", 0), (
+            "nothing was queued by the refused requests"
+        )
         assert "Idempotent-Replayed" not in first.headers
-        replayed = client.post(path, json=REASON, headers={**TENANT, **retry})
+        replayed = client.post(path, json=PADDED_REASON, headers={**TENANT, **retry})
         assert replayed.status_code == 200, replayed.text
         assert replayed.headers["Idempotent-Replayed"] == "true"
         assert replayed.json() == first.json(), "the same answer, and nothing queued twice"
@@ -114,7 +122,7 @@ def test_a_resend_needs_a_reason_and_a_key_and_replays_a_retry() -> None:
         "notification",
         notification_id,
         REASON["reason"],
-    )
+    ), "the reason lands trimmed of surrounding whitespace"
     assert entry.actor.label == "system:notification", "header mode names nobody"
     assert entry.before is not None
     assert entry.before["state"] == "failed"

@@ -1090,7 +1090,7 @@
         "description": "Why a failed notification is sent again, and, when the admin wants to be sure of the\naddress, which one.",
         "properties": {
           "reason": {
-            "description": "Why it is resent (a support case, a provider outage); written to the audit trail",
+            "description": "Why it is resent (a support case, a provider outage), 1 to 2000 characters once trimmed; written to the audit trail. A blank one is a 422",
             "maxLength": 2000,
             "minLength": 1,
             "title": "Reason",

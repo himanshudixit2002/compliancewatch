@@ -184,6 +184,8 @@ def test_the_list_pages_and_searches_by_name_or_id(client: TestClient, setup: Se
     assert rest["next_cursor"] is None
     by_name = client.get(TENANTS, params={"q": "STORES"}, headers=setup.admin).json()
     assert [item["name"] for item in by_name["items"]] == ["Example Stores"]
+    padded = client.get(TENANTS, params={"q": "  stores\t"}, headers=setup.admin).json()
+    assert [item["name"] for item in padded["items"]] == ["Example Stores"], "q is trimmed once"
     by_id = client.get(
         TENANTS, params={"q": setup.traders["tenant"]["id"]}, headers=setup.admin
     ).json()
@@ -224,8 +226,14 @@ def test_the_users_read_needs_a_reason_and_lands_in_the_tenant_s_trail(
     without = client.get(f"{TENANTS}/{tenant}/users", headers=setup.admin)
     assert without.status_code == 422, without.text
     assert without.json()["type"].endswith(":request-invalid")
-    blank = client.get(f"{TENANTS}/{tenant}/users", headers={**setup.admin, "x-reason": ""})
-    assert blank.status_code == 422
+    # A blank reason is refused at the edge as a missing one is, whatever whitespace it holds
+    # (the test client hands the header over as given, with no HTTP parser to trim it).
+    for blank in ("", "   ", "\t", " \t "):
+        refused = client.get(
+            f"{TENANTS}/{tenant}/users", headers={**setup.admin, "x-reason": blank}
+        )
+        assert refused.status_code == 422, (repr(blank), refused.text)
+        assert refused.json()["type"].endswith(":request-invalid"), repr(blank)
     unknown = client.get(f"{TENANTS}/{uuid4()}/users", headers={**setup.admin, **REASON})
     assert unknown.status_code == 404
 
@@ -246,10 +254,15 @@ def test_the_users_read_needs_a_reason_and_lands_in_the_tenant_s_trail(
     assert "+91" not in str(entry)
     mine = client.get(AUDIT, params={"action": USERS_READ}, headers=setup.admin).json()["items"]
     assert mine == []
-    # A second read is a second row.
-    client.get(f"{TENANTS}/{tenant}/users", headers={**setup.admin, **REASON})
+    # A second read is a second row; the reason lands trimmed of surrounding whitespace.
+    padded = client.get(
+        f"{TENANTS}/{tenant}/users",
+        headers={**setup.admin, "x-reason": f"  {REASON['x-reason']}\t"},
+    )
+    assert padded.status_code == 200, padded.text
     again = client.get(AUDIT, params={"action": USERS_READ}, headers=setup.owner).json()
     assert len(again["items"]) == 2
+    assert {item["reason"] for item in again["items"]} == {REASON["x-reason"]}
 
 
 def test_owners_staff_services_and_callers_without_a_token_are_refused(
@@ -337,6 +350,8 @@ def test_the_memory_directory_mirrors_the_function(app: FastAPI, client: TestCli
     assert directory.page("", TenantId.new(), 10) == [], "a cursor naming no tenant reads nothing"
     assert directory.page("traders", None, 10) == [traders]
     assert directory.page(str(traders.id), None, 10) == [traders]
+    assert directory.page("traders ", None, 10) == [], "matched as given, as the function does"
+    assert directory.page(f"{traders.id} ", None, 10) == [], "the use case trims q, not the twin"
     assert directory.get(traders.id) == traders
     assert directory.get(TenantId.new()) is None
     assert directory.page("", None, 1) == page[:1]

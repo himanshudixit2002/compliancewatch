@@ -59,8 +59,8 @@ class TenantDirectory(Protocol):
     def page(self, query: str, after: TenantId | None, limit: int) -> list[TenantSummary]:
         """At most ``limit`` tenants in the order of (name, id), after the tenant ``after``
         names (None: from the first). ``query`` keeps the tenants whose name contains it,
-        ignoring case, or whose id is it; empty keeps every tenant. A cursor naming no tenant
-        reads nothing."""
+        ignoring case, or whose id is it, matched as given (``ListTenants`` trims it first);
+        empty keeps every tenant. A cursor naming no tenant reads nothing."""
         ...
 
     def get(self, tenant_id: TenantId) -> TenantSummary | None:

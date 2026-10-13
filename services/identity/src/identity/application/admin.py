@@ -10,8 +10,9 @@ tenant. An admin of the internal tenant reads across them in two ways:
   roles and writes ``tenant.users_read`` to that tenant's audit trail in the same unit, with the
   reason the admin gave, the tenant id, the admin as the actor and how many users were read:
   no name, address or number. The tenant's owners see the read in their trail
-  (``GET /v1/identity/audit``), as they see every actor on their data. A read without a reason
-  never gets here: the route refuses it (422).
+  (``GET /v1/identity/audit``), as they see every actor on their data. A read without a reason,
+  or with a blank one, never gets here: the route refuses it (422); the use case's own check is
+  defence in depth.
 
 The caller is checked as the support requests are checked (``internal_admin``): a verified token
 naming an active admin of the internal tenant whose session is current. The anonymous caller of
@@ -60,12 +61,14 @@ class ListTenants:
     def run(
         self, actor: Principal, *, query: str = "", after: TenantId | None = None, limit: int
     ) -> list[TenantSummary]:
-        """At most ``limit`` tenants (up to ``MAX_PAGE``) after ``after``, matching ``query``."""
+        """At most ``limit`` tenants (up to ``MAX_PAGE``) after ``after``, matching ``query``
+        trimmed of surrounding whitespace; the directory matches what is left as given, so the
+        memory twin and ``identity.tenant_directory()`` answer alike."""
         if not 1 <= limit <= MAX_PAGE:
             raise ValueError(f"limit must be 1 to {MAX_PAGE}, got {limit}")
         with self._unit_of_work(actor.tenant_id) as uow:
             internal_admin(uow, actor)
-        return self._directory.page(query, after, limit)
+        return self._directory.page(query.strip(), after, limit)
 
 
 class ReadTenant:

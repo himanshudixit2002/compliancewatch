@@ -96,7 +96,8 @@ export type paths = {
     /**
      * A tenant's users with their roles, for a reason that is audited (internal admins)
      * @description The read is written to the tenant's audit trail as ``tenant.users_read`` with the
-     *     reason; 422 without the ``x-reason`` header, 404 for a tenant identity does not know.
+     *     reason; 422 without the ``x-reason`` header or with only whitespace in it, 404 for a tenant
+     *     identity does not know.
      */
     get: operations["read_tenant_users_v1_identity_admin_tenants__tenant_id__users_get"];
     put?: never;
@@ -1608,7 +1609,7 @@ export interface operations {
         cursor?: string | null;
         /** @description Items per page, 1 to 200 */
         limit?: number;
-        /** @description Keep the tenants whose name contains this, any case, or whose id is it */
+        /** @description Keep the tenants whose name contains this, any case, or whose id is it; surrounding whitespace is ignored */
         q?: string;
       };
       header?: never;
@@ -1717,7 +1718,7 @@ export interface operations {
     parameters: {
       query?: never;
       header: {
-        /** @description Why the users are read (a support case, a security review); written to the tenant's audit trail with the read. Required: a read without it is a 422. */
+        /** @description Why the users are read (a support case, a security review), 1 to 500 characters once trimmed; written to the tenant's audit trail with the read. Required: a read without it, or with only whitespace in it, is a 422. */
         "x-reason": string;
       };
       path: {

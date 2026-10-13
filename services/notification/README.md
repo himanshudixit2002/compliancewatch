@@ -126,9 +126,11 @@ the key is released so the retry runs.
 new round of attempts; the dispatcher then checks consent, suppression and quiet hours as for any
 other, so a resend never skips them. It is an act on a tenant's data, so:
 
-- it carries a `reason` in the body (1 to 2,000 characters) and is written to the tenant's audit
-  trail as `notification.resent`: the reason, the actor, the state and attempts before and after
-  and the channel, never the address;
+- it carries a `reason` in the body (1 to 2,000 characters once trimmed; a blank one is a 422)
+  and is written to the tenant's audit trail as `notification.resent`: the reason, the actor,
+  before it the state, the attempts and the error text of the failed round (the provider's or the
+  renderer's words, masked as every audit text is), after it the state, the attempts, the channel
+  and whether a `recipient` was named, never the address;
 - who may: a tenant admin (owner or ca_admin) for the tenant their token names, as a CA firm's
   people send its bulk card, or the regulatory team's admin for any tenant, naming it in
   `x-tenant-id` (the console browses by tenant); staff, other roles and services are refused

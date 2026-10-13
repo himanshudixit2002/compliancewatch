@@ -829,7 +829,7 @@ export type components = {
     ResendIn: {
       /**
        * Reason
-       * @description Why it is resent (a support case, a provider outage); written to the audit trail
+       * @description Why it is resent (a support case, a provider outage), 1 to 2000 characters once trimmed; written to the audit trail. A blank one is a 422
        */
       reason: string;
       /**
