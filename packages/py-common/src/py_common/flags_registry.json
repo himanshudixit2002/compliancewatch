@@ -317,6 +317,20 @@
       ]
     },
     {
+      "name": "profile.fy_schedule",
+      "type": "bool",
+      "default": false,
+      "owner": "core-product",
+      "description": "The profile worker's financial year schedule: once a day at 00:30 IST it opens the confirm_financial_year review tasks of every tenant that has profile nodes for the financial year of that moment in India (so on 1 April, and for a tenant onboarded later the next night), one task per entity and per-year attribute with no value for the year, never twice for the same entity, attribute and year. The tenants come from profile.tenant_directory(), the NOLOGIN directory role's function, so the job needs no service token and no row-level security bypass; each run logs profile.fy_schedule_run. Off, the worker hosts no such job and POST /v1/profile/financial-year-confirmations and profile-fy-confirm open the tasks by hand.",
+      "removal": "Once the schedule has opened the tasks of a financial year for every tenant in production and the tasks were answered or resolved through the web app.",
+      "expires": "2027-06-30",
+      "targeting": "none",
+      "env": "CW_PROFILE_FY_SCHEDULE_ENABLED",
+      "services": [
+        "profile"
+      ]
+    },
+    {
       "name": "profile.gstin_category_prefill",
       "type": "bool",
       "default": false,
