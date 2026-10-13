@@ -117,7 +117,10 @@ the checkout's Playwright version is not downloaded and Google Chrome is install
 
 `e2e/fixtures.ts` extends `test` with `checkA11y(selector?)`, which runs `AxeBuilder` on the page
 (or one selector) and fails on any finding of impact `serious` or `critical` (moderate and minor
-findings are the unit level's business), and with `signIn(persona)`: the personas (`OWNER`,
+findings are the unit level's business) once the page is at rest: it waits for the document's
+title, which Next streams after the body, and a spec whose actions made toasts calls
+`dismissToasts(page)` first, since a toast fading in or out reads as a contrast failure while
+sonner's transition runs; and with `signIn(persona)`: the personas (`OWNER`,
 `COMPLIANCE_LEAD`, `CA_ADMIN`, `ANALYST`, `REVIEWER`, `ADMIN`) are signed in once per worker through the
 development form (identity makes each persona as a real user and signs its token, which the
 app exchanges for a session with a bearer every service reads: the stack runs in dual mode,

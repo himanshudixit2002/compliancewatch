@@ -95,6 +95,19 @@ export async function seriousViolations(page: Page, include?: string): Promise<V
     }));
 }
 
+/**
+ * Closes every toast and waits until none is left, so axe runs on a page at rest: sonner fades a
+ * new toast in and the content of the toasts behind it out, and a contrast check made while
+ * either transition runs reads the text at a passing opacity, failing by the millisecond it ran.
+ */
+export async function dismissToasts(page: Page): Promise<void> {
+  const toasts = page.locator("[data-sonner-toast]");
+  for (let left = await toasts.count(); left > 0; left = await toasts.count()) {
+    await toasts.first().getByRole("button", { name: "Close toast" }).click();
+    await expect(toasts).toHaveCount(left - 1);
+  }
+}
+
 /** What the fake sign-in form is filled with. */
 export interface Persona {
   key: string;
@@ -243,6 +256,9 @@ export const test = base.extend<Fixtures>({
   // lint rule does not read it as a hook call.
   checkA11y: async ({ page }, provide) => {
     await provide(async (include) => {
+      // Next streams a page's metadata after its body, so a check made straight after a
+      // navigation can run before the <title> lands; axe reads the page once it has one.
+      await expect(page).toHaveTitle(/\S/);
       const violations = await seriousViolations(page, include);
       expect(violations, JSON.stringify(violations, null, 2)).toEqual([]);
     });

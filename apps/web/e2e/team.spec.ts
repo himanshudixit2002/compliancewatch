@@ -1,6 +1,6 @@
 import { inviteThroughDialog, uniqueEmail, uniquePhone } from "./auth-helpers";
 import { newTenantPersona } from "./business-helpers";
-import { ADMIN, ANALYST, OWNER, expect, signInThroughForm, test } from "./fixtures";
+import { ADMIN, ANALYST, OWNER, dismissToasts, expect, signInThroughForm, test } from "./fixtures";
 
 /**
  * The team pages on identity's user routes with the session's bearer: an owner invites,
@@ -70,6 +70,8 @@ test.describe("team", () => {
     await expect(colleague.locator("[data-slot='status-chip']")).toHaveText("Disabled");
     await expect(colleague.getByRole("button")).toHaveCount(0);
     await expect(page.locator("[data-slot='stat-card']").nth(2)).toContainText("1");
+    // The three toasts of the changes above are dismissed first: axe reads the page at rest.
+    await dismissToasts(page);
     await checkA11y();
   });
 
