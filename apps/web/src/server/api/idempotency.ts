@@ -19,7 +19,8 @@ import { call, type CallOutcome } from "./client";
  * without it and replay the first response for 24 hours (py-common's idempotency module):
  * starting a subscription with the billing provider, the business API's two creating POSTs, the applicability engine's evaluate, which appends a
  * decision each time, the obligation service's status, assignee and comment writes, which the
- * public API serves under `/v1/obligations` as well, and a CA firm's bulk change card. The
+ * public API serves under `/v1/obligations` as well, a CA firm's bulk change card and the
+ * resend of a failed notification. The
  * pipeline's retry of a stored document reads it too, but keeps the key on the retry it records:
  * the same request replays its attempt for as long as the retry is kept, not for 24 hours. The
  * other creating writes are safe to repeat without it because each has a natural key on the
@@ -106,6 +107,11 @@ export const IDEMPOTENT_ROUTES = {
     service: "notification",
     method: "POST",
     path: "/v1/notification/bulk",
+  },
+  "notification.resend": {
+    service: "notification",
+    method: "POST",
+    path: "/v1/notification/notifications/{notification_id}/resend",
   },
   "pipeline.retry-document": {
     service: "pipeline",

@@ -109,7 +109,13 @@ describe("awaits audit", () => {
     if (route === undefined) return;
     const committed = committedRoutes();
     expect(committed.has(routeKey(route))).toBe(true);
-    expect(auditAwaits([resend], committed)).toEqual([
+    // The committed spec requires the header now (the hardened resend), so the audit lists
+    // nothing for it; before it did, the route stayed listed with the header it waited for.
+    expect(auditAwaits([resend], committed)).toEqual([]);
+    const hardened = requiredHeaderKey(route, "Idempotency-Key");
+    expect(committed.has(hardened)).toBe(true);
+    const unhardened = new Set([...committed].filter((key) => key !== hardened));
+    expect(auditAwaits([resend], unhardened)).toEqual([
       {
         screenId: resend.id,
         service: "notification",
@@ -121,11 +127,9 @@ describe("awaits audit", () => {
         specExists: true,
       },
     ]);
-    expect(renderAudit(auditAwaits([resend], committed))).toContain(
+    expect(renderAudit(auditAwaits([resend], unhardened))).toContain(
       "notification POST /v1/notification/notifications/{notification_id}/resend with Idempotency-Key <- admin.notification.resend",
     );
-    const hardened = new Set([...committed, requiredHeaderKey(route, "Idempotency-Key")]);
-    expect(auditAwaits([resend], hardened)).toEqual([]);
   });
 
   it("drops a route once it is committed", () => {
