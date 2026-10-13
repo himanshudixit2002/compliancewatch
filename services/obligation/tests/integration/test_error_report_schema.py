@@ -209,7 +209,10 @@ def test_a_report_is_kept_as_written_leaves_masked_and_stays_the_tenants(
             {"t": tenant.value},
         ).scalars()
         entries = connection.execute(
-            text("SELECT action, after FROM audit.event WHERE subject_id = :id ORDER BY id"),
+            text(
+                "SELECT action, after FROM audit.event "
+                "WHERE subject_id = :id ORDER BY occurred_at, id"
+            ),
             {"id": str(report.id)},
         ).all()
     payload = message["payload"]
@@ -279,7 +282,9 @@ def test_a_decision_is_applied_once_on_the_locked_row(
     with owner.connect() as connection:
         actions = list(
             connection.execute(
-                text("SELECT action FROM audit.event WHERE subject_id = :id ORDER BY id"),
+                text(
+                    "SELECT action FROM audit.event WHERE subject_id = :id ORDER BY occurred_at, id"
+                ),
                 {"id": str(report.id)},
             ).scalars()
         )
