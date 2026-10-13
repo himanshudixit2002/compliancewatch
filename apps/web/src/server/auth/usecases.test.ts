@@ -413,7 +413,16 @@ describe("keeping a session current", () => {
     if (outcome.kind !== "updated") return;
     expect(outcome.claims.roles).toEqual(["compliance_lead", "owner"]);
     expect(outcome.claims.checkedAt).toBe(AT);
+    // The factor level is the token's, as identity answers it: a re-read never upgrades it.
+    expect(outcome.claims.mfa).toBe(false);
     expect(identity.requests.map((request) => request.pathname)).toEqual(["/v1/identity/me"]);
+    const verified = claimsFor(identity, user.id, {
+      checkedAt: AT - 301,
+      mfa: true,
+      cwToken: identity.accessToken(user, "aal2"),
+    });
+    const reread = await keepSessionCurrent(provider, verified, deps);
+    expect(reread.kind === "updated" && reread.claims.mfa).toBe(true);
   });
 
   it("signs out a session identity revoked, on the refresh or on the re-read", async () => {

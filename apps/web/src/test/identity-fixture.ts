@@ -43,8 +43,8 @@ export interface IdentityFixture extends FakeFetch {
     displayName?: string;
     tenantId?: string;
   }): FixtureUser;
-  /** The CW access token identity would mint for the user now. */
-  accessToken(user: FixtureUser): string;
+  /** The CW access token identity would mint for the user now, at the session's factor level. */
+  accessToken(user: FixtureUser, aal?: "aal1" | "aal2"): string;
   /** Changes a user's roles or disables it, bumping the session version. */
   bump(userId: string, change: { roles?: Role[]; disabled?: boolean }): void;
   /** Identity in header mode: /me and the user routes read no token. */
@@ -138,8 +138,8 @@ export function fakeIdentity(
       users.set(user.id, user);
       return user;
     },
-    accessToken(user) {
-      return `${ACCESS_PREFIX}.${user.id}.${user.sessionVersion}`;
+    accessToken(user, aal = "aal1") {
+      return `${ACCESS_PREFIX}.${user.id}.${user.sessionVersion}.${aal}`;
     },
     bump(userId, change) {
       const user = users.get(userId);
@@ -171,7 +171,7 @@ export function fakeIdentity(
     updated_at: "2000-04-10T05:00:00Z",
   });
   const sessionOut = (user: FixtureUser, tenant: FixtureTenant, mfa: boolean) => ({
-    access_token: fixture.accessToken(user),
+    access_token: fixture.accessToken(user, mfa ? "aal2" : "aal1"),
     token_type: "Bearer",
     expires_in: ACCESS_TTL,
     tenant_id: tenant.id,
@@ -183,18 +183,18 @@ export function fakeIdentity(
     session_version: user.sessionVersion,
   });
 
-  /** The user a bearer names, or the refusal. */
-  const bearerUser = (request: RecordedRequest): FixtureUser | Response => {
+  /** The user a bearer names with the token's factor level (as identity reads its `mfa` claim), or the refusal. */
+  const bearerUser = (request: RecordedRequest): { user: FixtureUser; mfa: boolean } | Response => {
     if (fixture.headerMode) return problem(401, "auth-token-required");
     const header = request.headers.authorization ?? "";
     if (!header.startsWith("Bearer ")) return problem(401, "auth-token-required");
-    const [prefix, userId, version] = header.slice("Bearer ".length).split(".");
+    const [prefix, userId, version, aal] = header.slice("Bearer ".length).split(".");
     const user = userId === undefined ? undefined : users.get(userId);
     if (prefix !== ACCESS_PREFIX || user === undefined) return problem(401, "auth-token-invalid");
     if (user.status !== "active" || String(user.sessionVersion) !== version) {
       return problem(401, "identity-session-revoked");
     }
-    return user;
+    return { user, mfa: aal === "aal2" };
   };
 
   const exchange = (token: string): Response => {
@@ -313,8 +313,9 @@ export function fakeIdentity(
       });
     }
     if (request.method === "GET" && path === "/v1/identity/me") {
-      const user = bearerUser(request);
-      if (user instanceof Response) return user;
+      const bearer = bearerUser(request);
+      if (bearer instanceof Response) return bearer;
+      const { user, mfa } = bearer;
       const tenant = tenants.get(user.tenantId) as FixtureTenant;
       return jsonResponse(200, {
         kind: "user",
@@ -322,15 +323,16 @@ export function fakeIdentity(
         tenant: tenantOut(tenant),
         roles: [...user.roles].sort(),
         session_version: user.sessionVersion,
-        mfa: true,
+        mfa,
         email: user.email,
         phone: user.phone,
         display_name: user.displayName,
       });
     }
     if (path === "/v1/identity/users" || path.startsWith("/v1/identity/users/")) {
-      const admin = bearerUser(request);
-      if (admin instanceof Response) return admin;
+      const bearer = bearerUser(request);
+      if (bearer instanceof Response) return bearer;
+      const admin = bearer.user;
       const tenant = tenants.get(admin.tenantId) as FixtureTenant;
       const members = [...users.values()].filter((user) => user.tenantId === tenant.id);
       const admins = (list: FixtureUser[]) =>
