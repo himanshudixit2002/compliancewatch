@@ -74,7 +74,7 @@ unreachable is retried, then dead-lettered; nothing is erased.
 | obligation | `obligation_change`, `obligation_comment` (append-only, under `app.erasure`), `obligation_reminder`, `obligation`, `obligation_decision`, its `obligation_tenant` row, `idempotency_key` | `rule_version_ref` (rule-level cache) |
 | notification | `work_index` and `notification` (receipts with them), `recipient_address`, `recipient_business`, `recipient`, its `address_directory` rows, `idempotency_key`; the opt-in `channel_preference` of an address no other tenant holds | opt-outs (the record that the person asked to stop, which must outlive the account), an opt-in another tenant still holds (in its directory, or set by its user), each with this tenant's `set_for_tenant_id` nulled; `suppression` |
 | applicability-engine | `review_item`, `applicability_decision` (append-only, under `app.erasure`), its `business_directory` rows, `idempotency_key` | `fanout_run`, `fanout_hold` (rule-level) |
-| rulebook | nothing: it holds regulatory data of no tenant | the documents, rules, candidates and their review |
+| rulebook | pseudonymises `error_report_review` (the tenant's error reports as the regulatory team reviews them: the tenant id nulled, the masked text emptied) | the documents, rules, candidates and their review, and the decisions on error reports as facts about the rules |
 
 Every service also prunes the tenant's published or dead `outbox_event` rows (pending ones go out
 with the relay; nothing prunes the outbox on its own, see `docs/runbooks/outbox-relay.md`), writes

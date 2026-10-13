@@ -37,13 +37,11 @@ describe("generated screen docs", () => {
     const sitemap = screenById("system.sitemap");
     expect(rolesCell(sitemap)).toBe("public");
     expect(waitsForCell(sitemap)).toBe("");
-    const reports = screenById("admin.error-reports");
-    expect(waitsForCell(reports)).toBe(
-      "`GET /v1/rulebook/error-reports` (services track, WP24); `POST /v1/rulebook/error-reports/{report_id}/decision` (services track, WP24)",
-    );
+    const tenants = screenById("admin.tenants");
+    expect(waitsForCell(tenants)).toBe("`GET /v1/identity/admin/tenants` (services track, WP30)");
     expect(waitsForCell(screenById("admin.review.stats"))).toBe("");
     const unconfirmed: Screen = {
-      ...reports,
+      ...tenants,
       awaits: [
         {
           service: "rulebook",
@@ -74,14 +72,14 @@ const servicesWithSpec = readdirSync(SPEC_DIR)
 
 describe("awaits audit", () => {
   it("lists awaited routes absent from the committed specs, sorted by service and path", () => {
-    const reports = screenById("admin.error-reports");
+    const tenants = screenById("admin.tenants");
     const rows = auditAwaits(SCREENS, committedRoutes());
-    const reportsRow = rows.find((row) => row.screenId === reports.id);
-    expect(reportsRow).toMatchObject({
-      service: "rulebook",
+    const tenantsRow = rows.find((row) => row.screenId === tenants.id);
+    expect(tenantsRow).toMatchObject({
+      service: "identity",
       method: "GET",
-      path: "/v1/rulebook/error-reports",
-      owner: "services track, WP24",
+      path: "/v1/identity/admin/tenants",
+      owner: "services track, WP30",
       unconfirmed: false,
       specExists: true,
     });
@@ -129,15 +127,15 @@ describe("awaits audit", () => {
   });
 
   it("drops a route once it is committed", () => {
-    const reports = screenById("admin.error-reports");
-    const route = reports.awaits[0];
+    const tenants = screenById("admin.tenants");
+    const route = tenants.awaits[0];
     expect(route).toBeDefined();
     if (route === undefined) return;
-    const rows = auditAwaits([{ ...reports, awaits: [route] }], new Set([routeKey(route)]));
+    const rows = auditAwaits([{ ...tenants, awaits: [route] }], new Set([routeKey(route)]));
     expect(rows).toEqual([]);
     // A path the design named before its spec was committed is marked as unconfirmed.
     const unconfirmed: Screen = {
-      ...reports,
+      ...tenants,
       awaits: [{ ...route, owner: "plan-k", unconfirmed: true }],
     };
     const text = renderAudit(auditAwaits([unconfirmed], new Set()));
@@ -163,7 +161,7 @@ describe("awaits audit", () => {
       uses: [{ service: "profile", method: "GET", path: "/v1/ontology" }],
       awaits: [{ service: "profile", method: "GET", path: "/v1/ontology", owner: "plan-a" }],
     };
-    expect(readyEntries([withAwait, screenById("admin.error-reports")])).toEqual([
+    expect(readyEntries([withAwait, screenById("admin.tenants")])).toEqual([
       { screenId: "admin.evals.run", items: ["GET /v1/ontology"] },
     ]);
     const text = renderAudit([], readyEntries([withFile]));
