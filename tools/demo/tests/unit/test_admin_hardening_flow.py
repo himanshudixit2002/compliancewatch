@@ -17,8 +17,9 @@ second factor. The three memory stores share one audit log, as the services shar
   one ``notification.resent`` row with the reason.
 
 Then, with the flag ``profile.fy_schedule`` on and a frozen clock at the first minute of April,
-the worker's schedule runs twice over the profile store and opens one confirmation task per
-tenant, once. One owner answers the turnover band, which closes their task in the same request;
+the job the worker hosts (``fy_schedule``, as wired there) runs twice over the profile store and
+opens one confirmation task per tenant, once. One owner answers the turnover band, which closes
+their task in the same request;
 the other resolves theirs through the route, and their trail shows the closure. Nothing reaches a
 real identity provider, model provider or regulator.
 """
@@ -43,8 +44,7 @@ from notification.domain.notification import DeliveryState, Notification
 from notification.domain.occasions import OccasionKind
 from notification.domain.repository import WorkEntry
 from notification.infrastructure.memory import MemoryStore as NotificationStore
-from profile_service.application.attributes import ConfirmFinancialYear
-from profile_service.application.fy_schedule import FinancialYearSchedule
+from profile_service.application.fy_schedule import ScheduleRun
 from profile_service.infrastructure.memory import MemoryStore as ProfileStore
 from profile_service.infrastructure.memory import MemoryTenantDirectory
 from profile_service.settings import ProfileSettings
@@ -309,17 +309,14 @@ def run_the_journey(app: CombinedApp, client: httpx2.Client) -> None:
     )
     assert job is not None
     assert job.name == FY_SCHEDULE_JOB
-    schedule = FinancialYearSchedule(
-        ConfirmFinancialYear(profile_store, ontology, clock=lambda: FIRST_MINUTE_OF_APRIL_IST),
-        MemoryTenantDirectory(profile_store),
-        clock=lambda: FIRST_MINUTE_OF_APRIL_IST,
-    )
-    run = schedule.run()
+    run = job.fn()
+    assert isinstance(run, ScheduleRun), "the job the worker hosts runs the schedule as wired"
     assert run.fy == FinancialYear(2027)
     assert run.tenants == 2
     assert {str(tenant) for tenant in run.opened} == {traders_id, stores_id}
     assert run.tasks_opened == 2
-    rerun = schedule.run()
+    rerun = job.fn()
+    assert isinstance(rerun, ScheduleRun)
     assert (rerun.tenants, rerun.tasks_opened) == (2, 0), "once per tenant per year"
     tasks = {
         name: client.get(f"/v1/profile/nodes/{node}/review-tasks", headers=owners[name]).json()
@@ -357,7 +354,9 @@ def run_the_journey(app: CombinedApp, client: httpx2.Client) -> None:
         assert [
             t["reason"] for t in still_open.json() if t["reason"] == "confirm_financial_year"
         ] == []
-    assert schedule.run().tasks_opened == 0, "closed tasks stay closed"
+    third = job.fn()
+    assert isinstance(third, ScheduleRun)
+    assert third.tasks_opened == 0, "closed tasks stay closed"
     closures = trail(client, owners["Example Stores"], "review_task.closed")
     assert [(c["subject"]["id"], c["after"]["closed_by"], c["reason"]) for c in closures] == [
         (stores_task, "resolve", "Example: dormant this year")
