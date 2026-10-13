@@ -22,6 +22,7 @@ const env = loadEnv({
   CW_WEB_AUTH_PROVIDER: "supabase",
   CW_WEB_SUPABASE_URL: `${URL_BASE}/`,
   CW_WEB_SUPABASE_ANON_KEY: ANON,
+  CW_WEB_PUBLIC_URL: "https://app.example.test",
   CW_WEB_REQUEST_TIMEOUT_MS: "500",
 });
 
@@ -89,7 +90,7 @@ describe("SupabaseAuthProvider", () => {
     );
     const exchanged = await supabase.exchangeEmailLink("hash-synthetic");
     expect(exchanged.ok).toBe(true);
-    expect(fake.requests[1]?.body).toEqual({ type: "magiclink", token_hash: "hash-synthetic" });
+    expect(fake.requests[1]?.body).toEqual({ type: "email", token_hash: "hash-synthetic" });
   });
 
   it("refreshes through the token route and signs out with the fresh access token", async () => {
@@ -181,7 +182,7 @@ describe("SupabaseAuthProvider", () => {
       }
       if (request.pathname === "/auth/v1/verify") {
         const body = request.body as { type: string };
-        return body.type === "magiclink"
+        return body.type === "email"
           ? jsonResponse(403, GOTRUE_ERRORS.invalidCode)
           : jsonResponse(422, GOTRUE_ERRORS.wrongCode);
       }

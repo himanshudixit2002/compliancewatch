@@ -54,7 +54,7 @@ describe("GET /auth/callback", () => {
     });
     const response = await callback({
       token_hash: identity.providerToken({ email: EMAIL }),
-      type: "magiclink",
+      type: "email",
       next: "/settings/team",
     });
     expect(response.status).toBe(303);
@@ -69,7 +69,7 @@ describe("GET /auth/callback", () => {
   it("sends an unknown person to sign up with the pending cookie, never with a token in the URL", async () => {
     const response = await callback({
       token_hash: identity.providerToken({ email: EMAIL }),
-      type: "magiclink",
+      type: "email",
     });
     expect(response.status).toBe(303);
     expect(response.headers.get("location")).toBe("/sign-up");
@@ -83,7 +83,7 @@ describe("GET /auth/callback", () => {
     identity.provision({ contact: { email: EMAIL }, kind: "ca_firm", roles: ["ca_admin"] });
     const response = await callback({
       token_hash: identity.providerToken({ email: EMAIL }),
-      type: "magiclink",
+      type: "email",
       next: "/settings/team",
     });
     expect(response.headers.get("location")).toBe("/account/mfa?next=%2Fsettings%2Fteam");

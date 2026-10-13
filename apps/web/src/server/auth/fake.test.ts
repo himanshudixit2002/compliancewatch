@@ -237,7 +237,7 @@ describe("FakeAuthProvider", () => {
     if (!sent.ok) return;
     const link = new URL(sent.value.devLink as string);
     expect(link.pathname).toBe("/auth/callback");
-    expect(link.searchParams.get("type")).toBe("magiclink");
+    expect(link.searchParams.get("type")).toBe("email");
     expect(link.searchParams.get("next")).toBe("/account");
     const hash = link.searchParams.get("token_hash") as string;
     expect(claimsOf(hash)?.email).toBe("owner@example.test");

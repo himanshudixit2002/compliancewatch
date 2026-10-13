@@ -249,7 +249,7 @@ export class FakeAuthProvider implements AuthProvider {
     if (!minted.ok) return minted;
     const link = new URL(redirectTo);
     link.searchParams.set("token_hash", minted.value.accessToken);
-    link.searchParams.set("type", "magiclink");
+    link.searchParams.set("type", "email");
     return ok({ devLink: link.toString() });
   }
 

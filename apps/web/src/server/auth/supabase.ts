@@ -27,7 +27,8 @@ import {
  * `Authorization: Bearer <the person's access token>`:
  *
  *   POST /otp            {phone} or {email, create_user, redirect_to}   send a code or a link
- *   POST /verify         {type sms, phone, token} or {type magiclink, token_hash}
+ *   POST /verify         {type sms, phone, token} or {type email, token_hash}: the email type
+ *                        covers a magic-link hash and a new address's sign-up hash alike
  *   POST /token?grant_type=refresh_token  {refresh_token}
  *   POST /logout
  *   GET  /user        the person, with `factors` (GoTrue lists them nowhere else)
@@ -222,7 +223,7 @@ export class SupabaseAuthProvider implements AuthProvider {
 
   async exchangeEmailLink(tokenHash: string): Promise<Result<ProviderSession>> {
     const result = await this.request("POST", "/verify", {
-      body: { type: "magiclink", token_hash: tokenHash },
+      body: { type: "email", token_hash: tokenHash },
       context: "magiclink",
     });
     return result.ok ? this.session(result.value) : result;

@@ -91,7 +91,7 @@ test.describe("sign-up", () => {
   });
 
   test("an expired link and an empty sign-up each say so", async ({ page, checkA11y }) => {
-    await page.goto("/auth/callback?token_hash=not-a-token&type=magiclink");
+    await page.goto("/auth/callback?token_hash=not-a-token&type=email");
     await expect(page).toHaveURL(/\/sign-in\?error=link-expired$/);
     await expect(page.getByText(/That sign-in link is not valid any more/)).toBeVisible();
     await checkA11y();

@@ -20,7 +20,7 @@ export default async function EmailSentPage() {
   if (pending !== null && pending.provider === "fake" && isLocalOrTest(env.CW_WEB_ENV)) {
     const link = new URL(await callbackUrl(pending.next, env));
     link.searchParams.set("token_hash", pending.session.accessToken);
-    link.searchParams.set("type", "magiclink");
+    link.searchParams.set("type", "email");
     devLink = link.toString();
   }
   return (
