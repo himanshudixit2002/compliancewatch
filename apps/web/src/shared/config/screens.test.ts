@@ -337,9 +337,14 @@ describe("hardened awaits", () => {
     expect(hasLanded({ ...keyed, owner: "plan-a", ref: "WP0", header: "X-Example-Header" })).toBe(
       false,
     );
+    // The resend waited for the hardened route; its spec now requires the Idempotency-Key, so
+    // the await has landed and the entry is ready.
     const resend = screenById("admin.notification.resend").awaits[0];
     expect(resend?.header).toBe("Idempotency-Key");
     expect(resend !== undefined && isCommitted(resend)).toBe(true);
-    expect(resend !== undefined && hasLanded(resend)).toBe(false);
+    expect(resend !== undefined && hasLanded(resend)).toBe(true);
+    expect(resend !== undefined && hasLanded({ ...resend, header: "X-Example-Header" })).toBe(
+      false,
+    );
   });
 });

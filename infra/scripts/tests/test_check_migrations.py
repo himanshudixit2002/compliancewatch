@@ -595,7 +595,7 @@ DIRECTORY = Policy("thing_directory", "SELECT", True, "true", None, ("cw_identit
 
 
 def test_the_directory_roles_are_those_roles_sql_declares(tmp_path: Path) -> None:
-    assert directory_roles() == {"cw_identity_directory"}
+    assert directory_roles() == {"cw_identity_directory", "cw_profile_directory"}
     roles = tmp_path / "roles.sql"
     roles.write_text(
         "DECLARE\n  directory_role CONSTANT text := 'cw_audit_directory';\n"

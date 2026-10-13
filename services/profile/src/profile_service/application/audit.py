@@ -13,6 +13,11 @@ the row commits or rolls back with it.
 - ``profile_node.prefilled``: the GSTIN and its lookup filled attribute values, in the same
   shape: ``after`` the values it filled, ``before`` what those attributes held. Nothing filled,
   nothing written.
+- ``review_task.closed``: a review task closed, by an answer to the attribute it asked about
+  (in the transaction of the answer) or by a person through the resolve route. The subject is
+  the task; ``before`` is ``{"open": true}`` and ``after`` holds ``open`` false, ``closed_by``,
+  ``outcome``, the task's ``reason``, ``attribute_key``, ``node_id`` and ``as_of_fy``; the
+  note of a resolve is the entry's ``reason``. No attribute value is in the row.
 
 The actor is the request's principal (``audit_actor``), the system as ``system:profile`` when
 there is none; ``occurred_at`` is the use case's clock time.
@@ -29,7 +34,7 @@ from typing import Final
 
 from domain_kernel.audit import AuditEntry
 from domain_kernel.ids import TenantId
-from profile_service.domain.model import AttributeKey, AttributeRecord, ProfileNode
+from profile_service.domain.model import AttributeKey, AttributeRecord, ProfileNode, ReviewTask
 from profile_service.domain.repository import UnitOfWork
 from py_common.audit import audit_actor, current_correlation_id
 
@@ -39,6 +44,8 @@ SUBJECT: Final = "profile_node"
 REGISTERED: Final = "profile_node.registered"
 ATTRIBUTES_CHANGED: Final = "profile_node.attributes_changed"
 PREFILLED: Final = "profile_node.prefilled"
+REVIEW_TASK_CLOSED: Final = "review_task.closed"
+REVIEW_TASK: Final = "review_task"
 
 
 def record_registered(uow: UnitOfWork, node: ProfileNode, now: datetime) -> None:
@@ -48,6 +55,34 @@ def record_registered(uow: UnitOfWork, node: ProfileNode, now: datetime) -> None
         "parent_id": None if node.parent_id is None else str(node.parent_id),
     }
     uow.audit.write(_entry(REGISTERED, node.tenant_id, node, None, after, now))
+
+
+def record_review_task_closed(uow: UnitOfWork, task: ReviewTask) -> None:
+    """Write the ``review_task.closed`` entry of ``task``, closed in ``uow`` just now."""
+    if task.open or task.closed_at is None or task.closed_by is None or task.outcome is None:
+        raise ValueError(f"review task {task.id} is not closed")
+    uow.audit.write(
+        AuditEntry(
+            action=REVIEW_TASK_CLOSED,
+            tenant_id=task.tenant_id,
+            subject_type=REVIEW_TASK,
+            subject_id=str(task.id),
+            actor=audit_actor(SERVICE),
+            reason=task.note,
+            before={"open": True},
+            after={
+                "open": False,
+                "closed_by": task.closed_by.value,
+                "outcome": task.outcome.value,
+                "reason": task.reason.value,
+                "attribute_key": task.attribute_key,
+                "node_id": str(task.node_id),
+                "as_of_fy": None if task.as_of_fy is None else task.as_of_fy.label,
+            },
+            occurred_at=task.closed_at,
+            correlation_id=current_correlation_id(),
+        )
+    )
 
 
 def record_attributes(

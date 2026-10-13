@@ -23,7 +23,14 @@ from domain_kernel.events import DomainEvent
 from domain_kernel.ids import BusinessId, TenantId
 from domain_kernel.ontology import AttributeLevel
 from profile_service.domain.errors import ProfileNodeNotFoundError
-from profile_service.domain.model import NodeAttribute, ProfileNode, ProfileVersion, ReviewTask
+from profile_service.domain.model import (
+    AttributeUsage,
+    NodeAttribute,
+    ProfileNode,
+    ProfileVersion,
+    ReviewTask,
+    ValueState,
+)
 from profile_service.domain.repository import (
     AttributeCursor,
     NodeCursor,
@@ -136,13 +143,26 @@ class MemoryProfileRepository:
         self._tasks[task.id] = task
 
     def open_review_tasks(self, node_id: BusinessId | None = None) -> Sequence[ReviewTask]:
-        return [
-            task
-            for task in self._tasks.values()
-            if task.tenant_id == self._tenant
-            and task.open
-            and (node_id is None or task.node_id == node_id)
-        ]
+        return [task for task in self.review_tasks(node_id) if task.open]
+
+    def review_tasks(self, node_id: BusinessId | None = None) -> Sequence[ReviewTask]:
+        return sorted(
+            (
+                task
+                for task in self._tasks.values()
+                if task.tenant_id == self._tenant and (node_id is None or task.node_id == node_id)
+            ),
+            key=lambda task: (task.created_at, task.id.value),
+        )
+
+    def get_review_task(self, task_id: BusinessId) -> ReviewTask | None:
+        task = self._tasks.get(task_id)
+        return task if task is not None and task.tenant_id == self._tenant else None
+
+    def save_review_task(self, task: ReviewTask) -> None:
+        if task.id not in self._tasks or task.tenant_id != self._tenant:
+            raise ValueError(f"review task {task.id} is not stored for this tenant")
+        self._tasks[task.id] = task
 
     def export_nodes(self, after: NodeCursor | None, limit: int) -> Sequence[ProfileNode]:
         mine = (node for node in self._nodes.values() if node.tenant_id == self._tenant)
@@ -198,6 +218,34 @@ def _attribute_position(value: NodeAttribute) -> tuple[datetime, UUID, str, str]
 def _position(node: ProfileNode) -> tuple[str, UUID]:
     """Where a node sorts in a list of businesses: by name, then id, as Postgres pages them."""
     return (node.name, node.id.value)
+
+
+class MemoryAttributeUsage:
+    """``AttributeUsageReader`` over a ``MemoryStore``: every tenant's nodes, counted as
+    ``profile.attribute_usage()`` counts them (a per-year value counts its node once)."""
+
+    def __init__(self, store: "MemoryStore") -> None:
+        self._store = store
+
+    def usage(self) -> Sequence[AttributeUsage]:
+        holders: dict[tuple[str, ValueState], set[BusinessId]] = {}
+        for node in list(self._store.nodes.values()):
+            for record in node.attributes.values():
+                holders.setdefault((record.key, record.state), set()).add(node.id)
+        ordered = sorted(holders.items(), key=lambda item: (item[0][0], item[0][1].value))
+        return [AttributeUsage(key, state, len(nodes)) for (key, state), nodes in ordered]
+
+
+class MemoryTenantDirectory:
+    """``TenantDirectory`` over a ``MemoryStore``: the tenants that have nodes, as
+    ``profile.tenant_directory()`` lists them."""
+
+    def __init__(self, store: "MemoryStore") -> None:
+        self._store = store
+
+    def tenants(self) -> Sequence[TenantId]:
+        found = {node.tenant_id for node in list(self._store.nodes.values())}
+        return sorted(found, key=lambda tenant: tenant.value)
 
 
 class MemorySink:

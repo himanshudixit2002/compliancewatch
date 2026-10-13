@@ -26,6 +26,12 @@ mode, or ``dual`` mode without one) everything works as before tokens existed: t
   describes. The ``api`` and ``support`` sources, which skip the consent check, are a
   service's: a person's token never records one, and outside header mode they need that
   service's token.
+- ``Resender`` (``/notifications/{id}/resend``): who resends a failed notification, and for which
+  tenant. A tenant admin (owner or ca_admin) resends their own tenant's, which their token names,
+  as a CA firm's people send its bulk card; an admin of the internal tenant resends any tenant's,
+  naming it in ``x-tenant-id`` (the regulatory team's console browses by tenant); a service and
+  every other role are refused, and outside header mode so is a request without a token. It
+  carries the audit actor and the request's correlation id for the ``notification.resent`` entry.
 - ``ExportTenant`` (``/data-export``, ``py_common.auth.fastapi.data_export_scope``): a user with a
   tenant admin role (owner, ca_admin) for their own tenant, or a service only with a data:export
   token bound to that tenant and addressed to this service, as identity mints one per export.
@@ -44,6 +50,7 @@ from fastapi import Depends, Header, Request
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from domain_kernel.access import (
+    TENANT_ADMIN_ROLES,
     TENANT_MEMBER_ROLES,
     Principal,
     PrincipalKind,
@@ -66,6 +73,7 @@ from py_common.auth.fastapi import (
     CurrentPrincipal,
     authenticator_of,
     data_export_scope,
+    refuse_erased,
     require_roles,
     resolve_tenant,
     shared_token_or_roles,
@@ -86,6 +94,9 @@ sender = require_roles(scopes={Scope.NOTIFICATION_SEND})
 ca_member = require_roles(CA_ROLES)
 """A user with a CA firm's role; a service is refused, and the anonymous principal of ``header``
 mode passes."""
+resend_roles = require_roles(TENANT_ADMIN_ROLES, Role.ADMIN)
+"""A tenant admin or the regulatory team's admin; a service is refused, and the anonymous
+principal of ``header`` mode passes."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,6 +151,44 @@ async def preference_caller(
 
 
 @dataclass(frozen=True, slots=True)
+class ResendCaller:
+    """Who resends a notification of which tenant: the actor its audit entry names and the
+    request's correlation id."""
+
+    tenant_id: TenantId
+    actor: AuditActor
+    correlation_id: str | None = None
+
+
+async def resend_caller(
+    request: Request,
+    principal: Annotated[Principal, Depends(resend_roles)],
+    x_tenant_id: Annotated[UUID | None, Header(description=TENANT_HEADER_DESCRIPTION)] = None,
+) -> ResendCaller:
+    """Who resends, for which tenant: an internal admin names any tenant in ``x-tenant-id``; a
+    tenant admin's token names their own (a header naming another is a 403); the anonymous
+    caller of header mode names it in the header. No tenant is a 401 ``tenant-required``."""
+    offered = None if x_tenant_id is None else TenantId(x_tenant_id)
+    if not principal.is_authenticated and authenticator_of(request).mode != "header":
+        raise AuthTokenRequiredError(
+            "Resending needs a tenant admin's or an admin's access token as "
+            "Authorization: Bearer <token>"
+        )
+    if principal.kind is PrincipalKind.USER and principal.has_role(Role.ADMIN):
+        tenant = offered
+    else:
+        tenant = resolve_tenant(principal, offered)
+    if tenant is None:
+        raise TenantRequiredError()
+    await refuse_erased(request, tenant)
+    return ResendCaller(
+        tenant_id=tenant,
+        actor=audit_actor(SERVICE_NAME, principal),
+        correlation_id=current_correlation_id(),
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class BulkCaller:
     """Who sends a bulk notification for which tenant: the actor its audit entry names and the
     request's correlation id."""
@@ -188,6 +237,7 @@ def wiring(request: Request) -> Wiring:
 Tenant = Annotated[TenantId, Depends(member_tenant)]
 SendTenant = Annotated[TenantId, Depends(send_tenant)]
 Bulk = Annotated[BulkCaller, Depends(bulk_caller)]
+Resender = Annotated[ResendCaller, Depends(resend_caller)]
 ExportTenant = Annotated[TenantId, Depends(data_export_scope(SERVICE_NAME, TenantRequiredError))]
 PreferenceCaller = Annotated[OptInCaller, Depends(preference_caller)]
 Wired = Annotated[Wiring, Depends(wiring)]

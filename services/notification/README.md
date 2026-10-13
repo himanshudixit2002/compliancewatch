@@ -20,7 +20,7 @@ Design reference: Project Foundation guide, sections 7, 9 and 14.
 | `POST /v1/notification/send` | Send one notification now through the queue: `sent`, `failed` (the service retries it), `deferred` (quiet hours, with `scheduled_for`), `not_opted_in` or `duplicate`. The `attempt` field is deprecated and ignored |
 | `GET /v1/notification/notifications?business_id=&state=&limit=&cursor=` | A business's notifications, newest first, a page at a time |
 | `GET /v1/notification/notifications/{notification_id}` | One notification of the tenant with its state, attempts, error and delivery times |
-| `POST /v1/notification/notifications/{notification_id}/resend` | Queue a notification that failed for good again (409 `notification-resend-not-allowed` in any other state) |
+| `POST /v1/notification/notifications/{notification_id}/resend` | Queue a notification that failed for good again, for a `reason` and with an `Idempotency-Key` (428 without one; a retry with the same key and body gets the first answer back), by a tenant admin for their own tenant or the regulatory team's admin for the tenant `x-tenant-id` names; written to the tenant's audit trail as `notification.resent`; an optional `recipient` must be the notification's own address (422 `notification-resend-recipient-mismatch`); 409 `notification-resend-not-allowed` in any other state |
 | `POST /v1/notification/receipts/whatsapp` | Statuses and inbound times the WhatsApp bot forwards, with `x-cw-bot-token` (`CW_NOTIFICATION_BOT_TOKEN`; unset, 503; missing or wrong, 401) or its service token (see Authentication) |
 | `POST /v1/notification/receipts/email` | SES bounces, complaints and deliveries that SNS posts, with HTTP basic credentials whose password is `CW_NOTIFICATION_EMAIL_FEEDBACK_TOKEN`, and the SNS signature verified |
 | `GET /v1/notification/templates` | Every template with its Meta approval status |
@@ -119,6 +119,33 @@ first answer back for 24 hours (`Idempotent-Replayed: true`), the same key with 
 owner core-product) off the route answers 503 `notification-bulk-disabled` before it looks at the
 key; an obligation service that cannot answer is 503 `notification-dependency-unavailable`, and
 the key is released so the retry runs.
+
+### Resending a failed notification
+
+`POST /v1/notification/notifications/{notification_id}/resend` (`application/resend.py`,
+`api/deps.py` `Resender`) queues a notification that failed for good again, due at once with a
+new round of attempts; the dispatcher then checks consent, suppression and quiet hours as for any
+other, so a resend never skips them. It is an act on a tenant's data, so:
+
+- it carries a `reason` in the body (1 to 2,000 characters once trimmed; a blank one is a 422)
+  and is written to the tenant's audit trail as `notification.resent`: the reason, the actor,
+  before it the state, the attempts and the error text of the failed round (the provider's or the
+  renderer's words, masked as every audit text is), after it the state, the attempts, the channel
+  and whether a `recipient` was named, never the address;
+- who may: a tenant admin (owner or ca_admin) for the tenant their token names, as a CA firm's
+  people send its bulk card, or the regulatory team's admin for any tenant, naming it in
+  `x-tenant-id` (the console browses by tenant); staff, other roles and services are refused
+  (403), and outside header mode so is a request without a token (401);
+- it takes an `Idempotency-Key` (`py_common.idempotency`; 428 without one): a retry with the same
+  key and body gets the first answer back with `Idempotent-Replayed: true` for 24 hours and queues
+  nothing more; the same key with another body is a 422;
+- a notification goes to one address, so the optional `recipient` is a guard rather than a
+  fan-out filter: it must be the notification's own address, normalised as the service keeps it,
+  else nothing is queued (422 `notification-resend-recipient-mismatch`);
+- 409 `notification-resend-not-allowed` in any state but failed, 404 for a notification the
+  tenant has none of.
+
+The composition classes the route `admin`: the public listener serves it in token mode only.
 
 ### From an obligation event to a message
 

@@ -28,12 +28,16 @@ per year and the snapshot picks the year asked for.
   opens a `ReviewTask` and records a golden-case seed through the eval recorder), `NextQuestion`,
   `BuildSnapshot`, `ConfirmFinancialYear` (one `confirm_financial_year` task per entity and
   per-year attribute missing for the new year: the April task).
+- `application/review_tasks.py`: `ResolveReviewTask`, a person closing a task by hand;
+  `application/fy_schedule.py`: the worker's April schedule (see Review tasks and Financial year
+  confirmation below).
 - `api/`: `POST /v1/profile/{entities,registrations,locations}`, `GET /v1/profile/nodes/{id}`,
   `PUT /v1/profile/nodes/{id}/attributes`, `GET .../snapshot?fy=2025-26`,
-  `GET .../next-question?fy=`, `GET .../review-tasks`,
-  `POST /v1/profile/financial-year-confirmations`. Every route but the ping acts for one
-  tenant (see Authentication below; 401 `tenant-required` without one). Errors
-  are problem details; the spec is `packages/contracts/openapi/profile.v1.json`
+  `GET .../next-question?fy=`, `GET .../review-tasks[?include_closed=true]`,
+  `POST .../review-tasks/{task_id}/resolve`, `POST /v1/profile/financial-year-confirmations`,
+  and the regulatory team's `GET /v1/profile/admin/attribute-usage`. Every route but the ping
+  and the usage acts for one tenant (see Authentication below; 401 `tenant-required` without
+  one). Errors are problem details; the spec is `packages/contracts/openapi/profile.v1.json`
   (`make openapi SERVICE=profile`, checked by a contract test).
 - `infrastructure/`: `PostgresUnitOfWorkFactory` (one transaction per call, `app.tenant_id`
   set for the row-level security policies on all four tables, events through the outbox,
@@ -44,6 +48,8 @@ per year and the snapshot picks the year asked for.
   forced policy, plus the outbox and inbox tables. `20260929_0003_business_api.py` adds
   `idempotency_key` (py-common's, with the forced tenant policy and the purge policy) and the
   index `ix_profile_node_tenant_level_name` the business list pages on.
+  `20261013_0005_review_task_closure.py` adds a task's closure to `review_task` (`closed_at`,
+  `closed_by`, `outcome`, `note`, with checks that an open task has none and a closed one all).
 
 Row-level security binds only non-superuser roles: `make run` and `make web-stack STORE=postgres`
 connect as `cw_profile` (`infra/dev/postgres/roles.sql`), so it holds locally too, unless
@@ -144,6 +150,32 @@ each attribute with its definition, question, help, labelled `values`, `min`, `m
 `example`. The answer carries an `ETag` and `Cache-Control: max-age=3600`; `If-None-Match` with
 the current tag gets a 304.
 
+## Review tasks
+
+A review task is a question for a person: an attribute the business said does not apply
+(`not_applicable`), a per-year value to confirm when the year turns (`confirm_financial_year`),
+or a registration the lookup could not verify (`verify_registration`). It closes in two ways,
+each written to the audit trail as `review_task.closed` (subject the task; `after` holds how and
+with what outcome, the task's reason, attribute and node, never a value):
+
+- An answer closes it. When `PUT /v1/profile/nodes/{id}/attributes` (or a business PATCH) stores
+  a known or a does-not-apply value for the attribute and year an open task of the node asks
+  about, the task closes with `closed_by` answer in the transaction of the answer; the response's
+  `closed_review_tasks` names it. An unsure answer closes nothing. A does-not-apply answer closes
+  the task that asked for the value and opens the review of the answer itself.
+- A person closes it. `POST /v1/profile/nodes/{id}/review-tasks/{task_id}/resolve` with
+  `{"outcome": "confirmed" | "dismissed", "note": "..."}` closes one a tenant admin (owner,
+  ca_admin) of the tenant checked or set aside, or a service with tenant:act; 404 for a task that
+  is not the node's, 409 `profile-review-task-closed` for one closed already, 422 for the outcome
+  `answered`, which is an answer's alone. The regulatory team's analysts and admins have no grant
+  on it (403): a user acts in the tenant their token names, and the internal tenant holds no
+  profile nodes, so a grant would be dead; letting them close a customer's task would be a
+  cross-tenant write that needs an audited reason, as identity's users read has, and none is built.
+
+`GET .../review-tasks` lists the open tasks; `?include_closed=true` every task with `closed_at`,
+`closed_by`, `outcome` and `note`. A closed task is never reopened: the financial year
+confirmation skips an entity, attribute and year that has a task, open or closed.
+
 ## Financial year confirmation
 
 On 1 April a new financial year starts, and per-year attributes (the turnover band) have no
@@ -151,13 +183,40 @@ value for it yet. `POST /v1/profile/financial-year-confirmations` (tenant header
 `{"fy": "2026-27"}`) runs `ConfirmFinancialYear` for the tenant: one `confirm_financial_year`
 review task per entity and per-year attribute missing for that year, answered 200 with
 `{"fy", "opened": [task ids]}`. Without `fy` it takes the financial year of today's date in
-India Standard Time. It is idempotent: a task still open for the same entity, attribute and
-year is not opened again, so a second call opens nothing. The command
-`profile-fy-confirm --tenant <uuid> [--tenant <uuid> ...] [--fy 2026-27]` does the same for
-named tenants from a shell (`uv run --package compliancewatch-profile profile-fy-confirm ...`;
-`CW_PROFILE_STORE` and `CW_DATABASE_URL` pick the store). Nothing calls either on a schedule
-yet: the daily job that confirms every active tenant from 1 to 7 April arrives with identity's
-worker, since under forced row-level security nothing here can list tenants.
+India Standard Time. It is idempotent: a task for the same entity, attribute and year, open or
+closed, is not opened again, so a second call opens nothing and a task a person dismissed stays
+dismissed. The command `profile-fy-confirm --tenant <uuid> [--tenant <uuid> ...] [--fy 2026-27]`
+does the same for named tenants from a shell (`uv run --package compliancewatch-profile
+profile-fy-confirm ...`; `CW_PROFILE_STORE` and `CW_DATABASE_URL` pick the store).
+
+The schedule (flag `profile.fy_schedule`, `CW_PROFILE_FY_SCHEDULE_ENABLED`, owner core-product,
+off by default) runs it for every tenant without anyone asking. With the flag on, the worker
+(`profile_service.worker`, `make worker SERVICE=profile`, or `cw-mvp worker`) hosts the periodic
+job `profile-fy-schedule`: once a day at 00:30 IST it names the financial year of that moment in
+India and confirms every tenant that has profile nodes, so the tasks appear in the night the
+year turns and a tenant onboarded later gets its year's tasks the next night; the run after the
+first opens nothing. The tenants come from `profile.tenant_directory()`, a SECURITY DEFINER
+function owned by the NOLOGIN role `cw_profile_directory` (`infra/dev/postgres/roles.sql`, `make
+db-roles`) that answers tenant ids and nothing else, so the job needs no service token, no
+cross-tenant scope at identity and no row-level security bypass: each tenant is then visited in a
+unit of work of its own, under its policy. A tenant whose confirmation fails is logged
+(`profile.fy_schedule_failed`) and the others go on; every run logs `profile.fy_schedule_run` with
+the year, the tenants visited, the tasks opened and the failures (`application/fy_schedule.py`).
+Off, the worker hosts no such job.
+
+## Attribute usage
+
+`GET /v1/profile/admin/attribute-usage` answers how many profile nodes hold each attribute in each
+state (`known`, `unsure`, `not_applicable`) across every tenant, for the regulatory team's
+ontology browser: `{"items": [{"key", "state", "count"}]}`, counts of distinct nodes (a per-year
+value counts its node once), never a value, a node or a tenant. Row-level security shows this
+service's own role one tenant at a time, so the counts come from `profile.attribute_usage()`, the
+other function of `cw_profile_directory`; in memory the twin counts over the store. The caller is
+an analyst, a reviewer or an admin a verified token names (403 for a tenant's member or a
+service); outside header mode a request without a token is a 401. The composition classes the
+route `admin`, so the public listener serves it in token mode only. Only `cw_profile` and `cw_app`
+may run either function; until `make db-roles` has run after the migrations, both reads answer
+500.
 
 ## GSTIN lookup
 
@@ -228,6 +287,7 @@ src/profile_service/
   infrastructure/  # SQLAlchemy models, repositories, Kafka, adapters
   main.py          # composition root: create_app(...) from py-common
   jobs.py          # profile-fy-confirm: the financial year confirmation for named tenants
+  worker.py        # the erasure consumer and, behind profile.fy_schedule, the April schedule
 migrations/        # alembic (env.py reads CW_DATABASE_URL and CW_DB_SCHEMA)
 tests/
   unit/            # domain and application with fakes; no I/O

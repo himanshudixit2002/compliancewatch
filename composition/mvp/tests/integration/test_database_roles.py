@@ -13,14 +13,18 @@ roles.sql and dev-passwords.sql, before any migration. Every service then migrat
   ``cw_identity`` reads them: its tenant's, and the platform's under the regulatory scope;
 - running the file again changes no privilege, and a role made by hand with more is cut back;
 - the identity directory: the NOLOGIN role cw_identity_directory owns
-  identity.data_requests_open(), which only cw_identity (and cw_app) may run, and it counts every
-  tenant's open requests that row-level security hides from cw_identity itself. It holds no
-  attribute, and its only member, if any, is the owner, which does not inherit it.
+  identity.data_requests_open() and identity.tenant_directory(), which only cw_identity (and
+  cw_app) may run; they count every tenant's open requests and list every tenant with its plan and
+  user counts, which row-level security hides from cw_identity itself. It holds no attribute, and
+  its only member, if any, is the owner, which does not inherit it;
+- the profile directory: cw_profile_directory owns profile.attribute_usage() and
+  profile.tenant_directory(), which only cw_profile (and cw_app) may run: the attribute counts
+  across tenants and the ids of the tenants that have profile nodes.
 
 A second database is a deployment's: its schemas belong to a login that may create roles but is
-not a superuser. That owner runs roles.sql, identity's migrations, roles.sql again and
-50-app-role.sql (make product-role), and PUBLIC still cannot run the function: the grants are made
-as the function's owner, since the owner in its own role holds no grant option on it.
+not a superuser. That owner runs roles.sql, identity's and profile's migrations, roles.sql again
+and 50-app-role.sql (make product-role), and PUBLIC still cannot run the functions: the grants are
+made as each function's owner, since the owner in its own role holds no grant option on it.
 """
 
 from collections.abc import Iterator
@@ -336,13 +340,17 @@ def test_running_the_file_again_changes_nothing_and_cuts_a_widened_role_back(
 
 
 DIRECTORY_ROLE = "cw_identity_directory"
+PROFILE_DIRECTORY_ROLE = "cw_profile_directory"
+TENANT_DIRECTORY = "SELECT * FROM identity.tenant_directory(:q, :after, :lim, :only)"
+ATTRIBUTE_USAGE = "SELECT key, state, count AS holders FROM profile.attribute_usage()"
+PROFILE_TENANTS = "SELECT tenant_id FROM profile.tenant_directory()"
 
 
 def test_the_identity_directory_counts_across_tenants_for_identity_only(
     owner_url: str, owner: Engine, first_migration_writes: dict[str, bool]
 ) -> None:
     with owner.connect() as connection:
-        _check_the_directory_role(connection, owner_of(connection))
+        _check_the_directory_role(connection, owner_of(connection), DIRECTORY_ROLE)
     tenants = [TenantId(uuid4()), TenantId(uuid4())]
     identity = create_engine(as_role(owner_url, "identity"))
     count = "SELECT coalesce(sum(open), 0) FROM identity.data_requests_open()"
@@ -371,18 +379,188 @@ def test_the_identity_directory_counts_across_tenants_for_identity_only(
     profile.dispose()
 
 
+def _insert_tenant(connection: Connection, tenant: TenantId, name: str, *, users: int) -> None:
+    """A tenant with ``users`` active users and one disabled, as cw_identity writes them."""
+    _as_tenant(connection, tenant)
+    connection.execute(
+        text(
+            "INSERT INTO identity.tenant (id, kind, name, region, status, created_at) "
+            "VALUES (:id, 'business', :name, 'in', 'active', now())"
+        ),
+        {"id": tenant.value, "name": name},
+    )
+    for index in range(users + 1):
+        connection.execute(
+            text(
+                "INSERT INTO identity.app_user (id, tenant_id, provider, provider_subject, "
+                "email, phone, display_name, roles, status, session_version, created_at, "
+                "updated_at) VALUES (:id, :tenant, 'fake', :subject, :email, '', '', "
+                "'{owner}', :status, 0, now(), now())"
+            ),
+            {
+                "id": uuid4(),
+                "tenant": tenant.value,
+                "subject": f"subject-{uuid4().hex}",
+                "email": f"user-{uuid4().hex[:8]}@example.invalid",
+                "status": "active" if index < users else "disabled",
+            },
+        )
+
+
+def _insert_subscription(
+    connection: Connection, tenant: TenantId, plan: str, status: str, *, days_ago: int
+) -> None:
+    connection.execute(
+        text(
+            "INSERT INTO identity.billing_subscription (provider_subscription_id, tenant_id, "
+            "plan_key, quantity, status, started_at, updated_at) VALUES (:id, :tenant, :plan, "
+            "1, :status, now() - make_interval(days => :days), now())"
+        ),
+        {
+            "id": f"sub_{uuid4().hex[:12]}",
+            "tenant": tenant.value,
+            "plan": plan,
+            "status": status,
+            "days": days_ago,
+        },
+    )
+
+
+def test_the_identity_directory_lists_every_tenant_with_its_plan_and_counts_for_identity_only(
+    owner_url: str, owner: Engine, first_migration_writes: dict[str, bool]
+) -> None:
+    traders, stores = TenantId(uuid4()), TenantId(uuid4())
+    identity = create_engine(as_role(owner_url, "identity"))
+    with identity.connect() as connection, connection.begin():
+        _insert_tenant(connection, traders, "Example Traders", users=2)
+        _insert_subscription(connection, traders, "starter", "cancelled", days_ago=40)
+        _insert_subscription(connection, traders, "growth", "active", days_ago=3)
+        _insert_tenant(connection, stores, "Example Stores", users=1)
+        listed = connection.execute(
+            text(TENANT_DIRECTORY), {"q": "example", "after": None, "lim": 10, "only": None}
+        ).all()
+        found = {row.id: row for row in listed}
+        assert {traders.value, stores.value} <= set(found)
+        assert tuple(found[traders.value])[1:4] == ("business", "Example Traders", "active")
+        assert (found[traders.value].plan_key, found[traders.value].subscription_status) == (
+            "growth",
+            "active",
+        ), "the newest subscription"
+        assert (found[traders.value].users, found[traders.value].active_users) == (3, 2)
+        assert (found[stores.value].plan_key, found[stores.value].subscription_status) == ("", "")
+        assert [row.name for row in listed] == sorted(row.name for row in listed)
+        one = connection.execute(
+            text(TENANT_DIRECTORY), {"q": None, "after": None, "lim": 10, "only": stores.value}
+        ).all()
+        assert [row.id for row in one] == [stores.value]
+        by_id = connection.execute(
+            text(TENANT_DIRECTORY),
+            {"q": str(traders.value), "after": None, "lim": 10, "only": None},
+        ).all()
+        assert [row.id for row in by_id] == [traders.value]
+        after = connection.execute(
+            text(TENANT_DIRECTORY),
+            {"q": "example", "after": stores.value, "lim": 10, "only": None},
+        ).all()
+        assert traders.value in {row.id for row in after}
+        assert stores.value not in {row.id for row in after}
+        literal = connection.execute(
+            text(TENANT_DIRECTORY), {"q": "%", "after": None, "lim": 10, "only": None}
+        ).all()
+        assert literal == [], "a LIKE wildcard is matched literally"
+        padded = connection.execute(
+            text(TENANT_DIRECTORY),
+            {"q": f"{traders.value} ", "after": None, "lim": 10, "only": None},
+        ).all()
+        assert padded == [], "q is matched as given, as the memory twin does; ListTenants trims it"
+        _as_tenant(connection, stores)
+        own = connection.execute(text("SELECT count(*) FROM identity.tenant")).scalar_one()
+        assert own == 1, "the role itself reads its current tenant only"
+        connection.rollback()
+    identity.dispose()
+    profile = create_engine(as_role(owner_url, "profile"))
+    with profile.connect() as connection, connection.begin():
+        assert (
+            _refused(
+                connection, TENANT_DIRECTORY, {"q": None, "after": None, "lim": 1, "only": None}
+            )
+            == INSUFFICIENT_PRIVILEGE
+        )
+    profile.dispose()
+
+
+def _insert_node(connection: Connection, tenant: TenantId, values: dict[str, str]) -> None:
+    """An entity of ``tenant`` holding ``values`` (key: state), as cw_profile writes them."""
+    _as_tenant(connection, tenant)
+    node = uuid4()
+    connection.execute(
+        text(
+            "INSERT INTO profile.profile_node (id, tenant_id, level, key, name, parent_id, "
+            "version, created_at, updated_at) VALUES (:id, :tenant, 'entity', :key, "
+            "'Example', NULL, 1, now(), now())"
+        ),
+        {"id": node, "tenant": tenant.value, "key": f"AAAAA{uuid4().int % 10000:04d}A"},
+    )
+    for key, state in values.items():
+        connection.execute(
+            text(
+                "INSERT INTO profile.profile_attribute (node_id, tenant_id, key, fy_label, "
+                "state, value, source, updated_at) VALUES (:node, :tenant, :key, '', :state, "
+                "CAST(:value AS jsonb), 'user_input', now())"
+            ),
+            {
+                "node": node,
+                "tenant": tenant.value,
+                "key": key,
+                "state": state,
+                "value": '{"v": "x"}' if state == "known" else None,
+            },
+        )
+
+
+def test_the_profile_directory_counts_attributes_and_lists_tenants_for_profile_only(
+    owner_url: str, owner: Engine, first_migration_writes: dict[str, bool]
+) -> None:
+    with owner.connect() as connection:
+        _check_the_directory_role(connection, owner_of(connection), PROFILE_DIRECTORY_ROLE)
+    traders, stores = TenantId(uuid4()), TenantId(uuid4())
+    key = f"example_{uuid4().hex[:8]}"
+    profile = create_engine(as_role(owner_url, "profile"))
+    with profile.connect() as connection, connection.begin():
+        _insert_node(connection, traders, {key: "known"})
+        _insert_node(connection, stores, {key: "known", f"{key}_b": "not_applicable"})
+        usage = {
+            (row.key, row.state): int(row.holders)
+            for row in connection.execute(text(ATTRIBUTE_USAGE)).all()
+        }
+        assert usage[(key, "known")] == 2, "both tenants' nodes"
+        assert usage[(f"{key}_b", "not_applicable")] == 1
+        tenants = set(connection.execute(text(PROFILE_TENANTS)).scalars())
+        assert {traders.value, stores.value} <= tenants
+        _as_tenant(connection, traders)
+        own = connection.execute(text("SELECT count(*) FROM profile.profile_node")).scalar_one()
+        assert own == 1, "the role itself reads its current tenant only"
+        connection.rollback()
+    profile.dispose()
+    identity = create_engine(as_role(owner_url, "identity"))
+    with identity.connect() as connection, connection.begin():
+        assert _refused(connection, ATTRIBUTE_USAGE) == INSUFFICIENT_PRIVILEGE
+        assert _refused(connection, PROFILE_TENANTS) == INSUFFICIENT_PRIVILEGE
+    identity.dispose()
+
+
 def owner_of(connection: Connection) -> str:
     return str(connection.execute(text("SELECT current_user")).scalar_one())
 
 
-def _check_the_directory_role(connection: Connection, owner: str) -> None:
+def _check_the_directory_role(connection: Connection, owner: str, role_name: str) -> None:
     """NOLOGIN with no attribute at all, and no member but the owner, which does not inherit."""
     role = connection.execute(
         text(
             "SELECT rolcanlogin, rolsuper, rolbypassrls, rolinherit, rolcreatedb, rolcreaterole, "
             "rolreplication FROM pg_roles WHERE rolname = :r"
         ),
-        {"r": DIRECTORY_ROLE},
+        {"r": role_name},
     ).one()
     assert tuple(role) == (False,) * 7, "NOLOGIN, NOINHERIT and nothing else"
     members = connection.execute(
@@ -390,13 +568,20 @@ def _check_the_directory_role(connection: Connection, owner: str) -> None:
             "SELECT m.rolname, a.inherit_option FROM pg_auth_members a "
             "JOIN pg_roles m ON m.oid = a.member WHERE a.roleid = to_regrole(:r)"
         ),
-        {"r": DIRECTORY_ROLE},
+        {"r": role_name},
     ).all()
     assert {name for name, _ in members} <= {owner}, members
     assert not any(inherits for _, inherits in members), "the owner never inherits its reads"
 
 
 FUNCTION = "identity.data_requests_open()"
+FUNCTIONS: dict[str, tuple[str, str]] = {
+    "identity.data_requests_open()": (DIRECTORY_ROLE, "cw_identity"),
+    "identity.tenant_directory(text, uuid, integer, uuid)": (DIRECTORY_ROLE, "cw_identity"),
+    "profile.attribute_usage()": (PROFILE_DIRECTORY_ROLE, "cw_profile"),
+    "profile.tenant_directory()": (PROFILE_DIRECTORY_ROLE, "cw_profile"),
+}
+"""Each directory function with its owner and the one service role that may run it."""
 DEPLOYMENT_OWNER = "cw_owner"
 APP_ROLE = "cw_app"
 
@@ -456,7 +641,7 @@ def deployment() -> Iterator[tuple[PostgresContainer, str]]:
             database_url=RUNTIME,
             migration_database_url=SecretStr(url),
         )
-        migrate(settings, services=["identity"])
+        migrate(settings, services=["identity", "profile"])
         apply_roles(url)
         _psql(
             container,
@@ -473,34 +658,36 @@ def deployment() -> Iterator[tuple[PostgresContainer, str]]:
         yield container, url
 
 
-def test_with_an_owner_that_is_not_a_superuser_public_cannot_count(
-    deployment: tuple[PostgresContainer, str],
+@pytest.mark.parametrize("function", sorted(FUNCTIONS))
+def test_with_an_owner_that_is_not_a_superuser_public_cannot_run_the_directory_functions(
+    deployment: tuple[PostgresContainer, str], function: str
 ) -> None:
     _, url = deployment
+    directory_role, caller = FUNCTIONS[function]
     owner = create_engine(url)
     try:
         with owner.connect() as connection:
-            _check_the_directory_role(connection, DEPLOYMENT_OWNER)
+            _check_the_directory_role(connection, DEPLOYMENT_OWNER, directory_role)
             function_owner, acl = connection.execute(
                 text(
                     "SELECT proowner::regrole::text, proacl::text FROM pg_proc "
-                    f"WHERE oid = '{FUNCTION}'::regprocedure"
+                    f"WHERE oid = '{function}'::regprocedure"
                 )
             ).one()
-            assert function_owner == DIRECTORY_ROLE
+            assert function_owner == directory_role
             grantees = {entry.split("=")[0] for entry in acl.strip("{}").split(",")}
-            assert grantees == {DIRECTORY_ROLE, "cw_identity", APP_ROLE}, "no PUBLIC entry"
+            assert grantees == {directory_role, caller, APP_ROLE}, "no PUBLIC entry"
             runs = {
                 role: connection.execute(
                     text("SELECT has_function_privilege(:role, :function, 'EXECUTE')"),
-                    {"role": role, "function": FUNCTION},
+                    {"role": role, "function": function},
                 ).scalar_one()
                 for role in ("cw_identity", APP_ROLE, "cw_profile", "cw_obligation")
             }
             assert runs == {
-                "cw_identity": True,
+                "cw_identity": caller == "cw_identity",
                 APP_ROLE: True,
-                "cw_profile": False,
+                "cw_profile": caller == "cw_profile",
                 "cw_obligation": False,
             }
     finally:
@@ -528,10 +715,19 @@ def test_with_an_owner_that_is_not_a_superuser_the_rows_are_read_only_through_th
                     ),
                     {"id": uuid4(), "tenant": tenant.value},
                 )
+        with identity.begin() as connection:
+            _insert_tenant(connection, tenants[0], "Example Traders", users=1)
         with identity.connect() as connection:
             assert connection.execute(text(count)).scalar_one() == 2
             seen = connection.execute(text("SELECT count(*) FROM identity.data_request"))
             assert seen.scalar_one() == 0, "without a tenant, row-level security hides every row"
+            listed = connection.execute(
+                text(TENANT_DIRECTORY), {"q": None, "after": None, "lim": 10, "only": None}
+            ).all()
+            assert [(row.name, row.users) for row in listed] == [("Example Traders", 2)]
+            assert (
+                connection.execute(text("SELECT count(*) FROM identity.tenant")).scalar_one() == 0
+            )
         with owner.connect() as connection:
             seen = connection.execute(text("SELECT count(*) FROM identity.data_request"))
             assert seen.scalar_one() == 0, "the owner does not inherit the directory's reads"

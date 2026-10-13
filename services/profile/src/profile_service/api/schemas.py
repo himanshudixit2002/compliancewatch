@@ -13,9 +13,13 @@ from profile_service.application.export import TenantDataExport
 from profile_service.application.prefill import PrefillResult
 from profile_service.domain.lookup import GstinLookupResult
 from profile_service.domain.model import (
+    MAX_NOTE_CHARS,
     AttributeChange,
     AttributeRecord,
+    AttributeUsage,
     ProfileNode,
+    ReviewClosedBy,
+    ReviewOutcome,
     ReviewTask,
     ValueState,
 )
@@ -120,7 +124,11 @@ class NodeOut(BaseModel):
 class SetResultOut(BaseModel):
     node: NodeOut
     changed: list[str]
-    review_tasks: list[UUID]
+    review_tasks: list[UUID] = Field(description="The review tasks the save opened")
+    closed_review_tasks: list[UUID] = Field(
+        default_factory=list,
+        description="The open tasks of the node the save answered, closed with it",
+    )
 
 
 class SnapshotOut(BaseModel):
@@ -179,6 +187,15 @@ class ReviewTaskOut(BaseModel):
     as_of_fy: str | None
     open: bool
     created_at: datetime
+    closed_at: datetime | None = Field(default=None, description="Null while the task is open")
+    closed_by: ReviewClosedBy | None = Field(
+        default=None,
+        description="answer: the attribute was answered; resolve: a person closed it",
+    )
+    outcome: ReviewOutcome | None = Field(
+        default=None, description="answered for an answer; confirmed or dismissed for a resolve"
+    )
+    note: str = Field(default="", description="What the person said when resolving")
 
     @classmethod
     def from_task(cls, task: ReviewTask) -> "ReviewTaskOut":
@@ -190,7 +207,39 @@ class ReviewTaskOut(BaseModel):
             as_of_fy=None if task.as_of_fy is None else task.as_of_fy.label,
             open=task.open,
             created_at=task.created_at,
+            closed_at=task.closed_at,
+            closed_by=task.closed_by,
+            outcome=task.outcome,
+            note=task.note,
         )
+
+
+class ReviewTaskResolveIn(Strict):
+    outcome: Literal["confirmed", "dismissed"] = Field(
+        description=(
+            "confirmed: what the task asked about was checked and stands; dismissed: nothing "
+            "to check, or checked elsewhere"
+        )
+    )
+    note: str = Field(default="", max_length=MAX_NOTE_CHARS, description="Why, in a sentence")
+
+
+class AttributeUsageOut(BaseModel):
+    """How many profile nodes, across every tenant, hold an attribute in a state."""
+
+    key: str
+    state: ValueState
+    count: int = Field(description="Distinct nodes; a per-year value counts its node once")
+
+    @classmethod
+    def from_usage(cls, usage: AttributeUsage) -> "AttributeUsageOut":
+        return cls(key=usage.key, state=usage.state, count=usage.count)
+
+
+class AttributeUsagesOut(BaseModel):
+    items: list[AttributeUsageOut] = Field(
+        description="One entry per (key, state) any node holds, in the order of (key, state)"
+    )
 
 
 class PrefillIn(Strict):

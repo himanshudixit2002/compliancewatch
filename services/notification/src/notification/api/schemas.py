@@ -2,11 +2,19 @@
 
 from collections.abc import Mapping
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 from uuid import UUID
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+)
 
+from domain_kernel.audit import MAX_REASON_CHARS
 from domain_kernel.channels import Channel
 from notification.application.bulk import (
     MAX_BUSINESSES as MAX_BULK_BUSINESSES,
@@ -238,6 +246,32 @@ class RecipientOut(BaseModel):
             created_at=recipient.created_at,
             updated_at=recipient.updated_at,
         )
+
+
+class ResendIn(Strict):
+    """Why a failed notification is sent again, and, when the admin wants to be sure of the
+    address, which one."""
+
+    reason: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_REASON_CHARS),
+        Field(
+            description=(
+                f"Why it is resent (a support case, a provider outage), 1 to {MAX_REASON_CHARS} "
+                "characters once trimmed; written to the audit trail. A blank one is a 422"
+            )
+        ),
+    ]
+    recipient: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=254,
+        description=(
+            "The address the admin means (a WhatsApp number or an email address): it must be the "
+            "notification's own, else nothing is queued (422); left out, the notification goes "
+            "to its address"
+        ),
+    )
 
 
 class NotificationOut(BaseModel):

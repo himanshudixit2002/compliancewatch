@@ -17,6 +17,7 @@ from profile_service.api.deps import (
     Caller,
     ExportTenant,
     Now,
+    ResolverTenant,
     Tenant,
     Wired,
     changed_by,
@@ -35,12 +36,14 @@ from profile_service.api.schemas import (
     PrefillOut,
     RegistrationIn,
     ReviewTaskOut,
+    ReviewTaskResolveIn,
     SetResultOut,
     SnapshotOut,
 )
 from profile_service.application.attributes import financial_year_in_india
 from profile_service.domain.errors import ProfileNodeNotFoundError
 from profile_service.domain.events import ChangeSource
+from profile_service.domain.model import ReviewOutcome
 from py_common.problems import limit_problem_responses, problem_responses
 
 router = APIRouter(prefix="/v1/profile", tags=["profile"])
@@ -121,6 +124,7 @@ def set_attributes(
         node=NodeOut.from_node(result.node),
         changed=list(result.changed),
         review_tasks=[task.value for task in result.review_tasks],
+        closed_review_tasks=[task.value for task in result.closed_review_tasks],
     )
 
 
@@ -169,15 +173,47 @@ def next_question(
 
 @router.get(
     "/nodes/{node_id}/review-tasks",
-    summary="Open review tasks of a node",
+    summary="Open review tasks of a node, or every task of it with include_closed",
     responses=problem_responses(401, 403, 404),
 )
-def review_tasks(node_id: UUID, tenant: Tenant, wired: Wired) -> list[ReviewTaskOut]:
+def review_tasks(
+    node_id: UUID,
+    tenant: Tenant,
+    wired: Wired,
+    include_closed: Annotated[
+        bool, Query(description="Closed tasks too, with how and when each closed")
+    ] = False,
+) -> list[ReviewTaskOut]:
     with wired.unit_of_work(tenant) as uow:
         if uow.profiles.get(BusinessId(node_id)) is None:
             raise ProfileNodeNotFoundError(str(node_id))
-        tasks = uow.profiles.open_review_tasks(BusinessId(node_id))
+        tasks = (
+            uow.profiles.review_tasks(BusinessId(node_id))
+            if include_closed
+            else uow.profiles.open_review_tasks(BusinessId(node_id))
+        )
     return [ReviewTaskOut.from_task(task) for task in tasks]
+
+
+@router.post(
+    "/nodes/{node_id}/review-tasks/{task_id}/resolve",
+    summary="Close a review task by hand, with an outcome and a note (tenant admins)",
+    responses=problem_responses(401, 403, 404, 409, 422),
+)
+def resolve_review_task(
+    node_id: UUID, task_id: UUID, body: ReviewTaskResolveIn, tenant: ResolverTenant, wired: Wired
+) -> ReviewTaskOut:
+    """A task closes on its own when the attribute it asks about is answered; this closes one a
+    person checked (``confirmed``) or set aside (``dismissed``), and writes ``review_task.closed``
+    to the audit trail. 404 for a task that is not the node's, 409 for one closed already."""
+    task = wired.resolve_review_task.run(
+        tenant,
+        BusinessId(node_id),
+        BusinessId(task_id),
+        outcome=ReviewOutcome(body.outcome),
+        note=body.note,
+    )
+    return ReviewTaskOut.from_task(task)
 
 
 @router.post(

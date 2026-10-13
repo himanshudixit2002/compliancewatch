@@ -13,7 +13,15 @@ from identity.application.channel_consents import ChannelConsentSummary
 from identity.application.consents import ConsentSummary
 from identity.application.sessions import ServiceSession, Session
 from identity.application.tenancy import CreatedTenant
-from identity.domain.billing import MAX_QUANTITY, PLANS, REGISTRATIONS, SEATS, Plan, Subscription
+from identity.domain.billing import (
+    MAX_QUANTITY,
+    PLANS,
+    REGISTRATIONS,
+    SEATS,
+    Plan,
+    Subscription,
+    SubscriptionStatus,
+)
 from identity.domain.channel_consent import (
     MESSAGE_ID_MAX_LENGTH,
     ChannelConsentRecord,
@@ -27,6 +35,7 @@ from identity.domain.data_requests import (
     DataRequestSource,
     DataRequestStatus,
 )
+from identity.domain.directory import TenantSummary
 from identity.domain.entitlements import Entitlements
 from identity.domain.tenancy import (
     MAX_NAME_CHARS,
@@ -384,6 +393,49 @@ class TenantOut(BaseModel):
             status=tenant.status,
             created_at=tenant.created_at,
         )
+
+
+class AdminTenantOut(BaseModel):
+    """One tenant as the regulatory team's admin lists it: the tenant, the plan key and status
+    of its newest subscription (null without one; what the plan entitles the tenant to is the
+    entitlements route's answer) and how many users it has, how many of them active."""
+
+    id: UUID
+    kind: TenantKind
+    name: str
+    status: TenantStatus
+    created_at: datetime
+    plan_key: str | None = Field(description="The newest subscription's plan; null without one")
+    subscription_status: SubscriptionStatus | None = Field(
+        description="The newest subscription's status, whatever it is; null without one"
+    )
+    users: int = Field(description="Every user of the tenant, disabled ones included")
+    active_users: int
+
+    @classmethod
+    def from_summary(cls, summary: TenantSummary) -> "AdminTenantOut":
+        return cls(
+            id=summary.id.value,
+            kind=summary.kind,
+            name=summary.name,
+            status=summary.status,
+            created_at=summary.created_at,
+            plan_key=summary.plan_key,
+            subscription_status=summary.subscription_status,
+            users=summary.users,
+            active_users=summary.active_users,
+        )
+
+
+class AdminTenantKeyset(BaseModel):
+    """The cursor's keyset of the admin tenant list: the last tenant of a page, whose name the
+    directory looks up again (a tenant's name does not change)."""
+
+    id: UUID
+
+    @classmethod
+    def of(cls, summary: TenantSummary) -> "AdminTenantKeyset":
+        return cls(id=summary.id.value)
 
 
 class UserOut(BaseModel):

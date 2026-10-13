@@ -14,7 +14,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Self, cast
+from typing import Final, Self, cast
 
 from domain_kernel._validation import (
     require_aware,
@@ -33,6 +33,7 @@ from profile_service.domain.errors import (
     AttributeLevelMismatchError,
     FinancialYearRequiredError,
     InvalidHierarchyError,
+    ReviewTaskClosedError,
 )
 from profile_service.domain.events import ChangeSource, ProfileUpdated
 
@@ -48,6 +49,31 @@ class ReviewReason(StrEnum):
     CONFIRM_FINANCIAL_YEAR = "confirm_financial_year"
     VERIFY_REGISTRATION = "verify_registration"
     """The GSTIN lookup was unavailable at onboarding; a person checks the registration."""
+
+
+class ReviewClosedBy(StrEnum):
+    """What closed a review task."""
+
+    ANSWER = "answer"
+    """The attribute the task asked about was answered, in the transaction of the answer."""
+    RESOLVE = "resolve"
+    """A person closed it through the resolve route, with an outcome and a note."""
+
+
+class ReviewOutcome(StrEnum):
+    """How a review task ended."""
+
+    ANSWERED = "answered"
+    """An answer closed it (``ReviewClosedBy.ANSWER``)."""
+    CONFIRMED = "confirmed"
+    """A person checked what the task asked about and it stands."""
+    DISMISSED = "dismissed"
+    """A person set the task aside: nothing to check, or checked elsewhere."""
+
+
+RESOLVE_OUTCOMES: Final = frozenset({ReviewOutcome.CONFIRMED, ReviewOutcome.DISMISSED})
+"""The outcomes a person may close a task with; ``answered`` is an answer's alone."""
+MAX_NOTE_CHARS: Final = 2_000
 
 
 type AttributeKey = tuple[str, str | None]
@@ -398,7 +424,9 @@ def _require_chain(chain: Iterable[ProfileNode]) -> None:
 @dataclass(frozen=True, slots=True)
 class ReviewTask:
     """A question for a person: an attribute the business says does not apply, or a per-year
-    value to confirm when the financial year turns."""
+    value to confirm when the financial year turns. It closes when the attribute it asks about
+    is answered (``answered``) or when a person resolves it (``resolved``); a closed task keeps
+    when, how and with what outcome, and the note of a resolve."""
 
     id: BusinessId
     tenant_id: TenantId
@@ -408,6 +436,10 @@ class ReviewTask:
     as_of_fy: FinancialYear | None
     open: bool
     created_at: datetime
+    closed_at: datetime | None = None
+    closed_by: ReviewClosedBy | None = None
+    outcome: ReviewOutcome | None = None
+    note: str = ""
 
     def __post_init__(self) -> None:
         require_instance(self.id, BusinessId, "id")
@@ -418,6 +450,20 @@ class ReviewTask:
         if self.as_of_fy is not None:
             require_instance(self.as_of_fy, FinancialYear, "as_of_fy")
         require_aware(self.created_at, "created_at")
+        require_instance(self.note, str, "note")
+        if len(self.note) > MAX_NOTE_CHARS:
+            raise InvariantViolationError(f"note has at most {MAX_NOTE_CHARS} characters")
+        if self.open:
+            if self.closed_at is not None or self.closed_by is not None or self.outcome is not None:
+                raise InvariantViolationError("an open task has no closure")
+            return
+        if self.closed_at is None or self.closed_by is None or self.outcome is None:
+            raise InvariantViolationError("a closed task says when, how and with what outcome")
+        require_aware(self.closed_at, "closed_at")
+        require_instance(self.closed_by, ReviewClosedBy, "closed_by")
+        require_instance(self.outcome, ReviewOutcome, "outcome")
+        if (self.closed_by is ReviewClosedBy.ANSWER) != (self.outcome is ReviewOutcome.ANSWERED):
+            raise InvariantViolationError("an answer's outcome is answered, and only an answer's")
 
     @property
     def dedupe_key(self) -> tuple[BusinessId, str, ReviewReason, str | None]:
@@ -427,6 +473,50 @@ class ReviewTask:
             self.reason,
             None if self.as_of_fy is None else self.as_of_fy.label,
         )
+
+    @property
+    def storage_key(self) -> AttributeKey:
+        """The stored value the task asks about: (attribute key, financial year label)."""
+        return (self.attribute_key, None if self.as_of_fy is None else self.as_of_fy.label)
+
+    def answered(self, at: datetime) -> Self:
+        """This task closed by an answer to the attribute it asks about."""
+        return self._closed(ReviewClosedBy.ANSWER, ReviewOutcome.ANSWERED, "", at)
+
+    def resolved(self, outcome: ReviewOutcome, note: str, at: datetime) -> Self:
+        """This task closed by a person with one of ``RESOLVE_OUTCOMES`` and ``note``."""
+        require_instance(outcome, ReviewOutcome, "outcome")
+        if outcome not in RESOLVE_OUTCOMES:
+            raise InvariantViolationError(
+                f"a person resolves a task as {' or '.join(sorted(RESOLVE_OUTCOMES))}, "
+                f"not {outcome.value}"
+            )
+        return self._closed(ReviewClosedBy.RESOLVE, outcome, note.strip(), at)
+
+    def _closed(
+        self, closed_by: ReviewClosedBy, outcome: ReviewOutcome, note: str, at: datetime
+    ) -> Self:
+        require_aware(at, "at")
+        if not self.open:
+            assert self.closed_by is not None
+            raise ReviewTaskClosedError(str(self.id), self.closed_by.value)
+        return replace(
+            self, open=False, closed_at=at, closed_by=closed_by, outcome=outcome, note=note
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class AttributeUsage:
+    """How many nodes, across every tenant, hold attribute ``key`` in ``state``."""
+
+    key: str
+    state: ValueState
+    count: int
+
+    def __post_init__(self) -> None:
+        require_text(self.key, "key")
+        require_instance(self.state, ValueState, "state")
+        require_int(self.count, "count", minimum=0)
 
 
 @dataclass(frozen=True, slots=True)
