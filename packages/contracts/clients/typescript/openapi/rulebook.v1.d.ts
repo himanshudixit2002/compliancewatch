@@ -214,6 +214,53 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  "/v1/rulebook/error-reports": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * The error reports tenants' members made, by rule version, oldest first
+     * @description Each report with its masked description and, once decided, the decision; ``groups``
+     *     counts the open reports per rule version, whatever the page shows.
+     */
+    get: operations["list_error_reports_v1_rulebook_error_reports_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/rulebook/error-reports/{report_id}/decision": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Confirm an error report with its correcting version, or reject it
+     * @description Once per report (409 rulebook-error-review-closed). confirmed needs
+     *     correcting_rule_version_id, a stored version with a corrects relation to the reported one
+     *     (422 rulebook-correcting-version-required; 404 rulebook-rule-version-not-found for one the
+     *     rulebook does not hold); publishing it replaces the reported version and reaches the affected
+     *     businesses through the rule events. The decision goes back to the obligation service as
+     *     error_report.decided and is audited as error_report_review.decided. 404
+     *     rulebook-error-review-not-found when no such report reached the rulebook.
+     */
+    post: operations["decide_error_report_v1_rulebook_error_reports__report_id__decision_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/rulebook/maintenance/transitions": {
     parameters: {
       query?: never;
@@ -1264,37 +1311,6 @@ export type components = {
       returned: number;
     };
     /**
-     * DecisionIn
-     * @description Decide every open mention of one (entity type, proposed name).
-     */
-    DecisionIn: {
-      /**
-       * Decided By
-       * @description Who decided; a signed-in user's token overrides it with that user's id
-       */
-      decided_by: string;
-      decision: components["schemas"]["MentionDecision"];
-      /**
-       * Entity Id
-       * @description The entity to add the name to
-       */
-      entity_id?: string | null;
-      entity_type: components["schemas"]["EntityType"];
-      /**
-       * Note
-       * @default
-       */
-      note?: string;
-      /** Proposed Name */
-      proposed_name: string;
-      reject_reason?: components["schemas"]["EntityRejectReason"] | null;
-      /**
-       * Review Ids
-       * @description The mentions this decision covers. Required for a name that does not name one entity across documents (empty, or a section or rule without its statute)
-       */
-      review_ids?: string[] | null;
-    };
-    /**
      * DocumentIn
      * @description A parsed regulator document. The id in the path must be the first half of ``sha256``.
      */
@@ -1618,6 +1634,107 @@ export type components = {
       | "tax_rate"
       | "threshold"
       | "state";
+    /**
+     * ErrorCategory
+     * @description What the reporter says is wrong; the values are the contract's.
+     * @enum {string}
+     */
+    ErrorCategory: "due_date" | "applicability" | "steps" | "citation" | "other";
+    /**
+     * ErrorOutcome
+     * @description What the regulatory team decided; the values are the contract's.
+     * @enum {string}
+     */
+    ErrorOutcome: "confirmed" | "rejected";
+    /**
+     * ErrorReviewGroupOut
+     * @description The open reports about one rule version: how many and since when, with the version's
+     *     rule key, number and title (null or empty for a version the rulebook no longer lists).
+     */
+    ErrorReviewGroupOut: {
+      /**
+       * Oldest Received At
+       * Format: date-time
+       */
+      oldest_received_at: string;
+      /** Open */
+      open: number;
+      /** Rule Key */
+      rule_key: string | null;
+      /**
+       * Rule Version Id
+       * Format: uuid
+       */
+      rule_version_id: string;
+      /** Title */
+      title: string;
+      /** Version */
+      version: number | null;
+    };
+    /**
+     * ErrorReviewOut
+     * @description One report as the rulebook holds it: ``description`` is the reporter's account as the
+     *     obligation service masked it (empty once the tenant was erased, with ``tenant_id`` null);
+     *     ``status`` is ``open`` until decided, then ``confirmed`` with
+     *     ``correcting_rule_version_id`` or ``rejected``, with the decision's notes.
+     */
+    ErrorReviewOut: {
+      category: components["schemas"]["ErrorCategory"];
+      /** Correcting Rule Version Id */
+      correcting_rule_version_id: string | null;
+      /** Decided At */
+      decided_at: string | null;
+      /** Decided By */
+      decided_by: string | null;
+      /** Description */
+      description: string;
+      /** Notes */
+      notes: string;
+      /**
+       * Obligation Id
+       * Format: uuid
+       */
+      obligation_id: string;
+      /**
+       * Received At
+       * Format: date-time
+       */
+      received_at: string;
+      /**
+       * Report Id
+       * Format: uuid
+       */
+      report_id: string;
+      /**
+       * Rule Version Id
+       * Format: uuid
+       */
+      rule_version_id: string;
+      status: components["schemas"]["ErrorReviewStatus"];
+      /** Tenant Id */
+      tenant_id: string | null;
+    };
+    /**
+     * ErrorReviewPageOut
+     * @description One page of the queue, and the open reports counted per rule version (the whole queue,
+     *     whatever the page's filters).
+     */
+    ErrorReviewPageOut: {
+      /** Groups */
+      groups: components["schemas"]["ErrorReviewGroupOut"][];
+      /** Items */
+      items: components["schemas"]["ErrorReviewOut"][];
+      /**
+       * Next Cursor
+       * @description Send as cursor to read the next page; null on the last page
+       */
+      next_cursor: string | null;
+    };
+    /**
+     * ErrorReviewStatus
+     * @enum {string}
+     */
+    ErrorReviewStatus: "open" | "confirmed" | "rejected";
     /** EventOut */
     EventOut: {
       /** Causation Id */
@@ -2530,6 +2647,61 @@ export type components = {
      * @enum {string}
      */
     ReviewTaskStatus: "open" | "claimed" | "decided";
+    /**
+     * DecisionIn
+     * @description ``confirmed`` names ``correcting_rule_version_id``, a version with a corrects relation to
+     *     the reported one; ``rejected`` says why in ``notes``.
+     */
+    rulebook__api__error_reports__DecisionIn: {
+      /**
+       * Actor Id
+       * Format: uuid
+       * @description The analyst deciding; a signed-in user's token overrides it
+       */
+      actor_id: string;
+      /**
+       * Correcting Rule Version Id
+       * @description For a confirmed report, the version that corrects it
+       */
+      correcting_rule_version_id?: string | null;
+      decision: components["schemas"]["ErrorOutcome"];
+      /**
+       * Notes
+       * @default
+       */
+      notes?: string;
+    };
+    /**
+     * DecisionIn
+     * @description Decide every open mention of one (entity type, proposed name).
+     */
+    rulebook__api__schemas__DecisionIn: {
+      /**
+       * Decided By
+       * @description Who decided; a signed-in user's token overrides it with that user's id
+       */
+      decided_by: string;
+      decision: components["schemas"]["MentionDecision"];
+      /**
+       * Entity Id
+       * @description The entity to add the name to
+       */
+      entity_id?: string | null;
+      entity_type: components["schemas"]["EntityType"];
+      /**
+       * Note
+       * @default
+       */
+      note?: string;
+      /** Proposed Name */
+      proposed_name: string;
+      reject_reason?: components["schemas"]["EntityRejectReason"] | null;
+      /**
+       * Review Ids
+       * @description The mentions this decision covers. Required for a name that does not name one entity across documents (empty, or a section or rule without its statute)
+       */
+      review_ids?: string[] | null;
+    };
     /**
      * RuleCandidateStatus
      * @enum {string}
@@ -3720,6 +3892,154 @@ export interface operations {
       };
     };
   };
+  list_error_reports_v1_rulebook_error_reports_get: {
+    parameters: {
+      query?: {
+        /** @description The next_cursor of the previous page; absent for the first page */
+        cursor?: string | null;
+        /** @description Items per page, 1 to 200 */
+        limit?: number;
+        /** @description Only reports about this rule version */
+        rule_version_id?: string | null;
+        /** @description Only reports in this status; open by default */
+        status?: components["schemas"]["ErrorReviewStatus"] | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorReviewPageOut"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  decide_error_report_v1_rulebook_error_reports__report_id__decision_post: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token */
+        "x-cw-review-token"?: string | null;
+      };
+      path: {
+        report_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["rulebook__api__error_reports__DecisionIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorReviewOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   apply_transitions_v1_rulebook_maintenance_transitions_post: {
     parameters: {
       query?: never;
@@ -3915,7 +4235,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["DecisionIn"];
+        "application/json": components["schemas"]["rulebook__api__schemas__DecisionIn"];
       };
     };
     responses: {

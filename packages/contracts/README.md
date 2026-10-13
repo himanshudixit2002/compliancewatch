@@ -155,12 +155,13 @@ its service's own prefix (`/v1/qa`, `/v1/notification/bulk`) or outside every pr
 
 ## Events
 
-Twenty-two topics have a schema: `document.discovered`, `document.parsed`,
+Twenty-four topics have a schema: `document.discovered`, `document.parsed`,
 `document.classified`, `rule.candidate.created`, `rule.rejected`, `rule.published`,
 `rule.superseded`, `rule.withdrawn`, `rule.deadline_changed`, `profile.updated`,
 `applicability.decided`, `obligation.created`, `obligation.due_soon`, `obligation.closed`,
-`obligation.rescheduled`, `notification.sent`, `notification.failed`, `tenant.created`,
-`tenant.deletion.requested`, `tenant.data.erased`, `user.role.changed` and `eval.run.completed`. The gateway's `llm.call.completed` and
+`obligation.rescheduled`, `error_report.submitted`, `error_report.decided`, `notification.sent`,
+`notification.failed`, `tenant.created`, `tenant.deletion.requested`, `tenant.data.erased`,
+`user.role.changed` and `eval.run.completed`. The gateway's `llm.call.completed` and
 `llm.budget.alarmed` are still log lines and get a schema when they gain a consumer; until then
 they are listed, with the reason, in `LOG_ONLY_TOPICS` in `scripts/check_topics.py`.
 

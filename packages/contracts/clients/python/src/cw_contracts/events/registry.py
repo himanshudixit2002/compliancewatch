@@ -10,6 +10,8 @@ from cw_contracts.events.applicability_decided_v1 import ApplicabilityDecidedV1
 from cw_contracts.events.document_classified_v1 import DocumentClassifiedV1
 from cw_contracts.events.document_discovered_v1 import DocumentDiscoveredV1
 from cw_contracts.events.document_parsed_v1 import DocumentParsedV1
+from cw_contracts.events.error_report_decided_v1 import ErrorReportDecidedV1
+from cw_contracts.events.error_report_submitted_v1 import ErrorReportSubmittedV1
 from cw_contracts.events.eval_run_completed_v1 import EvalRunCompletedV1
 from cw_contracts.events.notification_failed_v1 import NotificationFailedV1
 from cw_contracts.events.notification_sent_v1 import NotificationSentV1
@@ -72,6 +74,20 @@ TOPICS: Mapping[str, TopicSpec] = MappingProxyType(
             model=DocumentParsedV1,
             tenant_scoped=False,
             schema_file="document.parsed.v1.json",
+        ),
+        "error_report.decided": TopicSpec(
+            topic="error_report.decided",
+            version="1.0.0",
+            model=ErrorReportDecidedV1,
+            tenant_scoped=True,
+            schema_file="error_report.decided.v1.json",
+        ),
+        "error_report.submitted": TopicSpec(
+            topic="error_report.submitted",
+            version="1.0.0",
+            model=ErrorReportSubmittedV1,
+            tenant_scoped=True,
+            schema_file="error_report.submitted.v1.json",
         ),
         "eval.run.completed": TopicSpec(
             topic="eval.run.completed",

@@ -247,6 +247,19 @@
       ]
     },
     {
+      "name": "obligation.error_reports",
+      "type": "bool",
+      "default": false,
+      "owner": "core-product",
+      "description": "Lets a tenant's members report an error in an obligation (POST /v1/obligation/obligations/{obligation_id}/error-reports): the report is stored under row-level security, error_report.submitted goes out with the description masked for personal identifiers, and the rulebook queues it for the regulatory team, whose decision (error_report.decided) comes back to the report. Off, the route answers 404 obligation-error-reports-disabled and stores nothing; the list route and both consumers run either way. With CW_FLAG_OBLIGATION_ERROR_REPORTS__TENANTS it applies to the listed tenants only.",
+      "removal": "When the web obligation detail screen's report-an-error form (W11) has shipped to the pilot and reports have reached the rulebook's review queue in production for 30 days.",
+      "expires": "2027-03-31",
+      "targeting": "tenant",
+      "services": [
+        "obligation"
+      ]
+    },
+    {
       "name": "obligation.reminder_sweep",
       "type": "bool",
       "default": false,

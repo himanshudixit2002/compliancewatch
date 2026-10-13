@@ -35,8 +35,8 @@ EXAMPLE_FILES = sorted(EXAMPLES.rglob("*.json"))
 ENVELOPE = validator_for(SCHEMAS / "envelope.v1.json")
 
 
-def test_twenty_three_schemas_exist() -> None:
-    assert len(TOPIC_FILES) == 22
+def test_twenty_five_schemas_exist() -> None:
+    assert len(TOPIC_FILES) == 24
     assert (SCHEMAS / "envelope.v1.json").exists()
 
 

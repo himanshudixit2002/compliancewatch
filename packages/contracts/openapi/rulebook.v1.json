@@ -1122,84 +1122,6 @@
         "title": "DecisionCountsOut",
         "type": "object"
       },
-      "DecisionIn": {
-        "additionalProperties": false,
-        "description": "Decide every open mention of one (entity type, proposed name).",
-        "properties": {
-          "decided_by": {
-            "description": "Who decided; a signed-in user's token overrides it with that user's id",
-            "maxLength": 120,
-            "minLength": 1,
-            "title": "Decided By",
-            "type": "string"
-          },
-          "decision": {
-            "$ref": "#/components/schemas/MentionDecision"
-          },
-          "entity_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The entity to add the name to",
-            "title": "Entity Id"
-          },
-          "entity_type": {
-            "$ref": "#/components/schemas/EntityType"
-          },
-          "note": {
-            "default": "",
-            "maxLength": 2000,
-            "title": "Note",
-            "type": "string"
-          },
-          "proposed_name": {
-            "maxLength": 400,
-            "title": "Proposed Name",
-            "type": "string"
-          },
-          "reject_reason": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/EntityRejectReason"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "review_ids": {
-            "anyOf": [
-              {
-                "items": {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                "maxItems": 200,
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The mentions this decision covers. Required for a name that does not name one entity across documents (empty, or a section or rule without its statute)",
-            "title": "Review Ids"
-          }
-        },
-        "required": [
-          "entity_type",
-          "proposed_name",
-          "decision",
-          "decided_by"
-        ],
-        "title": "DecisionIn",
-        "type": "object"
-      },
       "DocumentIn": {
         "additionalProperties": false,
         "description": "A parsed regulator document. The id in the path must be the first half of ``sha256``.",
@@ -1949,6 +1871,232 @@
           "state"
         ],
         "title": "EntityType",
+        "type": "string"
+      },
+      "ErrorCategory": {
+        "description": "What the reporter says is wrong; the values are the contract's.",
+        "enum": [
+          "due_date",
+          "applicability",
+          "steps",
+          "citation",
+          "other"
+        ],
+        "title": "ErrorCategory",
+        "type": "string"
+      },
+      "ErrorOutcome": {
+        "description": "What the regulatory team decided; the values are the contract's.",
+        "enum": [
+          "confirmed",
+          "rejected"
+        ],
+        "title": "ErrorOutcome",
+        "type": "string"
+      },
+      "ErrorReviewGroupOut": {
+        "description": "The open reports about one rule version: how many and since when, with the version's\nrule key, number and title (null or empty for a version the rulebook no longer lists).",
+        "properties": {
+          "oldest_received_at": {
+            "format": "date-time",
+            "title": "Oldest Received At",
+            "type": "string"
+          },
+          "open": {
+            "title": "Open",
+            "type": "integer"
+          },
+          "rule_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rule Key"
+          },
+          "rule_version_id": {
+            "format": "uuid",
+            "title": "Rule Version Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          }
+        },
+        "required": [
+          "rule_version_id",
+          "rule_key",
+          "version",
+          "title",
+          "open",
+          "oldest_received_at"
+        ],
+        "title": "ErrorReviewGroupOut",
+        "type": "object"
+      },
+      "ErrorReviewOut": {
+        "description": "One report as the rulebook holds it: ``description`` is the reporter's account as the\nobligation service masked it (empty once the tenant was erased, with ``tenant_id`` null);\n``status`` is ``open`` until decided, then ``confirmed`` with\n``correcting_rule_version_id`` or ``rejected``, with the decision's notes.",
+        "properties": {
+          "category": {
+            "$ref": "#/components/schemas/ErrorCategory"
+          },
+          "correcting_rule_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Correcting Rule Version Id"
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "decided_by": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided By"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "notes": {
+            "title": "Notes",
+            "type": "string"
+          },
+          "obligation_id": {
+            "format": "uuid",
+            "title": "Obligation Id",
+            "type": "string"
+          },
+          "received_at": {
+            "format": "date-time",
+            "title": "Received At",
+            "type": "string"
+          },
+          "report_id": {
+            "format": "uuid",
+            "title": "Report Id",
+            "type": "string"
+          },
+          "rule_version_id": {
+            "format": "uuid",
+            "title": "Rule Version Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ErrorReviewStatus"
+          },
+          "tenant_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Id"
+          }
+        },
+        "required": [
+          "report_id",
+          "tenant_id",
+          "obligation_id",
+          "rule_version_id",
+          "category",
+          "description",
+          "received_at",
+          "status",
+          "decided_by",
+          "decided_at",
+          "notes",
+          "correcting_rule_version_id"
+        ],
+        "title": "ErrorReviewOut",
+        "type": "object"
+      },
+      "ErrorReviewPageOut": {
+        "description": "One page of the queue, and the open reports counted per rule version (the whole queue,\nwhatever the page's filters).",
+        "properties": {
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/ErrorReviewGroupOut"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ErrorReviewOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Send as cursor to read the next page; null on the last page",
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor",
+          "groups"
+        ],
+        "title": "ErrorReviewPageOut",
+        "type": "object"
+      },
+      "ErrorReviewStatus": {
+        "enum": [
+          "open",
+          "confirmed",
+          "rejected"
+        ],
+        "title": "ErrorReviewStatus",
         "type": "string"
       },
       "EventOut": {
@@ -5289,6 +5437,124 @@
         ],
         "title": "ValidationIssue",
         "type": "object"
+      },
+      "rulebook__api__error_reports__DecisionIn": {
+        "additionalProperties": false,
+        "description": "``confirmed`` names ``correcting_rule_version_id``, a version with a corrects relation to\nthe reported one; ``rejected`` says why in ``notes``.",
+        "properties": {
+          "actor_id": {
+            "description": "The analyst deciding; a signed-in user's token overrides it",
+            "format": "uuid",
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "correcting_rule_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For a confirmed report, the version that corrects it",
+            "title": "Correcting Rule Version Id"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/ErrorOutcome"
+          },
+          "notes": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Notes",
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor_id",
+          "decision"
+        ],
+        "title": "DecisionIn",
+        "type": "object"
+      },
+      "rulebook__api__schemas__DecisionIn": {
+        "additionalProperties": false,
+        "description": "Decide every open mention of one (entity type, proposed name).",
+        "properties": {
+          "decided_by": {
+            "description": "Who decided; a signed-in user's token overrides it with that user's id",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Decided By",
+            "type": "string"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/MentionDecision"
+          },
+          "entity_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The entity to add the name to",
+            "title": "Entity Id"
+          },
+          "entity_type": {
+            "$ref": "#/components/schemas/EntityType"
+          },
+          "note": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Note",
+            "type": "string"
+          },
+          "proposed_name": {
+            "maxLength": 400,
+            "title": "Proposed Name",
+            "type": "string"
+          },
+          "reject_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EntityRejectReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "review_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "maxItems": 200,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The mentions this decision covers. Required for a name that does not name one entity across documents (empty, or a section or rule without its statute)",
+            "title": "Review Ids"
+          }
+        },
+        "required": [
+          "entity_type",
+          "proposed_name",
+          "decision",
+          "decided_by"
+        ],
+        "title": "DecisionIn",
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -6372,6 +6638,276 @@
         ]
       }
     },
+    "/v1/rulebook/error-reports": {
+      "get": {
+        "description": "Each report with its masked description and, once decided, the decision; ``groups``\ncounts the open reports per rule version, whatever the page shows.",
+        "operationId": "list_error_reports_v1_rulebook_error_reports_get",
+        "parameters": [
+          {
+            "description": "Only reports in this status; open by default",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ErrorReviewStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": "open",
+              "description": "Only reports in this status; open by default",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "Only reports about this rule version",
+            "in": "query",
+            "name": "rule_version_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only reports about this rule version",
+              "title": "Rule Version Id"
+            }
+          },
+          {
+            "description": "Items per page, 1 to 200",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Items per page, 1 to 200",
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The next_cursor of the previous page; absent for the first page",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The next_cursor of the previous page; absent for the first page",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReviewPageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "The error reports tenants' members made, by rule version, oldest first",
+        "tags": [
+          "rulebook",
+          "review"
+        ]
+      }
+    },
+    "/v1/rulebook/error-reports/{report_id}/decision": {
+      "post": {
+        "description": "Once per report (409 rulebook-error-review-closed). confirmed needs\ncorrecting_rule_version_id, a stored version with a corrects relation to the reported one\n(422 rulebook-correcting-version-required; 404 rulebook-rule-version-not-found for one the\nrulebook does not hold); publishing it replaces the reported version and reaches the affected\nbusinesses through the rule events. The decision goes back to the obligation service as\nerror_report.decided and is audited as error_report_review.decided. 404\nrulebook-error-review-not-found when no such report reached the rulebook.",
+        "operationId": "decide_error_report_v1_rulebook_error_reports__report_id__decision_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "report_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Report Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token",
+            "in": "header",
+            "name": "x-cw-review-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Shared secret for analyst actions (CW_RULEBOOK_REVIEW_TOKEN), accepted when CW_AUTH_MODE is header or dual and the request carries no bearer token",
+              "title": "X-Cw-Review-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/rulebook__api__error_reports__DecisionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorReviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Confirm an error report with its correcting version, or reject it",
+        "tags": [
+          "rulebook",
+          "review"
+        ]
+      }
+    },
     "/v1/rulebook/maintenance/transitions": {
       "post": {
         "operationId": "apply_transitions_v1_rulebook_maintenance_transitions_post",
@@ -6783,7 +7319,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/DecisionIn"
+                "$ref": "#/components/schemas/rulebook__api__schemas__DecisionIn"
               }
             }
           },
