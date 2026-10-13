@@ -13,24 +13,26 @@ import { safeNext, withQuery } from "@/shared/lib/url";
  * handler exchanges the hash with the provider, then runs the same exchange as the code step:
  * a session cookie and a redirect, the sign-up or second-factor step with the pending cookie,
  * or the sign-in page saying the link is not valid any more. GET, since a mail client opens a
- * link; the hash is single-use at the provider and never lands in a page of this app.
+ * link; the hash is single-use at the provider and never lands in a page of this app. Every
+ * redirect is a relative Location, so the browser stays on the host it used: under `next start`
+ * Next builds `request.nextUrl` from the server's bind address, not from that host (as the
+ * sign-out handler says).
  */
 export const dynamic = "force-dynamic";
+
+/** A 303 to a path of this app, relative on purpose. */
+function redirectTo(location: string): NextResponse {
+  return new NextResponse(null, { status: 303, headers: { location } });
+}
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const env = getEnv();
   const tokenHash = request.nextUrl.searchParams.get("token_hash")?.trim() ?? "";
   const next = safeNext(request.nextUrl.searchParams.get("next"), "");
-  const expired = () =>
-    NextResponse.redirect(
-      new URL(withQuery(signInHref(), { error: "link-expired", next }), request.url),
-      303,
-    );
+  const expired = () => redirectTo(withQuery(signInHref(), { error: "link-expired", next }));
   if (tokenHash === "") return expired();
   const provider = providerFor(env);
-  if (!provider.ok) {
-    return NextResponse.redirect(new URL(signInHref(next || undefined), request.url), 303);
-  }
+  if (!provider.ok) return redirectTo(signInHref(next || undefined));
   const exchanged = await provider.value.exchangeEmailLink(tokenHash);
   if (!exchanged.ok) return expired();
   const contact = emailOf(exchanged.value.accessToken);
@@ -39,10 +41,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const step = await signInWithProviderSession(ctx, exchanged.value);
   switch (step.kind) {
     case "session": {
-      const response = NextResponse.redirect(
-        new URL(safeNext(next, homeFor(step.claims)), request.url),
-        303,
-      );
+      const response = redirectTo(safeNext(next, homeFor(step.claims)));
       response.cookies.set(PENDING_COOKIE_NAME, "", { ...pendingCookieOptions(env), maxAge: 0 });
       response.cookies.set(
         "cw_session",
@@ -54,7 +53,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     case "sign-up":
     case "mfa": {
       const target = step.kind === "sign-up" ? signUpHref() : mfaHref(next || undefined);
-      const response = NextResponse.redirect(new URL(target, request.url), 303);
+      const response = redirectTo(target);
       response.cookies.set(
         PENDING_COOKIE_NAME,
         await encryptPending(step.pending),
@@ -69,7 +68,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           : step.reason === "tenant-deleting"
             ? "tenant-deleting"
             : "registered";
-      return NextResponse.redirect(new URL(withQuery(signInHref(), { error }), request.url), 303);
+      return redirectTo(withQuery(signInHref(), { error }));
     }
     case "error":
       return expired();
