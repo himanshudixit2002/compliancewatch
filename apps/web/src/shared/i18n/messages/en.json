@@ -3671,7 +3671,7 @@
   "team.form.nameTooLong": "Use at most 200 characters.",
   "team.form.memberUnknown": "The form named no member.",
   "team.form.reason": "Reason",
-  "team.form.reasonHelp": "Kept with the record of this change; the person does not see it.",
+  "team.form.reasonHelp": "The person does not see it. The record of this change cannot hold a reason yet, so it is not kept anywhere.",
   "team.form.reasonTooShort": "Enter at least {min} characters.",
   "team.error.seatLimitBilling": "See the plan and its seats",
   "team.error.lastAdmin": "This is the account's only admin. Make someone else an admin first.",

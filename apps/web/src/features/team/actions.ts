@@ -24,8 +24,9 @@ import { parseDisableForm, parseInviteForm, parseRolesForm, type TeamScreenId } 
  * and a verified second factor, and sends the session's bearer to identity, which decides:
  * 409 `identity-last-admin` and 422 `identity-role-not-allowed` come back as form errors, 402
  * `identity-seat-limit-reached` as the problem the dialog links to billing from. The reason
- * given for disabling a member is kept in the server log for the audit note, since the route
- * takes none yet (W13 sends it along).
+ * given for disabling a member goes nowhere yet: identity's route takes none (W13 sends it
+ * along), and a process log is no place for what an admin wrote about a person, so the log
+ * line says only that a reason of so many characters was given.
  */
 async function gate(screenId: TeamScreenId): Promise<SessionClaims> {
   const screen = screenById(screenId);
@@ -114,7 +115,7 @@ export async function disableMember(_state: ActionState, formData: FormData): Pr
       tenant_id: session.tenantId,
       user_id: parsed.value.userId,
       by: session.userId,
-      reason: parsed.value.reason,
+      reason_length: parsed.value.reason.length,
     }),
   );
   refresh(screenId);

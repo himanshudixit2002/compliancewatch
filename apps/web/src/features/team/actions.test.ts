@@ -230,9 +230,17 @@ describe("changeMemberRoles and disableMember", () => {
         message: "Example staff was disabled. Their open sessions end.",
       });
       expect(identity.users.get(staff.id)?.status).toBe("disabled");
-      expect(info.mock.calls.some((call) => String(call[0]).includes("team_member_disabled"))).toBe(
-        true,
-      );
+      const logged = info.mock.calls.map((call) => String(call[0]));
+      const line = logged.find((entry) => entry.includes("team_member_disabled"));
+      expect(line).toBeDefined();
+      // What the admin wrote stays out of the process log; only its length is noted.
+      expect(JSON.parse(line as string)).toMatchObject({
+        event: "team_member_disabled",
+        user_id: staff.id,
+        by: owner.id,
+        reason_length: "Left the company in April".length,
+      });
+      expect(logged.join("\n")).not.toContain("Left the company");
     } finally {
       info.mockRestore();
     }
