@@ -1,9 +1,9 @@
 /**
  * Recorded response shapes of Supabase Auth's GoTrue API (v2), as its reference documents them
  * and as supabase-js reads them, with synthetic values: a session (sign-in, verify, refresh and
- * factor verify answer one), the factor list, an enrolment, a challenge, and the error bodies of
- * the two shapes GoTrue uses. They stand in for the Supabase project until one exists; the
- * adapter's tests run every call against them (server/auth/supabase.test.ts).
+ * factor verify answer one), the user with their factors, an enrolment, a challenge, and the
+ * error bodies of the two shapes GoTrue uses. They stand in for the Supabase project until one
+ * exists; the adapter's tests run every call against them (server/auth/supabase.test.ts).
  */
 function base64url(value: unknown): string {
   return Buffer.from(JSON.stringify(value)).toString("base64url");
@@ -53,9 +53,19 @@ export function gotrueSession(aal: "aal1" | "aal2" = "aal1") {
   };
 }
 
-/** `GET /auth/v1/factors`: every factor, and the TOTP ones again. */
-export const GOTRUE_FACTORS = {
-  all: [
+/** `GET /auth/v1/user`: the person, whose `factors` is the only list of them GoTrue serves. */
+export const GOTRUE_USER = {
+  id: GOTRUE_USER_ID,
+  aud: "authenticated",
+  role: "authenticated",
+  email: "",
+  phone: "919876543210",
+  phone_confirmed_at: "2000-04-10T05:00:00Z",
+  app_metadata: { provider: "phone", providers: ["phone"] },
+  user_metadata: {},
+  created_at: "2000-04-10T05:00:00Z",
+  updated_at: "2000-04-10T05:00:00Z",
+  factors: [
     {
       id: "0f1e2d3c-4b5a-4968-8778-695a4b3c2d1e",
       friendly_name: "Work phone",
@@ -81,7 +91,6 @@ export const GOTRUE_FACTORS = {
       updated_at: "2000-04-12T05:00:00Z",
     },
   ],
-  totp: [],
 };
 
 /** `POST /auth/v1/factors {factor_type: "totp"}`. */

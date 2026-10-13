@@ -5,7 +5,7 @@ import {
   GOTRUE_CHALLENGE,
   GOTRUE_ENROLMENT,
   GOTRUE_ERRORS,
-  GOTRUE_FACTORS,
+  GOTRUE_USER,
   GOTRUE_USER_ID,
   gotrueSession,
 } from "@/test/gotrue-fixtures";
@@ -113,7 +113,7 @@ describe("SupabaseAuthProvider", () => {
 
   it("lists, enrols, challenges, verifies and removes TOTP factors with the person's token", async () => {
     const { fake, supabase } = adapter([
-      { method: "GET", path: "/auth/v1/factors", body: GOTRUE_FACTORS },
+      { method: "GET", path: "/auth/v1/user", body: GOTRUE_USER },
       { method: "POST", path: "/auth/v1/factors", body: GOTRUE_ENROLMENT },
       { method: "POST", path: /\/auth\/v1\/factors\/[^/]+\/challenge$/, body: GOTRUE_CHALLENGE },
       { method: "POST", path: /\/auth\/v1\/factors\/[^/]+\/verify$/, body: gotrueSession("aal2") },
@@ -125,19 +125,21 @@ describe("SupabaseAuthProvider", () => {
     if (factors.ok) {
       expect(factors.value).toEqual([
         {
-          id: GOTRUE_FACTORS.all[0]?.id,
+          id: GOTRUE_USER.factors[0]?.id,
           type: "totp",
           status: "verified",
           friendlyName: "Work phone",
         },
         {
-          id: GOTRUE_FACTORS.all[1]?.id,
+          id: GOTRUE_USER.factors[1]?.id,
           type: "totp",
           status: "unverified",
           friendlyName: "Old phone",
         },
       ]);
     }
+    expect(fake.requests[0]?.method).toBe("GET");
+    expect(fake.requests[0]?.pathname).toBe("/auth/v1/user");
     expectCommonHeaders(fake.requests[0], current.accessToken);
     const enrolled = await supabase.mfa.enrolTotp(current, "Work phone");
     expect(enrolled.ok).toBe(true);

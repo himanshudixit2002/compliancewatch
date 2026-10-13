@@ -30,7 +30,8 @@ import {
  *   POST /verify         {type sms, phone, token} or {type magiclink, token_hash}
  *   POST /token?grant_type=refresh_token  {refresh_token}
  *   POST /logout
- *   GET  /factors, POST /factors {factor_type totp, friendly_name}, POST /factors/{id}/challenge,
+ *   GET  /user        the person, with `factors` (GoTrue lists them nowhere else)
+ *   POST /factors {factor_type totp, friendly_name}, POST /factors/{id}/challenge,
  *   POST /factors/{id}/verify {challenge_id, code}, DELETE /factors/{id}
  *
  * A GoTrue error body is `{code, error_code, msg}` (or `{error, error_description}` on the
@@ -72,9 +73,10 @@ interface GotrueFactor {
   updated_at?: string;
 }
 
-interface GotrueFactorsOut {
-  all?: GotrueFactor[];
-  totp?: GotrueFactor[];
+/** `GET /user`: the person as GoTrue keeps them; only the factors are read here. */
+interface GotrueUserOut {
+  id?: string;
+  factors?: GotrueFactor[];
 }
 
 interface GotrueEnrolOut {
@@ -256,14 +258,15 @@ export class SupabaseAuthProvider implements AuthProvider {
     }
   }
 
+  /** The person's factors ride on `GET /user`; the factor routes themselves answer no list. */
   private async listFactors(session: ProviderSession): Promise<Result<MfaFactor[]>> {
-    const result = await this.request("GET", "/factors", {
+    const result = await this.request("GET", "/user", {
       token: session.accessToken,
       context: "mfa",
     });
     if (!result.ok) return result;
-    const body = result.value as GotrueFactorsOut | GotrueFactor[] | null;
-    const list = Array.isArray(body) ? body : (body?.all ?? body?.totp ?? []);
+    const body = result.value as GotrueUserOut | null;
+    const list = Array.isArray(body?.factors) ? body.factors : [];
     return ok(
       list
         .filter((factor) => factor.factor_type === "totp")
