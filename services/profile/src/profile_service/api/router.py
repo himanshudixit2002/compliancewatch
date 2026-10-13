@@ -197,7 +197,7 @@ def review_tasks(
 
 @router.post(
     "/nodes/{node_id}/review-tasks/{task_id}/resolve",
-    summary="Close a review task by hand, with an outcome and a note (tenant admins, analysts)",
+    summary="Close a review task by hand, with an outcome and a note (tenant admins)",
     responses=problem_responses(401, 403, 404, 409, 422),
 )
 def resolve_review_task(

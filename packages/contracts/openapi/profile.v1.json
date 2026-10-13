@@ -3765,7 +3765,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Close a review task by hand, with an outcome and a note (tenant admins, analysts)",
+        "summary": "Close a review task by hand, with an outcome and a note (tenant admins)",
         "tags": [
           "profile"
         ]

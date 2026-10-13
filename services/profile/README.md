@@ -165,9 +165,12 @@ with what outcome, the task's reason, attribute and node, never a value):
   the task that asked for the value and opens the review of the answer itself.
 - A person closes it. `POST /v1/profile/nodes/{id}/review-tasks/{task_id}/resolve` with
   `{"outcome": "confirmed" | "dismissed", "note": "..."}` closes one a tenant admin (owner,
-  ca_admin) or one of the regulatory team's analysts or admins checked or set aside; 404 for a
-  task that is not the node's, 409 `profile-review-task-closed` for one closed already, 422 for
-  the outcome `answered`, which is an answer's alone.
+  ca_admin) of the tenant checked or set aside, or a service with tenant:act; 404 for a task that
+  is not the node's, 409 `profile-review-task-closed` for one closed already, 422 for the outcome
+  `answered`, which is an answer's alone. The regulatory team's analysts and admins have no grant
+  on it (403): a user acts in the tenant their token names, and the internal tenant holds no
+  profile nodes, so a grant would be dead; letting them close a customer's task would be a
+  cross-tenant write that needs an audited reason, as identity's users read has, and none is built.
 
 `GET .../review-tasks` lists the open tasks; `?include_closed=true` every task with `closed_at`,
 `closed_by`, `outcome` and `note`. A closed task is never reopened: the financial year

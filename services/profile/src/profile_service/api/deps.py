@@ -12,9 +12,12 @@ member of it acts for:
 Profiles are tenant data, so no tenant at all is this service's own 401 ``tenant-required``.
 ``Caller`` is the principal, from which the routes take who changed a value.
 
-``ResolverTenant`` is the tenant of a review task's resolve: a tenant admin (owner, ca_admin) or
-one of the regulatory team (analyst, admin) acting in the tenant their token names, or a service
-with tenant:act. ``RegulatoryReader`` guards the admin read of the attribute usage across tenants:
+``ResolverTenant`` is the tenant of a review task's resolve: a tenant admin (owner, ca_admin)
+acting in the tenant their token names, or a service with tenant:act. The regulatory team has no
+grant on it: a user acts in the tenant their token names, and the internal tenant holds no
+profile nodes, so one would be dead; a cross-tenant resolve would need an audited reason, as the
+identity users read has, and none is built. ``RegulatoryReader`` guards the admin read of the
+attribute usage across tenants:
 an analyst, a reviewer or an admin a verified token names; outside header mode a request without a
 token is a 401, and in header mode the anonymous caller passes, as on every route.
 """
@@ -67,9 +70,10 @@ async def member_tenant(
     return tenant
 
 
-resolver = require_roles(TENANT_ADMIN_ROLES, Role.ANALYST, Role.ADMIN, scopes={Scope.TENANT_ACT})
-"""Who closes a review task by hand: a tenant admin or one of the regulatory team's analysts or
-admins; a service with tenant:act; the anonymous principal of ``header`` mode passes."""
+resolver = require_roles(TENANT_ADMIN_ROLES, scopes={Scope.TENANT_ACT})
+"""Who closes a review task by hand: a tenant admin (owner, ca_admin) of the tenant their token
+names, or a service with tenant:act; the anonymous principal of ``header`` mode passes. An
+analyst or an admin is refused (403): their token names the internal tenant, which has no nodes."""
 
 
 async def resolver_tenant(

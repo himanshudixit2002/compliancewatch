@@ -397,7 +397,9 @@ def test_in_token_mode_who_may_resolve_and_who_may_read_the_usage() -> None:
     app: FastAPI = build_app(settings(**issuer.settings_overrides("token")))
     owner = bearer(issuer.user(TENANT, [Role.OWNER]))
     staff = bearer(issuer.user(TENANT, [Role.STAFF]))
-    analyst = bearer(issuer.user(TenantId.new(), [Role.ANALYST]))
+    internal = TenantId.new()
+    analyst = bearer(issuer.user(internal, [Role.ANALYST]))
+    admin = bearer(issuer.user(internal, [Role.ADMIN]))
     usage = "/v1/profile/admin/attribute-usage"
     with TestClient(app) as client:
         node = client.post(
@@ -409,9 +411,13 @@ def test_in_token_mode_who_may_resolve_and_who_may_read_the_usage() -> None:
         path = f"/v1/profile/nodes/{node}/review-tasks/{task_id}/resolve"
         refused = client.post(path, json={"outcome": "dismissed"}, headers=staff)
         assert refused.status_code == 403, refused.text
-        assert (
-            client.post(path, json={"outcome": "dismissed"}, headers=analyst).status_code == 404
-        ), "an analyst acts in the tenant their token names, which has no such node"
+        # The regulatory team has no grant on the resolve: a user acts in the tenant their token
+        # names, so a grant could reach no customer's task; naming the tenant changes nothing.
+        for regulatory in (analyst, admin):
+            for headers in (regulatory, {**regulatory, **HEADERS}):
+                refused = client.post(path, json={"outcome": "dismissed"}, headers=headers)
+                assert refused.status_code == 403, refused.text
+                assert refused.json()["type"].endswith(":auth-forbidden")
         resolved = client.post(path, json={"outcome": "dismissed"}, headers=owner)
         assert resolved.status_code == 200, resolved.text
 

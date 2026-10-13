@@ -303,7 +303,7 @@ export type paths = {
     get?: never;
     put?: never;
     /**
-     * Close a review task by hand, with an outcome and a note (tenant admins, analysts)
+     * Close a review task by hand, with an outcome and a note (tenant admins)
      * @description A task closes on its own when the attribute it asks about is answered; this closes one a
      *     person checked (``confirmed``) or set aside (``dismissed``), and writes ``review_task.closed``
      *     to the audit trail. 404 for a task that is not the node's, 409 for one closed already.
