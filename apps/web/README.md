@@ -157,8 +157,9 @@ scripts/stack-guard/  the end-to-end suite's guard (pnpm --filter web e2e:guard,
                     the chromium project's stack-guard setup): it refuses services that answer and are not
                     the memory stack make web-stack recorded, unless E2E_ALLOW_POSTGRES=1
 e2e/                fixtures.ts (the axe check failing on serious or critical, the personas signed in through
-                    the fake form, the seed-state reader, the stack's service URLs) and one spec per live page, plus a11y.spec.ts over
-                    every registered page; product/ holds the real-data journeys the product project runs
+                    the fake form, the seed-state reader, the stack's service URLs), identity-helpers.ts (an
+                    internal admin's bearer for a direct service call dual mode guards) and one spec per live
+                    page, plus a11y.spec.ts over every registered page; product/ holds the real-data journeys the product project runs
                     against make product (make product-e2e): the owner's obligations, changes and ask, and
                     the oversight tools (a fan-out and the hold, a dry run, a CA firm's change card);
                     tsconfig.scripts.json type-checks them

@@ -10,6 +10,7 @@ import {
   test,
   waitForHydration,
 } from "./fixtures";
+import { adminAuthHeaders } from "./identity-helpers";
 import { latestVersion } from "./rulebook-helpers";
 
 /**
@@ -32,7 +33,7 @@ async function dryRunOnEngine(body: unknown): Promise<DryRunBody> {
     `${serviceUrl("applicability-engine")}/v1/applicability-engine/dry-runs`,
     {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...(await adminAuthHeaders()) },
       body: JSON.stringify(body),
     },
   );

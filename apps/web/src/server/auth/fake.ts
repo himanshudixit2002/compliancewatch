@@ -29,7 +29,9 @@ import {
  * OTP step, the email link is handed back to be opened instead of mailed (`devLink`), the
  * second factor is asserted by one confirm (the route signs a token at aal2), and the
  * development sign-in form's persona (a tenant kind, roles, a name and an optional tenant id)
- * is made by identity on the spot, so the token exchanges for a session like any other.
+ * is made by identity on the spot, so the token exchanges for a session like any other. A
+ * regulatory persona without a tenant id joins the one development internal tenant
+ * (`DEV_INTERNAL_TENANT_ID`); the others get a new tenant each.
  *
  * What is fake, and documented as such on the account page: the second factor is asserted,
  * never verified. What is real: identity issues the session, keeps the user, and revokes it
@@ -64,8 +66,20 @@ export function uuidV5(namespace: string, name: string): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-/** The URL namespace of RFC 4122; the name is the tenant and the normalised display name. */
+/** The URL namespace of RFC 4122, which names the personas and the development internal tenant. */
 const USER_NAMESPACE = "6ba7b811-9dad-11d1-80b4-00c04fd430c8";
+
+/**
+ * The one development internal tenant: where a regulatory persona lives when the form names no
+ * tenant. Identity keeps exactly one internal tenant, so a fresh id for each internal sign-in
+ * would be refused (`identity-internal-tenant-exists`) from the second one on; this is the id
+ * identity's own dev personas use (`uuid5(NAMESPACE_URL, "urn:compliancewatch:dev:internal-tenant")`),
+ * so the web and identity agree on it without a call.
+ */
+export const DEV_INTERNAL_TENANT_ID = uuidV5(
+  USER_NAMESPACE,
+  "urn:compliancewatch:dev:internal-tenant",
+);
 
 /** A stable id for a persona: the same name in the same tenant is the same person. */
 export function fakeUserId(tenantId: string, displayName: string): string {
@@ -272,7 +286,7 @@ export class FakeAuthProvider implements AuthProvider {
         err(providerFailure("invalid_contact", undefined, { fieldErrors: errors })),
       );
     }
-    const tenantId = input.tenantId?.trim() || randomUUID();
+    const tenantId = input.tenantId?.trim() || defaultTenantId(input.tenantKind);
     const displayName = input.displayName.trim();
     const roles = normaliseRoles(input.roles);
     return this.mint(
@@ -322,6 +336,12 @@ export class FakeAuthProvider implements AuthProvider {
       subject: minted.subject,
     });
   }
+}
+
+/** Where a persona without a tenant id lives: the one internal tenant for the regulatory roles,
+ * a new tenant for a business or a CA firm. */
+function defaultTenantId(kind: DevPersonaInput["tenantKind"]): string {
+  return kind === "internal" ? DEV_INTERNAL_TENANT_ID : randomUUID();
 }
 
 function invalidContact(field: "phone" | "email"): ApiError {

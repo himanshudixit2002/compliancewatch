@@ -5,6 +5,7 @@ import { claimsOf, fakeIdentity } from "@/test/identity-fixture";
 import { EnvError, loadEnv } from "../env";
 import { isProblem } from "../result";
 import {
+  DEV_INTERNAL_TENANT_ID,
   DISPLAY_NAME_MAX_LENGTH,
   FAKE_FACTOR_ID,
   FakeAuthProvider,
@@ -150,6 +151,44 @@ describe("FakeAuthProvider", () => {
           ),
         ),
     ).toBe(true);
+  });
+
+  it("puts a regulatory persona without a tenant id in the one development internal tenant", async () => {
+    // identity's own constant: uuid5(NAMESPACE_URL, "urn:compliancewatch:dev:internal-tenant")
+    expect(DEV_INTERNAL_TENANT_ID).toBe("cf42499e-2f75-5ecb-a1c0-bc82d8495ad2");
+    const { identity, fake } = provider();
+    const admin = await fake.signInAsPersona({
+      tenantKind: "internal",
+      roles: ["admin"],
+      displayName: "Example admin",
+    });
+    const analyst = await fake.signInAsPersona({
+      tenantKind: "internal",
+      roles: ["analyst"],
+      displayName: "Example analyst",
+    });
+    const again = await fake.signInAsPersona({
+      tenantKind: "internal",
+      roles: ["admin"],
+      displayName: "Example admin",
+    });
+    expect([admin.ok, analyst.ok, again.ok]).toEqual([true, true, true]);
+    for (const request of identity.requests) {
+      expect(request.body).toMatchObject({ tenant_id: DEV_INTERNAL_TENANT_ID });
+    }
+    expect([...identity.tenants.keys()]).toEqual([DEV_INTERNAL_TENANT_ID]);
+    expect(identity.tenants.get(DEV_INTERNAL_TENANT_ID)?.kind).toBe("internal");
+    expect(identity.users.size).toBe(2);
+    // A second internal tenant is identity's refusal, passed through.
+    const other = await fake.signInAsPersona({
+      tenantId: TENANT,
+      tenantKind: "internal",
+      roles: ["reviewer"],
+      displayName: "Example reviewer",
+    });
+    expect(other.ok).toBe(false);
+    if (other.ok) return;
+    expect(isProblem(other.error, "identity-internal-tenant-exists")).toBe(true);
   });
 
   it("answers a persona's validation as field errors without calling identity", async () => {

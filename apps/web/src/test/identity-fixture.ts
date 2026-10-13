@@ -252,6 +252,19 @@ export function fakeIdentity(
       }
       let made: FixtureUser | undefined;
       if (typeof body.tenant_kind === "string" && Array.isArray(body.roles)) {
+        // Identity keeps one internal tenant: a persona naming another internal tenant id is
+        // refused as its repository refuses the insert.
+        const internal = [...tenants.values()].find((tenant) => tenant.kind === "internal");
+        const known = [...users.values()].some((user) => user.subject === subjectFor(contact));
+        if (
+          !known &&
+          body.tenant_kind === "internal" &&
+          internal !== undefined &&
+          typeof body.tenant_id === "string" &&
+          body.tenant_id !== internal.id
+        ) {
+          return problem(409, "identity-internal-tenant-exists");
+        }
         made = fixture.provision({
           contact,
           kind: body.tenant_kind as TenantKind,
