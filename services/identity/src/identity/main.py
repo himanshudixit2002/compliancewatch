@@ -7,7 +7,9 @@ ES256 keys (``CW_IDENTITY_SIGNING_KEYS``). It verifies its own tokens in the pro
 authenticator it hands to ``create_app`` holds the same keys. It also keeps consent records,
 channel consents for numbers no tenant owns yet, and billing behind ``CW_BILLING_PROVIDER`` with
 the entitlements a tenant's plan gives (``GET /v1/identity/entitlements``), and it reads the
-audit log every service writes (``GET /v1/identity/audit``). A tenant's data requests and its
+audit log every service writes (``GET /v1/identity/audit``). The regulatory team's admin reads
+every tenant's summary and, with a reason that is audited, a tenant's users
+(``/v1/identity/admin/tenants``, ``identity.application.admin``). A tenant's data requests and its
 export (``/v1/identity/data-requests``) gather identity's own data and the data each service of
 ``CW_IDENTITY_EXPORT_SOURCES`` answers, called with a service token identity mints for itself;
 ``export_sources`` replaces them (tests and demos). With telemetry on, the app reports every
@@ -36,6 +38,7 @@ from domain_kernel.errors import DomainError
 from domain_kernel.events import utc_now
 from domain_kernel.ids import TenantId
 from identity import __version__
+from identity.api.admin import router as admin_router
 from identity.api.audit import router as audit_router
 from identity.api.auth import router as auth_router
 from identity.api.data_requests import router as data_requests_router
@@ -43,6 +46,7 @@ from identity.api.entitlements import router as entitlements_router
 from identity.api.erasures import router as erasures_router
 from identity.api.router import router
 from identity.api.tenancy import router as tenancy_router
+from identity.application.admin import ListTenants, ReadTenant, ReadTenantUsers
 from identity.application.audit import ReadAuditTrail
 from identity.application.billing import ReceiveBillingWebhook, StartSubscription
 from identity.application.bootstrap import EnsureDevServiceClients
@@ -72,6 +76,7 @@ from identity.domain.audit import AuditReader
 from identity.domain.billing import PLANS, BillingProvider
 from identity.domain.channel_consent import ChannelUnitOfWorkFactory
 from identity.domain.data_requests import DataRequestDirectory, ExportSource
+from identity.domain.directory import TenantDirectory
 from identity.domain.entitlements import Limits
 from identity.domain.errors import (
     BillingDisabledError,
@@ -120,11 +125,13 @@ from identity.infrastructure.memory import (
     MemoryChannelStore,
     MemoryDataRequestDirectory,
     MemoryStore,
+    MemoryTenantDirectory,
 )
 from identity.infrastructure.minter import IssuerMinter
 from identity.infrastructure.providers.fake import FakeIdentityProvider
 from identity.infrastructure.repository import (
     PostgresDataRequestDirectory,
+    PostgresTenantDirectory,
     PostgresUnitOfWorkFactory,
 )
 from identity.settings import IdentitySettings
@@ -277,6 +284,7 @@ def wire(
     channel_unit_of_work: ChannelUnitOfWorkFactory
     audit_reader: AuditReader
     directory: DataRequestDirectory
+    tenants: TenantDirectory
     idempotency: IdempotencyStore
     erased: ErasedTenants
     ping: Callable[[], bool]
@@ -286,6 +294,7 @@ def wire(
         channel_unit_of_work = MemoryChannelStore()
         audit_reader = MemoryAuditReader(memory)
         directory = MemoryDataRequestDirectory(memory, utc_now)
+        tenants = MemoryTenantDirectory(memory)
         idempotency = MemoryIdempotencyStore()
         erased = memory.erased
     else:
@@ -294,6 +303,7 @@ def wire(
         channel_unit_of_work = postgres.channel_unit_of_work
         audit_reader = PostgresAuditReader(postgres.engine)
         directory = PostgresDataRequestDirectory(postgres.engine)
+        tenants = PostgresTenantDirectory(postgres.engine)
         idempotency = SqlAlchemyIdempotencyStore(postgres.engine)
         erased = PostgresErasedTenants.pooled(settings.database_url)
 
@@ -359,6 +369,10 @@ def wire(
             deadline_seconds=settings.identity_export_deadline_seconds,
         ),
         data_request_directory=directory,
+        tenant_directory=tenants,
+        list_tenants=ListTenants(unit_of_work, tenants),
+        read_tenant=ReadTenant(unit_of_work, tenants),
+        read_tenant_users=ReadTenantUsers(unit_of_work),
         check_erasure=CheckErasure(unit_of_work),
         erased_tenants=erased,
     )
@@ -418,6 +432,7 @@ def build_app(
             auth_router,
             tenancy_router,
             audit_router,
+            admin_router,
             entitlements_router,
             data_requests_router,
             erasures_router,
