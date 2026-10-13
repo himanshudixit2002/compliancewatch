@@ -123,6 +123,26 @@ export function forbiddenHref(): string {
   return hrefFor(screenById("system.forbidden"));
 }
 
+/** The query the sign-in page reads when a session ended before its time. */
+export const SIGNED_OUT_REASON = "signed-out";
+
+/** The sign-in page saying the session ended (identity revoked it, or the token stopped being good). */
+export function signedOutHref(): string {
+  return withQuery(hrefFor(screenById("system.sign-in")), { reason: SIGNED_OUT_REASON });
+}
+
+/** The sign-up page, which takes its pending sign-in from the cookie. */
+export function signUpHref(): string {
+  return hrefFor(screenById("system.sign-up"));
+}
+
+/** The two-step verification page, with the same-origin path to return to once verified. */
+export function mfaHref(next?: string): string {
+  const mfa = hrefFor(screenById("account.mfa"));
+  const safe = safeNext(next, "");
+  return safe === "" || safe === mfa ? mfa : withQuery(mfa, { next: safe });
+}
+
 function sectionsFor(
   groups: readonly NavGroupKey[],
   ctx: NavContext,

@@ -2,7 +2,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fakeFetch, type FakeFetch } from "@/test/fake-fetch";
 import { resetEnvCache } from "../env";
-import { REQUEST_ID_HEADER, TENANT_HEADER, WRITE_TOKEN_HEADER } from "./client";
+import {
+  AUTHORIZATION_HEADER,
+  REQUEST_ID_HEADER,
+  TENANT_HEADER,
+  WRITE_TOKEN_HEADER,
+} from "./client";
 import {
   applicabilityEngineAdminClient,
   applicabilityEngineClient,
@@ -82,6 +87,38 @@ describe("tenant-scoped clients", () => {
     expect(tenantIdOf({ session: owner, tenantId: OTHER_TENANT })).toBe(OTHER_TENANT);
     expect(tenantIdOf({ session: owner })).toBe(TENANT);
     expect(tenantIdOf({ session: null })).toBeUndefined();
+  });
+
+  it("send the session's identity token as a bearer, except on another tenant's lookup", async () => {
+    const fake = fakeFetch(
+      () => new Response("{}", { headers: { "content-type": "application/json" } }),
+    );
+    const withToken: ClientPrincipal = { ...owner, cwToken: "cw.user-1.0" };
+    const c = ctx(withToken, fake);
+    await identityClient(c).GET("/v1/identity/billing/plans");
+    await profileClient(c).GET("/v1/profile/ping");
+    await notificationClient(c).GET("/v1/notification/templates");
+    await llmGatewayClient(c).GET("/v1/llm-gateway/models");
+    await obligationClient(c).GET("/v1/obligation/ping");
+    await qaClient(c).GET("/v1/qa/ping");
+    await applicabilityEngineClient(c).GET("/v1/applicability-engine/ping");
+    expect(fake.requests).toHaveLength(7);
+    for (const request of fake.requests) {
+      expect(request.headers[AUTHORIZATION_HEADER]).toBe("Bearer cw.user-1.0");
+      expect(request.headers[TENANT_HEADER]).toBe(TENANT);
+    }
+    // The same tenant named again is still the token's: the bearer goes.
+    await profileClient(ctx(withToken, fake, TENANT)).GET("/v1/profile/ping");
+    expect(fake.requests[7]?.headers[AUTHORIZATION_HEADER]).toBe("Bearer cw.user-1.0");
+    // An admin lookup of another tenant goes without it: the services would refuse the pair.
+    await profileClient(ctx({ ...analyst, cwToken: "cw.user-2.0" }, fake, OTHER_TENANT)).GET(
+      "/v1/profile/ping",
+    );
+    expect(fake.requests[8]?.headers[AUTHORIZATION_HEADER]).toBeUndefined();
+    expect(fake.requests[8]?.headers[TENANT_HEADER]).toBe(OTHER_TENANT);
+    // A session without a token (none issued) sends none.
+    await profileClient(ctx(owner, fake)).GET("/v1/profile/ping");
+    expect(fake.requests[9]?.headers[AUTHORIZATION_HEADER]).toBeUndefined();
   });
 
   it("send no tenant header without a session", async () => {

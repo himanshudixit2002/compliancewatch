@@ -3,7 +3,9 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import createClient, { type Client } from "openapi-fetch";
 import type { ServiceName } from "@/shared/config/services";
-import { err, ok, type Result } from "../result";
+import { problemSlug } from "@/entities/problem/mappers";
+import { signedOut } from "../auth/signed-out";
+import { err, ok, type ApiError, type Result } from "../result";
 import { networkError, problemFromBody, toApiError } from "./problem";
 
 /**
@@ -26,6 +28,13 @@ import { networkError, problemFromBody, toApiError } from "./problem";
 export const REQUEST_ID_HEADER = "x-request-id";
 export const TENANT_HEADER = "x-tenant-id";
 export const WRITE_TOKEN_HEADER = "x-cw-write-token";
+export const AUTHORIZATION_HEADER = "authorization";
+
+/** The problems that say the session's token is no longer good anywhere. */
+export const SESSION_ENDED_SLUGS: readonly string[] = [
+  "auth-token-invalid",
+  "identity-session-revoked",
+];
 
 /** The request id of a cached read: `cached:` and its tags, joined with commas. */
 export const CACHED_REQUEST_ID_PREFIX = "cached:";
@@ -81,10 +90,16 @@ export class NetworkFailure extends Error {
 }
 
 const REQUEST_IDS = new WeakMap<Response, string>();
+const SENT_BEARER = new WeakSet<Response>();
 
 /** The x-request-id sent with the request that produced the response ("" when unknown). */
 export function requestIdOf(response: Response): string {
   return REQUEST_IDS.get(response) ?? response.headers.get(REQUEST_ID_HEADER) ?? "";
+}
+
+/** Whether the request behind the response carried the session's bearer token. */
+export function sentBearer(response: Response): boolean {
+  return SENT_BEARER.has(response);
 }
 
 function withTimeout(request: Request, timeoutMs: number): AbortSignal {
@@ -152,6 +167,7 @@ export function createServiceClient<Paths extends object>(
     },
     onResponse({ request, response }) {
       REQUEST_IDS.set(response, request.headers.get(REQUEST_ID_HEADER) ?? "");
+      if (request.headers.has(AUTHORIZATION_HEADER)) SENT_BEARER.add(response);
     },
     onError({ request, error }) {
       const requestId = request.headers.get(REQUEST_ID_HEADER) ?? "";
@@ -166,13 +182,35 @@ export type CallOutcome<T> =
   | { data: T; error?: never; response: Response }
   | { data?: never; error: unknown; response: Response };
 
+export interface CallOptions {
+  /**
+   * What a 401 that says the session's token is no longer good does (`SESSION_ENDED_SLUGS`,
+   * on a request that carried the bearer): `redirect` (the default) ends the request on the
+   * sign-in page with the cookie cleared on the way (server/auth/signed-out.ts), since
+   * nothing the page could render is right for a person identity no longer knows; `report`
+   * returns the error, for the proxy and the sign-in flows, which handle it themselves.
+   */
+  revoked?: "redirect" | "report";
+}
+
+/** True when the error says the session's token is no longer good and the call sent it. */
+export function endsSession(error: ApiError, response: Response): boolean {
+  if (error.status !== 401 || !sentBearer(response)) return false;
+  const slug = problemSlug(error.problem);
+  return slug !== null && SESSION_ENDED_SLUGS.includes(slug);
+}
+
 /**
  * `const plans = await call(identityClient(ctx).GET("/v1/identity/billing/plans"))`.
  * A 2xx gives `ok(data, requestId)` (data is undefined for a 204); anything else gives the
  * ApiError for the status and body; a NetworkFailure gives `kind: "network"`. Any other
- * exception is a bug and propagates.
+ * exception is a bug and propagates. A 401 that ends the session redirects to the sign-in page
+ * unless the caller asked to be told instead (`CallOptions`).
  */
-export async function call<T>(promise: Promise<CallOutcome<T>>): Promise<Result<T>> {
+export async function call<T>(
+  promise: Promise<CallOutcome<T>>,
+  options: CallOptions = {},
+): Promise<Result<T>> {
   let outcome: CallOutcome<T>;
   try {
     outcome = await promise;
@@ -185,12 +223,12 @@ export async function call<T>(promise: Promise<CallOutcome<T>>): Promise<Result<
   const { response } = outcome;
   const requestId = requestIdOf(response);
   if (response.ok) return ok(outcome.data as T, requestId);
-  return err(
-    toApiError({
-      status: response.status,
-      headers: response.headers,
-      problem: problemFromBody(outcome.error),
-      requestId,
-    }),
-  );
+  const error = toApiError({
+    status: response.status,
+    headers: response.headers,
+    problem: problemFromBody(outcome.error),
+    requestId,
+  });
+  if (options.revoked !== "report" && endsSession(error, response)) signedOut();
+  return err(error);
 }

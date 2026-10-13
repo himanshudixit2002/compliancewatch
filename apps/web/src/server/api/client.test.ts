@@ -1,19 +1,32 @@
 // @vitest-environment node
 import type { identity } from "@compliancewatch/contracts/openapi";
-import { describe, expect, it } from "vitest";
+import { redirect } from "next/navigation";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { PROBLEM_TYPE_PREFIX } from "@/entities/problem/mappers";
-import { fakeFetch, hangingFetch, jsonResponse, refusingFetch } from "@/test/fake-fetch";
+import {
+  fakeFetch,
+  hangingFetch,
+  jsonResponse,
+  problemResponse,
+  refusingFetch,
+} from "@/test/fake-fetch";
 import { defaultMessageFor } from "../result";
 import {
   CACHED_REQUEST_ID_PREFIX,
   NetworkFailure,
   REQUEST_ID_HEADER,
+  SESSION_ENDED_SLUGS,
   cacheTagsOf,
   call,
   createServiceClient,
   requestIdFor,
   requestIdOf,
+  sentBearer,
 } from "./client";
+
+afterEach(() => {
+  vi.mocked(redirect).mockReset();
+});
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const BASE = "http://localhost:8001";
@@ -282,5 +295,59 @@ describe("requestIdOf", () => {
     const echoed = new Response(null, { status: 204, headers: { [REQUEST_ID_HEADER]: "abc" } });
     expect(requestIdOf(echoed)).toBe("abc");
     expect(requestIdOf(new Response(null, { status: 204 }))).toBe("");
+  });
+});
+
+describe("a session that ended", () => {
+  function bearerClient(fetchImpl: ReturnType<typeof fakeFetch>["fetchImpl"]) {
+    return createServiceClient<identity.paths>({
+      service: "identity",
+      baseUrl: BASE,
+      timeoutMs: 1000,
+      fetchImpl,
+      headers: { authorization: "Bearer cw.user.0" },
+    });
+  }
+
+  it("redirects to the sign-in page on a 401 that says the token is no longer good", async () => {
+    for (const slug of SESSION_ENDED_SLUGS) {
+      vi.mocked(redirect).mockReset();
+      const fake = fakeFetch(() => problemResponse(401, { type: `${PROBLEM_TYPE_PREFIX}${slug}` }));
+      const result = await call(bearerClient(fake.fetchImpl).GET("/v1/identity/me"));
+      expect(result.ok).toBe(false);
+      expect(vi.mocked(redirect)).toHaveBeenCalledWith("/sign-in?reason=signed-out");
+    }
+  });
+
+  it("reports instead when asked, and never for a call that sent no bearer or another 401", async () => {
+    const revoked = fakeFetch(() =>
+      problemResponse(401, { type: `${PROBLEM_TYPE_PREFIX}identity-session-revoked` }),
+    );
+    const reported = await call(bearerClient(revoked.fetchImpl).GET("/v1/identity/me"), {
+      revoked: "report",
+    });
+    expect(reported.ok).toBe(false);
+    expect(vi.mocked(redirect)).not.toHaveBeenCalled();
+    const anonymous = await call(identityClient(revoked.fetchImpl).GET("/v1/identity/me"));
+    expect(anonymous.ok).toBe(false);
+    expect(vi.mocked(redirect)).not.toHaveBeenCalled();
+    const required = fakeFetch(() =>
+      problemResponse(401, { type: `${PROBLEM_TYPE_PREFIX}auth-token-required` }),
+    );
+    await call(bearerClient(required.fetchImpl).GET("/v1/identity/me"));
+    expect(vi.mocked(redirect)).not.toHaveBeenCalled();
+    const forbidden = fakeFetch(() =>
+      problemResponse(403, { type: `${PROBLEM_TYPE_PREFIX}auth-token-invalid` }),
+    );
+    await call(bearerClient(forbidden.fetchImpl).GET("/v1/identity/me"));
+    expect(vi.mocked(redirect)).not.toHaveBeenCalled();
+  });
+
+  it("remembers which responses came from a call with a bearer", async () => {
+    const fake = fakeFetch(() => jsonResponse(200, {}));
+    const { response } = await bearerClient(fake.fetchImpl).GET("/v1/identity/me");
+    expect(sentBearer(response)).toBe(true);
+    const plain = await identityClient(fake.fetchImpl).GET("/v1/identity/me");
+    expect(sentBearer(plain.response)).toBe(false);
   });
 });

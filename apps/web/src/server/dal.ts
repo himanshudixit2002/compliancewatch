@@ -4,8 +4,8 @@ import { notFound, redirect } from "next/navigation";
 import { cache } from "react";
 import { toSessionDto } from "@/entities/session/mappers";
 import type { SessionClaims, SessionDto } from "@/entities/session/types";
-import { forbiddenHref, signInHref } from "@/shared/config/nav";
-import { hasRole, isRegulatory } from "@/shared/config/roles";
+import { forbiddenHref, mfaHref, signInHref } from "@/shared/config/nav";
+import { hasRole, isRegulatory, requiresMfa } from "@/shared/config/roles";
 import type { Role, TenantKind } from "@/shared/config/roles";
 import { hrefFor } from "@/shared/config/screens";
 import type { Screen } from "@/shared/config/screens";
@@ -26,6 +26,8 @@ import { decryptSession, readSessionCookie } from "./session";
  *                          for an entry that is never public
  *   requireAdmin()         a regulatory role, or notFound(): a tenant role must not learn
  *                          that a tool exists
+ *   requireMfa()           a session whose roles need a second factor has one, or a redirect
+ *                          to /account/mfa?next= (the admin tools and the team page)
  *   sessionForRender()     the render-safe view for shells and pages, never the token
  *
  * A page calls its gate on the first line and re-checks nothing else; a server action calls
@@ -116,6 +118,17 @@ export async function requireScreenSession(
   if (screen.roles === "public") throw new Error(`${screen.id} is public; use requireScreen`);
   const session = await requireScreen(screen, params);
   if (session === null) redirect(signInHref(hrefFor(screen, params)));
+  return session;
+}
+
+/**
+ * A session whose roles need a second factor (`MFA_REQUIRED_ROLES`) and has one. Without one
+ * the person is sent to verify it first and comes back to `next`. A session that needs none
+ * passes as it is.
+ */
+export async function requireMfa(options: GateOptions = {}): Promise<SessionClaims> {
+  const session = await requireSession(options);
+  if (requiresMfa(session.roles) && !session.mfa) redirect(mfaHref(options.next));
   return session;
 }
 
