@@ -14,15 +14,16 @@ mode, or ``dual`` mode without one) everything works as before tokens existed: t
   or ``ca_staff``) whose token names the tenant, never a service; it carries the audit actor and
   the request's correlation id. ``PUBLIC_CA_ROUTE`` is its ``openapi_extra``: those roles as
   ``x-roles``.
-- ``PreferenceAccess``: a service with the notification:preferences scope. Preferences are keyed
-  by channel and address and name no tenant, so no user may change them directly.
-- ``PreferenceCaller``: for a change given on the web, the tenant (``resolve_tenant``: a
-  service's ``x-tenant-id`` with tenant:act, or the anonymous principal's header), and for a web
-  opt-in, which identity's consent must cover, the consent subject the body names. Only a
-  service with notification:preferences reaches the route with a token (a user is refused), so
-  the subject is the web app's word for its signed-in user: the trust boundary
-  ``notification.application.preferences`` describes. Outside header mode the ``api`` and
-  ``support`` sources, which skip the consent check, need that service's token.
+- ``PreferenceAccess``: a service with the notification:preferences scope, or a user with a
+  tenant member role (the web sends the signed-in person's token, and a web change is the
+  tenant's). Preferences are keyed by channel and address and name no tenant themselves.
+- ``PreferenceCaller``: for a change given on the web, the tenant (``resolve_tenant``: the
+  user's own, a service's ``x-tenant-id`` with tenant:act, or the anonymous principal's
+  header), and for a web opt-in, which identity's consent must cover, the consent subject the
+  body names: the web app's word for its signed-in user, the trust boundary
+  ``notification.application.preferences`` describes. The ``api`` and ``support`` sources, which
+  skip the consent check, are a service's: a person's token never records one, and outside
+  header mode they need that service's token.
 - ``ExportTenant`` (``/data-export``, ``py_common.auth.fastapi.data_export_scope``): a user with a
   tenant admin role (owner, ca_admin) for their own tenant, or a service only with a data:export
   token bound to that tenant and addressed to this service, as identity mints one per export.

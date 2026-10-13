@@ -185,13 +185,20 @@ def test_a_service_token_names_the_tenant_with_tenant_act(consents: FakeConsentR
             headers={**without_tenant_act, **AS_TENANT},
         )
         assert keyword.status_code == 200, "only a web opt-in reads the tenant"
-        user = client.put(
-            WA_PATH, json=web_opt_in(), headers=bearer(ISSUER.user(TENANT, [Role.OWNER]))
+        owner = bearer(ISSUER.user(TENANT, [Role.OWNER]))
+        user = client.put(WA_PATH, json=web_opt_in(), headers=owner)
+        assert user.status_code == 200, "a member's token sets a web preference of its tenant"
+        by_person = client.put(WA_PATH, json={"opted_in": True, "source": "api"}, headers=owner)
+        assert (by_person.status_code, problem(by_person)) == (403, "auth-forbidden"), (
+            "a person never records a change only a service records"
         )
-        assert (user.status_code, problem(user)) == (403, "auth-forbidden"), (
-            "users still never change preferences directly"
+        other = client.put(
+            WA_PATH,
+            json=web_opt_in(),
+            headers={**bearer(ISSUER.user(TenantId.new(), [Role.OWNER])), **AS_TENANT},
         )
-    assert consents.asked == [(TENANT, SUBJECT, WHATSAPP)]
+        assert (other.status_code, problem(other)) == (403, "auth-tenant-mismatch")
+    assert consents.asked == [(TENANT, SUBJECT, WHATSAPP)] * 2
 
 
 def test_an_address_identity_knows_is_not_the_subject_s_is_a_409(
