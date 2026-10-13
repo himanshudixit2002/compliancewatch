@@ -1311,6 +1311,37 @@ export type components = {
       returned: number;
     };
     /**
+     * DecisionIn
+     * @description Decide every open mention of one (entity type, proposed name).
+     */
+    DecisionIn: {
+      /**
+       * Decided By
+       * @description Who decided; a signed-in user's token overrides it with that user's id
+       */
+      decided_by: string;
+      decision: components["schemas"]["MentionDecision"];
+      /**
+       * Entity Id
+       * @description The entity to add the name to
+       */
+      entity_id?: string | null;
+      entity_type: components["schemas"]["EntityType"];
+      /**
+       * Note
+       * @default
+       */
+      note?: string;
+      /** Proposed Name */
+      proposed_name: string;
+      reject_reason?: components["schemas"]["EntityRejectReason"] | null;
+      /**
+       * Review Ids
+       * @description The mentions this decision covers. Required for a name that does not name one entity across documents (empty, or a section or rule without its statute)
+       */
+      review_ids?: string[] | null;
+    };
+    /**
      * DocumentIn
      * @description A parsed regulator document. The id in the path must be the first half of ``sha256``.
      */
@@ -1640,6 +1671,30 @@ export type components = {
      * @enum {string}
      */
     ErrorCategory: "due_date" | "applicability" | "steps" | "citation" | "other";
+    /**
+     * ErrorDecisionIn
+     * @description ``confirmed`` names ``correcting_rule_version_id``, a version with a corrects relation to
+     *     the reported one; ``rejected`` says why in ``notes``.
+     */
+    ErrorDecisionIn: {
+      /**
+       * Actor Id
+       * Format: uuid
+       * @description The analyst deciding; a signed-in user's token overrides it
+       */
+      actor_id: string;
+      /**
+       * Correcting Rule Version Id
+       * @description For a confirmed report, the version that corrects it
+       */
+      correcting_rule_version_id?: string | null;
+      decision: components["schemas"]["ErrorOutcome"];
+      /**
+       * Notes
+       * @default
+       */
+      notes?: string;
+    };
     /**
      * ErrorOutcome
      * @description What the regulatory team decided; the values are the contract's.
@@ -2647,61 +2702,6 @@ export type components = {
      * @enum {string}
      */
     ReviewTaskStatus: "open" | "claimed" | "decided";
-    /**
-     * DecisionIn
-     * @description ``confirmed`` names ``correcting_rule_version_id``, a version with a corrects relation to
-     *     the reported one; ``rejected`` says why in ``notes``.
-     */
-    rulebook__api__error_reports__DecisionIn: {
-      /**
-       * Actor Id
-       * Format: uuid
-       * @description The analyst deciding; a signed-in user's token overrides it
-       */
-      actor_id: string;
-      /**
-       * Correcting Rule Version Id
-       * @description For a confirmed report, the version that corrects it
-       */
-      correcting_rule_version_id?: string | null;
-      decision: components["schemas"]["ErrorOutcome"];
-      /**
-       * Notes
-       * @default
-       */
-      notes?: string;
-    };
-    /**
-     * DecisionIn
-     * @description Decide every open mention of one (entity type, proposed name).
-     */
-    rulebook__api__schemas__DecisionIn: {
-      /**
-       * Decided By
-       * @description Who decided; a signed-in user's token overrides it with that user's id
-       */
-      decided_by: string;
-      decision: components["schemas"]["MentionDecision"];
-      /**
-       * Entity Id
-       * @description The entity to add the name to
-       */
-      entity_id?: string | null;
-      entity_type: components["schemas"]["EntityType"];
-      /**
-       * Note
-       * @default
-       */
-      note?: string;
-      /** Proposed Name */
-      proposed_name: string;
-      reject_reason?: components["schemas"]["EntityRejectReason"] | null;
-      /**
-       * Review Ids
-       * @description The mentions this decision covers. Required for a name that does not name one entity across documents (empty, or a section or rule without its statute)
-       */
-      review_ids?: string[] | null;
-    };
     /**
      * RuleCandidateStatus
      * @enum {string}
@@ -3962,7 +3962,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["rulebook__api__error_reports__DecisionIn"];
+        "application/json": components["schemas"]["ErrorDecisionIn"];
       };
     };
     responses: {
@@ -4235,7 +4235,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["rulebook__api__schemas__DecisionIn"];
+        "application/json": components["schemas"]["DecisionIn"];
       };
     };
     responses: {

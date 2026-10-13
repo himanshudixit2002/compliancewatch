@@ -1122,6 +1122,84 @@
         "title": "DecisionCountsOut",
         "type": "object"
       },
+      "DecisionIn": {
+        "additionalProperties": false,
+        "description": "Decide every open mention of one (entity type, proposed name).",
+        "properties": {
+          "decided_by": {
+            "description": "Who decided; a signed-in user's token overrides it with that user's id",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Decided By",
+            "type": "string"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/MentionDecision"
+          },
+          "entity_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The entity to add the name to",
+            "title": "Entity Id"
+          },
+          "entity_type": {
+            "$ref": "#/components/schemas/EntityType"
+          },
+          "note": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Note",
+            "type": "string"
+          },
+          "proposed_name": {
+            "maxLength": 400,
+            "title": "Proposed Name",
+            "type": "string"
+          },
+          "reject_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EntityRejectReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "review_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "maxItems": 200,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The mentions this decision covers. Required for a name that does not name one entity across documents (empty, or a section or rule without its statute)",
+            "title": "Review Ids"
+          }
+        },
+        "required": [
+          "entity_type",
+          "proposed_name",
+          "decision",
+          "decided_by"
+        ],
+        "title": "DecisionIn",
+        "type": "object"
+      },
       "DocumentIn": {
         "additionalProperties": false,
         "description": "A parsed regulator document. The id in the path must be the first half of ``sha256``.",
@@ -1884,6 +1962,46 @@
         ],
         "title": "ErrorCategory",
         "type": "string"
+      },
+      "ErrorDecisionIn": {
+        "additionalProperties": false,
+        "description": "``confirmed`` names ``correcting_rule_version_id``, a version with a corrects relation to\nthe reported one; ``rejected`` says why in ``notes``.",
+        "properties": {
+          "actor_id": {
+            "description": "The analyst deciding; a signed-in user's token overrides it",
+            "format": "uuid",
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "correcting_rule_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For a confirmed report, the version that corrects it",
+            "title": "Correcting Rule Version Id"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/ErrorOutcome"
+          },
+          "notes": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Notes",
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor_id",
+          "decision"
+        ],
+        "title": "ErrorDecisionIn",
+        "type": "object"
       },
       "ErrorOutcome": {
         "description": "What the regulatory team decided; the values are the contract's.",
@@ -5437,124 +5555,6 @@
         ],
         "title": "ValidationIssue",
         "type": "object"
-      },
-      "rulebook__api__error_reports__DecisionIn": {
-        "additionalProperties": false,
-        "description": "``confirmed`` names ``correcting_rule_version_id``, a version with a corrects relation to\nthe reported one; ``rejected`` says why in ``notes``.",
-        "properties": {
-          "actor_id": {
-            "description": "The analyst deciding; a signed-in user's token overrides it",
-            "format": "uuid",
-            "title": "Actor Id",
-            "type": "string"
-          },
-          "correcting_rule_version_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "For a confirmed report, the version that corrects it",
-            "title": "Correcting Rule Version Id"
-          },
-          "decision": {
-            "$ref": "#/components/schemas/ErrorOutcome"
-          },
-          "notes": {
-            "default": "",
-            "maxLength": 2000,
-            "title": "Notes",
-            "type": "string"
-          }
-        },
-        "required": [
-          "actor_id",
-          "decision"
-        ],
-        "title": "DecisionIn",
-        "type": "object"
-      },
-      "rulebook__api__schemas__DecisionIn": {
-        "additionalProperties": false,
-        "description": "Decide every open mention of one (entity type, proposed name).",
-        "properties": {
-          "decided_by": {
-            "description": "Who decided; a signed-in user's token overrides it with that user's id",
-            "maxLength": 120,
-            "minLength": 1,
-            "title": "Decided By",
-            "type": "string"
-          },
-          "decision": {
-            "$ref": "#/components/schemas/MentionDecision"
-          },
-          "entity_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The entity to add the name to",
-            "title": "Entity Id"
-          },
-          "entity_type": {
-            "$ref": "#/components/schemas/EntityType"
-          },
-          "note": {
-            "default": "",
-            "maxLength": 2000,
-            "title": "Note",
-            "type": "string"
-          },
-          "proposed_name": {
-            "maxLength": 400,
-            "title": "Proposed Name",
-            "type": "string"
-          },
-          "reject_reason": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/EntityRejectReason"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "review_ids": {
-            "anyOf": [
-              {
-                "items": {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                "maxItems": 200,
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The mentions this decision covers. Required for a name that does not name one entity across documents (empty, or a section or rule without its statute)",
-            "title": "Review Ids"
-          }
-        },
-        "required": [
-          "entity_type",
-          "proposed_name",
-          "decision",
-          "decided_by"
-        ],
-        "title": "DecisionIn",
-        "type": "object"
       }
     },
     "securitySchemes": {
@@ -6808,7 +6808,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/rulebook__api__error_reports__DecisionIn"
+                "$ref": "#/components/schemas/ErrorDecisionIn"
               }
             }
           },
@@ -7319,7 +7319,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/rulebook__api__schemas__DecisionIn"
+                "$ref": "#/components/schemas/DecisionIn"
               }
             }
           },

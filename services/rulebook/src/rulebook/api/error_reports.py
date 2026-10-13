@@ -117,7 +117,7 @@ class ErrorReviewCursor(BaseModel):
         return ErrorReviewKey(RuleVersionId(self.v), self.r, self.i)
 
 
-class DecisionIn(BaseModel):
+class ErrorDecisionIn(BaseModel):
     """``confirmed`` names ``correcting_rule_version_id``, a version with a corrects relation to
     the reported one; ``rejected`` says why in ``notes``."""
 
@@ -177,7 +177,7 @@ def list_error_reports(
     responses=problem_responses(401, 403, 404, 409, 422, 503),
 )
 def decide_error_report(
-    report_id: UUID, body: DecisionIn, analyst: AnalystWrite, wired: Wired
+    report_id: UUID, body: ErrorDecisionIn, analyst: AnalystWrite, wired: Wired
 ) -> ErrorReviewOut:
     """Once per report (409 rulebook-error-review-closed). confirmed needs
     correcting_rule_version_id, a stored version with a corrects relation to the reported one
