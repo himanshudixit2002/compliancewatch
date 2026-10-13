@@ -541,18 +541,25 @@ WEB_STACK_DIR := var/web-stack
 WEB_STACK_WAIT_SECONDS ?= 60
 STORE ?= memory
 BILLING ?= none
+# AUTH=dual runs every service with CW_AUTH_MODE=dual: a bearer token is read when a request
+# carries one (verified against identity's JWKS on the stack's own base) and the tenant header
+# serves as before without one, which is what the web app's real sign-in needs (identity's /me
+# and its user routes answer only a token) and what the web-e2e CI job runs. Without AUTH the
+# stack keeps header mode, as the user's own stack and make product run it.
+AUTH ?= header
 
-web-stack: check-uv ## UI-only stack, no worker: every service on SERVICE_PORT_BASE+1..10 with memory stores (pids and logs in var/web-stack): make web-stack [STORE=postgres] [BILLING=memory] [DB_ROLE=owner]
+web-stack: check-uv ## UI-only stack, no worker: every service on SERVICE_PORT_BASE+1..10 with memory stores (pids and logs in var/web-stack): make web-stack [STORE=postgres] [BILLING=memory] [AUTH=dual] [DB_ROLE=owner]
 	@env0=$$(export -p); set -a; [ -f .env ] && . ./.env; set +a; eval "$$env0"; \
 	[ "$(STORE)" = "memory" ] || [ "$(STORE)" = "postgres" ] || { echo "usage: make web-stack [STORE=memory|postgres]"; exit 1; }; \
 	[ "$(BILLING)" = "none" ] || [ "$(BILLING)" = "memory" ] || { echo "usage: make web-stack [BILLING=none|memory]"; exit 1; }; \
+	[ "$(AUTH)" = "header" ] || [ "$(AUTH)" = "dual" ] || { echo "usage: make web-stack [AUTH=header|dual]"; exit 1; }; \
 	mkdir -p $(WEB_STACK_DIR); base=$${SERVICE_PORT_BASE:-8000}; i=0; \
 	token="$${CW_RULEBOOK_WRITE_TOKEN:-local-write-token}"; review="$${CW_RULEBOOK_REVIEW_TOKEN:-local-review-token}"; \
 	seed=false; raw=local; if [ "$(STORE)" = "memory" ]; then seed=true; raw=memory; fi; \
 	as=""; if [ "$(STORE)" = "postgres" ]; then \
 	  case "$(DB_ROLE)" in "") as=", each as its database role cw_<schema>" ;; owner) as=", as the owner $${POSTGRES_USER:-cw}" ;; \
 	    *) echo "error: DB_ROLE=$(DB_ROLE): leave it unset for the services' roles, or set DB_ROLE=owner"; exit 1 ;; esac; fi; \
-	echo "web stack: services on $$((base+1))-$$((base+10)), $(STORE) stores$$as, billing provider $(BILLING), rulebook publishing on"; \
+	echo "web stack: services on $$((base+1))-$$((base+10)), $(STORE) stores$$as, billing provider $(BILLING), auth mode $(AUTH), rulebook publishing on"; \
 	kept=0; \
 	for svc in $(SERVICES); do \
 	  i=$$((i+1)); port=$$((base+i)); pidfile=$(WEB_STACK_DIR)/$$svc.pid; \
@@ -566,6 +573,7 @@ web-stack: check-uv ## UI-only stack, no worker: every service on SERVICE_PORT_B
 	  fi; \
 	  temporal="$${CW_TEMPORAL_ADDRESS:-localhost:7233}"; case "$$svc" in pipeline|applicability-engine) temporal=127.0.0.1:1 ;; esac; \
 	  CW_DATABASE_URL="$$url" CW_DB_SCHEMA="$$schema" CW_TEMPORAL_ADDRESS="$$temporal" CW_PIPELINE_RAW_STORE=$$raw \
+	  CW_AUTH_MODE=$(AUTH) \
 	  CW_IDENTITY_STORE=$(STORE) CW_PROFILE_STORE=$(STORE) CW_RULEBOOK_STORE=$(STORE) CW_OBLIGATION_STORE=$(STORE) CW_NOTIFICATION_STORE=$(STORE) CW_EVAL_STORE=$(STORE) CW_APPLICABILITY_ENGINE_STORE=$(STORE) CW_PIPELINE_STORE=$(STORE) CW_LLM_LEDGER=$(STORE) \
 	  CW_PROFILE_GSTIN_LOOKUP=static CW_BILLING_PROVIDER=$(BILLING) CW_RULEBOOK_PUBLISH_ENABLED=true CW_QA_KAG_ENABLED=false CW_PIPELINE_CRAWL_ENABLED=false \
 	  CW_RULEBOOK_SEED_ON_START=$$seed CW_RULEBOOK_WRITE_TOKEN="$$token" CW_RULEBOOK_REVIEW_TOKEN="$$review" \
