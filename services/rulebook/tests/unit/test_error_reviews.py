@@ -1,6 +1,7 @@
 """Tenants' error reports on the memory store and over HTTP: the intake of error_report.submitted
-(one review per report, a redelivery changes nothing, a payload the contract refuses or a version
-the rulebook does not hold raises), the queue by rule version, oldest first, with its groups and
+(one review per report, a redelivery changes nothing, the text masked once more with the record
+patterns and cut to the limit, a payload the contract refuses or a version the rulebook does not
+hold raises), the queue by rule version, oldest first, with its groups and
 pages, the decisions (confirmed only with a version that has a corrects relation to the reported
 one, rejected with notes, once), the error_report.decided outbox row keyed by the reporting
 tenant, the audit entry, an erased tenant's review decided for the record without an event, and
@@ -24,6 +25,7 @@ from domain_kernel.documents import Clause, DocumentType, clause_id_for, documen
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.ids import ClauseId, ObligationId, RuleVersionId, SourceId, TenantId, UserId
 from domain_kernel.knowledge import RelationKind, RuleRelation
+from domain_kernel.pii import mask_pii_in
 from domain_kernel.status import RuleVersionStatus
 from py_common.auth.testing import TestIssuer, bearer
 from py_common.events import payload_of
@@ -37,6 +39,7 @@ from rulebook.application.error_reports import (
 )
 from rulebook.domain.documents import StoredDocument
 from rulebook.domain.error_reports import (
+    MAX_DESCRIPTION_CHARS,
     ErrorCategory,
     ErrorOutcome,
     ErrorReportDecided,
@@ -192,6 +195,32 @@ def test_the_intake_keeps_one_review_per_report(store: MemoryKnowledgeStore, clo
     assert not again.created
     assert again.review == review, "the first delivery wins"
     assert [r.report_id for r in store.error_reviews()] == [review.report_id]
+
+
+def test_the_intake_masks_the_text_once_more_and_cuts_it_to_the_limit(
+    store: MemoryKnowledgeStore, clock: Clock
+) -> None:
+    old, _, _ = versions(store)
+    intake = IntakeErrorReport(store, clock)
+    unmasked = (
+        "Example: our PAN is abcde1234f, the GSTIN 29abcde1234f1z5; call +91 (987) 654 3210 or "
+        "write to owner%40example.net (synthetic)."
+    )
+    review = intake.run(TENANT, payload(old, description=unmasked)).review
+    assert review.description_masked == (
+        "Example: our PAN is [PAN], the GSTIN [GSTIN]; call [PHONE] or write to [EMAIL] "
+        "(synthetic)."
+    ), "a producer that masked nothing: the rulebook holds no identifier either way"
+    assert review.description_masked == mask_pii_in(unmasked)
+
+    growing = ("a@b.cd " * (MAX_DESCRIPTION_CHARS // 7 + 1))[:MAX_DESCRIPTION_CHARS]
+    assert len(mask_pii_in(growing)) > MAX_DESCRIPTION_CHARS, "the case: masking grows the text"
+    grown = intake.run(TENANT, payload(old, description=growing)).review
+    cut = grown.description_masked
+    assert MAX_DESCRIPTION_CHARS - len("[EMAIL] ") < len(cut) <= MAX_DESCRIPTION_CHARS
+    assert cut.startswith("[EMAIL] [EMAIL] ")
+    assert cut.endswith("[EMAIL]"), "the cut leaves no trailing space"
+    assert "a@b.cd" not in cut
 
 
 def test_the_intake_refuses_what_the_contract_or_the_rulebook_does_not_know(

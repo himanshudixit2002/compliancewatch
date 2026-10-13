@@ -4,10 +4,11 @@ decision about it.
 A report names an obligation of the tenant, what kind of error it is (``ErrorCategory``) and the
 reporter's account, kept as they wrote it (``description``, one to ``MAX_DESCRIPTION_CHARS``
 characters) under row-level security. The rulebook, which every tenant shares, gets the account
-masked for personal identifiers (``ErrorReportSubmitted``, the kernel's ``mask_pii``) and never
-the raw text. A report is ``submitted`` until the regulatory team decides it: ``confirmed``, with
-the rule version that corrects the reported one, or ``rejected`` with the analyst's notes; a
-decided report never changes again (``decide`` refuses a second decision).
+masked for personal identifiers (``ErrorReportSubmitted``, the kernel's ``mask_pii_in``, cut to
+the same limit) and never the raw text. A report is ``submitted`` until the regulatory team
+decides it: ``confirmed``, with the rule version that corrects the reported one, or ``rejected``
+with the analyst's notes; a decided report never changes again (``decide`` refuses a second
+decision).
 """
 
 from dataclasses import dataclass, replace

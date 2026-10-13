@@ -6,10 +6,12 @@ decision when it comes back (guide section 16, G06).
   otherwise: the route does not exist for the tenant and nothing is stored). The obligation must
   be the tenant's (``ObligationNotFoundError``). In one unit of work the report is stored as the
   reporter wrote it, under row-level security; ``error_report.submitted`` goes to the outbox with
-  the description masked for personal identifiers (the kernel's ``mask_pii``), since the rulebook
-  every tenant shares must never hold a tenant's personal data; and an audit entry
-  ``error_report.submitted`` names the report, its obligation, rule version and category, never
-  the text. The rulebook's consumer turns the event into a review item.
+  the description masked for personal identifiers (``masked_description``: the kernel's
+  ``mask_pii_in``, the record patterns every log line and audit row is masked with, cut to the
+  description's limit), since the rulebook every tenant shares must never hold a tenant's
+  personal data; and an audit entry ``error_report.submitted`` names the report, its obligation,
+  rule version and category, never the text. The rulebook's consumer turns the event into a
+  review item and masks the text once more on arrival.
 - ``ListErrorReports``: the tenant's reports, newest first, a page at a time, of one status when
   asked.
 - ``ApplyErrorDecision``: what the worker's consumer of ``error_report.decided`` (group
@@ -33,7 +35,7 @@ from domain_kernel.audit import AuditEntry
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.events import utc_now
 from domain_kernel.ids import EventId, ObligationId, RuleVersionId, TenantId
-from domain_kernel.pii import mask_pii
+from domain_kernel.pii import mask_pii_in
 from obligation.application.tracking import Acting, correlation_of
 from obligation.domain.error_reports import (
     MAX_DESCRIPTION_CHARS,
@@ -71,6 +73,19 @@ def report_description(text: str) -> str:
             f"a description has at most {MAX_DESCRIPTION_CHARS} characters"
         )
     return description
+
+
+def masked_description(description: str) -> str:
+    """``description`` as it leaves the service: every GSTIN, PAN, Aadhaar number, phone number
+    and email address replaced by its bracketed kind with the kernel's record patterns
+    (``mask_pii_in``: a lower-case PAN or GSTIN, a URL-encoded or glued address and the wider
+    phone shapes too, as every log line and audit row is masked), then cut to
+    ``MAX_DESCRIPTION_CHARS``. A token can be longer than the address it replaces (``a@b.cd`` is
+    six characters, ``[EMAIL]`` seven), so a description at the limit may grow past it, and the
+    event, its contract and the rulebook's column are bounded by the same limit; the tenant keeps
+    the full text, a token cut at the end stands for nothing, and the cut leaves no trailing
+    whitespace (the event's text carries none)."""
+    return mask_pii_in(description)[:MAX_DESCRIPTION_CHARS].rstrip()
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,7 +141,7 @@ class ReportError:
                     business_id=report.business_id,
                     rule_version_id=report.rule_version_id,
                     category=report.category,
-                    description=mask_pii(description).text,
+                    description=masked_description(description),
                     submitted_at=now,
                 )
             )

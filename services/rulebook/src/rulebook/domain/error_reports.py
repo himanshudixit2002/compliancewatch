@@ -2,14 +2,14 @@
 obligation, masked, waiting for the regulatory team's decision.
 
 The obligation service emits ``error_report.submitted`` with the description masked for personal
-identifiers; the rulebook keeps that text and nothing else of the tenant's (``ErrorReview``, one
-per report, keyed by the report so a redelivered event changes nothing). An analyst, reviewer or
-admin decides it once (``decide``): ``confirmed`` names the rule version that corrects the
-reported one, which the application checks has a ``corrects`` relation to it, and its publication
-replaces the reported version through the publish lifecycle; ``rejected`` leaves the version as
-it is. The decision goes back to the obligation service as ``error_report.decided``, keyed by the
-tenant. A tenant's erasure nulls the review's tenant and empties its text; the decision stays as
-a fact about the rule.
+identifiers; the rulebook masks it once more on arrival and keeps that text and nothing else of
+the tenant's (``ErrorReview``, one per report, keyed by the report so a redelivered event changes
+nothing). An analyst, reviewer or admin decides it once (``decide``): ``confirmed`` names the
+rule version that corrects the reported one, which the application checks has a ``corrects``
+relation to it, and its publication replaces the reported version through the publish lifecycle;
+``rejected`` leaves the version as it is. The decision goes back to the obligation service as
+``error_report.decided``, keyed by the tenant. A tenant's erasure nulls the review's tenant and
+empties its text; the decision stays as a fact about the rule.
 """
 
 from dataclasses import dataclass, replace

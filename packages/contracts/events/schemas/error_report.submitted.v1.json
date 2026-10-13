@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:compliancewatch:event:error_report.submitted:v1",
   "title": "error_report.submitted",
-  "description": "A member of a tenant reported an error in one of its obligations (a wrong due date, a rule that should not apply, a wrong step or citation, or something else). The obligation service stores the report under row-level security and emits it with the description masked for personal identifiers (the kernel's mask_pii), so the rulebook, which every tenant shares, never holds a tenant's personal data; the rulebook's group rulebook.error-reports turns it into a review item for the regulatory team. Producer: obligation. Consumers: rulebook.",
+  "description": "A member of a tenant reported an error in one of its obligations (a wrong due date, a rule that should not apply, a wrong step or citation, or something else). The obligation service stores the report under row-level security and emits it with the description masked for personal identifiers (the kernel's mask_pii_in, the record patterns log lines and audit rows are masked with, cut to the description's limit), so the rulebook, which every tenant shares, never holds a tenant's personal data; the rulebook's group rulebook.error-reports masks it once more and turns it into a review item for the regulatory team. Producer: obligation. Consumers: rulebook.",
   "type": "object",
   "x-version": "1.0.0",
   "x-producer": "obligation",

@@ -6,8 +6,10 @@ decide them, and answer the obligation service.
   from the report's (``error_reports.review_id_for``), so a redelivered or replayed event finds the
   row and changes nothing. The payload is checked against its contract first; one the contract
   refuses raises, so the consumer retries it and then dead-letters it. The description arrives
-  masked (the obligation service masks it with the kernel before it emits the event) and is kept
-  as it arrived.
+  masked (the obligation service masks it with the kernel before it emits the event) and is
+  masked once more on arrival (``masked_text``: the kernel's ``mask_pii_in``, the record
+  patterns, cut to the review's limit), so the rulebook never depends on the producer: masking
+  is idempotent, and a text masked by the obligation service comes through unchanged.
 - ``ListErrorReviews``: the queue, by the rule version a report is about, then oldest first, a
   page at a time, open reviews unless another status is asked for; ``groups`` counts the open
   reviews per rule version with the version's rule, number and title, so an analyst sees which
@@ -32,9 +34,11 @@ from uuid import UUID
 from cw_contracts.events.error_report_submitted_v1 import ErrorReportSubmittedV1
 from domain_kernel.ids import ObligationId, RuleVersionId, TenantId, UserId
 from domain_kernel.knowledge import RelationKind
+from domain_kernel.pii import mask_pii_in
 from rulebook.application.alignment import Clock, default_clock
 from rulebook.application.audit import actor_for, entry
 from rulebook.domain.error_reports import (
+    MAX_DESCRIPTION_CHARS,
     MAX_PAGE,
     ErrorCategory,
     ErrorOutcome,
@@ -56,6 +60,15 @@ from rulebook.domain.repository import KnowledgeUnitOfWork, KnowledgeUnitOfWorkF
 
 SUBJECT: Final = "error_report"
 DECIDED_ACTION: Final = "error_report_review.decided"
+
+
+def masked_text(description: str) -> str:
+    """``description`` as the rulebook keeps it: every GSTIN, PAN, Aadhaar number, phone number
+    and email address replaced by its bracketed kind with the kernel's record patterns
+    (``mask_pii_in``), cut to ``MAX_DESCRIPTION_CHARS`` with no trailing whitespace, since a
+    token can be longer than the address it replaces and the column is bounded by the contract's
+    limit."""
+    return mask_pii_in(description)[:MAX_DESCRIPTION_CHARS].rstrip()
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,7 +94,7 @@ class IntakeErrorReport:
             obligation_id=ObligationId(report.obligation_id),
             rule_version_id=RuleVersionId(report.rule_version_id),
             category=ErrorCategory(report.category.value),
-            description_masked=report.description,
+            description_masked=masked_text(report.description),
             received_at=self._clock(),
         )
         with self._unit_of_work() as uow:

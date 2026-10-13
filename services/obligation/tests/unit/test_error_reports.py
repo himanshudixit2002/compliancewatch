@@ -1,11 +1,13 @@
 """Error reports on the memory store, over HTTP in header mode and through the worker's consumer
 of error_report.decided: the route behind its flag (404 and nothing stored while it is off), a
 report of another tenant's obligation (404), the report kept as written while the event leaves
-masked and the audit row names no text, the Idempotency-Key, the tenant's list with its status
-filter and pages, the decision applied once (confirmed with the correcting version, rejected, a
-redelivery or a replay changing nothing, a report the tenant has no row of dead-lettered, an
-erased tenant's decision only marked processed), the export section and the domain's own
-rules."""
+masked with the record patterns (a lower-case PAN, a URL-encoded address and a bracketed phone
+number too) and cut to the limit when masking grows it, and the audit row names no text, the
+Idempotency-Key, the tenant's list with its status filter and pages, the decision applied once
+(confirmed with the correcting version, rejected, a redelivery or a replay changing nothing, a
+report the tenant has no row of dead-lettered, an erased tenant's decision only marked
+processed), the export section and the domain's own rules. tests/unit/test_auth_mode.py proves
+the route in token mode: the reporter named, a service or an analyst refused."""
 
 import json
 from collections.abc import Iterator
@@ -23,16 +25,19 @@ from sqlalchemy.pool import NullPool
 from domain_kernel.erasure import TenantDataErased
 from domain_kernel.errors import InvariantViolationError
 from domain_kernel.ids import EventId, ObligationId, RuleVersionId, TenantId, UserId
+from domain_kernel.pii import mask_pii_in
 from obligation import worker
 from obligation.application.error_reports import (
     DECIDED_ACTION,
     SUBMITTED_ACTION,
     ApplyErrorDecision,
+    masked_description,
     report_description,
 )
 from obligation.application.export import ExportTenantData
 from obligation.application.materialise import MaterialiseRequest
 from obligation.domain.error_reports import (
+    MAX_DESCRIPTION_CHARS,
     ErrorCategory,
     ErrorOutcome,
     ErrorReport,
@@ -66,8 +71,14 @@ DLQ = "error_report.decided.obligation.error-decisions.dlq"
 NOW = datetime(2026, 10, 1, 4, 0, tzinfo=UTC)
 TEXT = (
     "Example: the example monthly statement shows the 20th as its due date, but the example "
-    "notice gives the 25th. Call us on +91 98765 43210 or write to owner@example.org."
+    "notice gives the 25th. Call us on +91 98765 43210 or +91 (987) 654 3210, or write to "
+    "owner@example.org or owner%40example.net; our PAN is abcde1234f (synthetic)."
 )
+IDENTIFIERS = ("98765", "(987) 654", "example.org", "example.net", "abcde1234f")
+"""What TEXT carries that the record patterns mask and the prompt patterns partly leave."""
+GROWING = ("a@b.cd " * (MAX_DESCRIPTION_CHARS // 7 + 1))[:MAX_DESCRIPTION_CHARS]
+"""A description at the limit whose masking grows it: each six-character address becomes
+[EMAIL], seven."""
 
 
 class Api:
@@ -166,10 +177,12 @@ def test_a_report_is_kept_as_written_and_leaves_masked() -> None:
 
     (event,) = api.submitted()
     assert (event.tenant_id, event.report_id, event.obligation_id) == (TENANT, report_id, api.first)
-    assert "[PHONE]" in event.description
-    assert "[EMAIL]" in event.description
-    assert "98765" not in event.description
-    assert "example.org" not in event.description
+    assert event.description == (
+        "Example: the example monthly statement shows the 20th as its due date, but the example "
+        "notice gives the 25th. Call us on [PHONE] or [PHONE], or write to [EMAIL] or [EMAIL]; "
+        "our PAN is [PAN] (synthetic)."
+    ), "the record patterns: the bracketed number, the encoded address and the lower-case PAN too"
+    assert not [found for found in IDENTIFIERS if found in event.description]
     assert event.category is ErrorCategory.DUE_DATE
     assert event.submitted_at == stored.submitted_at
 
@@ -188,7 +201,9 @@ def test_a_report_is_kept_as_written_and_leaves_masked() -> None:
         "rule_version_id": str(api.rule.rule_version_id),
         "category": "due_date",
     }
-    assert "98765" not in str(entry.after), "the audit row names no text"
+    assert not [found for found in IDENTIFIERS if found in str(entry.after)], (
+        "the audit row names no text"
+    )
 
     replayed = api.report(key="report-1")
     assert replayed.status_code == 201
@@ -215,6 +230,22 @@ def test_a_report_needs_the_tenants_obligation_and_a_description() -> None:
     assert api.report(category="typo").status_code == 422
     assert api.store.error_reports == {}
     assert api.submitted() == []
+
+
+def test_a_description_at_the_limit_leaves_cut_to_the_limit_when_masking_grows_it() -> None:
+    api = Api()
+    assert len(GROWING) == MAX_DESCRIPTION_CHARS
+    assert len(mask_pii_in(GROWING)) > MAX_DESCRIPTION_CHARS, "the case: masking grows the text"
+    answered = api.report(GROWING)
+    assert answered.status_code == 201, answered.text
+    report_id = ErrorReportId(UUID(answered.json()["report_id"]))
+    assert api.store.error_reports[report_id].description == GROWING, "the tenant keeps it all"
+    (event,) = api.submitted()
+    assert MAX_DESCRIPTION_CHARS - len("[EMAIL] ") < len(event.description) <= MAX_DESCRIPTION_CHARS
+    assert event.description == masked_description(GROWING)
+    assert "a@b.cd" not in event.description
+    assert event.description.startswith("[EMAIL] [EMAIL] ")
+    assert event.description.endswith("[EMAIL]"), "the cut leaves no trailing space"
 
 
 def test_the_list_runs_newest_first_by_status_in_pages() -> None:
