@@ -140,6 +140,7 @@ TENANT_ROUTES: dict[str, frozenset[str]] = {
             "GET /v1/profile/nodes/{node_id}/next-question",
             "GET /v1/profile/nodes/{node_id}/review-tasks",
             "POST /v1/profile/registrations/{node_id}/prefill",
+            "POST /v1/profile/nodes/{node_id}/review-tasks/{task_id}/resolve",
             "POST /v1/profile/financial-year-confirmations",
             "POST /v1/businesses",
             "GET /v1/businesses",
@@ -214,6 +215,14 @@ FAN_OUT = (
     "a token names (401 without one in dual mode)"
 )
 
+ADMIN_READS = (
+    "the regulatory team's admin reads every tenant's summary (the tenant, its plan and its user "
+    "counts, through the directory function) and, with a reason in x-reason that is written to "
+    "that tenant's audit trail, the users of the tenant the path names, not the caller's; with "
+    "tokens read each takes an admin of the internal tenant a token names (401 without one in "
+    "dual mode), and the composition serves them publicly in token mode only"
+)
+
 FAN_OUT_ROUTES = (
     "GET /v1/applicability-engine/fan-outs",
     "GET /v1/applicability-engine/fan-outs/{rule_version_id}",
@@ -258,11 +267,25 @@ EXEMPT_ROUTES: dict[str, dict[str, str]] = {
             "development sign-in: signs a fake provider token for a phone number or an email "
             "address, answers only with the fake provider in local and test, and 404 elsewhere"
         ),
+        **dict.fromkeys(
+            (
+                "GET /v1/identity/admin/tenants",
+                "GET /v1/identity/admin/tenants/{tenant_id}",
+                "GET /v1/identity/admin/tenants/{tenant_id}/users",
+            ),
+            ADMIN_READS,
+        ),
     },
     "profile": {
         "GET /v1/ontology": (
             "global data: the attributes, their questions, labels and rule operators are the same "
             "for every tenant, and nothing a tenant stored is in the answer"
+        ),
+        "GET /v1/profile/admin/attribute-usage": (
+            "the regulatory team's count of how many profiles hold each attribute in each state "
+            "across every tenant, through the directory function: counts only, no value and no "
+            "tenant named; with tokens read it takes an analyst, a reviewer or an admin a token "
+            "names (401 without one in dual mode), and it is served publicly in token mode only"
         ),
     },
     "applicability-engine": {
@@ -589,7 +612,12 @@ def test_tenant_b_cannot_read_or_resend_a_notification_of_tenant_a(
     path = f"/v1/notification/notifications/{notification_id}"
     assert notification.get(path, headers=AS_A).status_code == 200
     assert notification.get(path, headers=AS_B).status_code == 404
-    assert notification.post(f"{path}/resend", headers=AS_B).status_code == 404
+    resend = notification.post(
+        f"{path}/resend",
+        json={"reason": "Example: tenant B asks"},
+        headers={**AS_B, "Idempotency-Key": uuid4().hex},
+    )
+    assert resend.status_code == 404, resend.text
     listed = notification.get(
         "/v1/notification/notifications", params={"business_id": business_id}, headers=AS_B
     )

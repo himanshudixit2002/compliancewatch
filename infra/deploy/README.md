@@ -63,16 +63,26 @@ service as its own `cw_<schema>` role instead needs a database URL per service i
      only grants. It sets no password and refuses to leave a role with SUPERUSER or BYPASSRLS.
    - Set each role's password from the secret store; never run `dev-passwords.sql`, which holds
      the dev stack's placeholders.
-   - The same file makes `cw_identity_directory`, a NOLOGIN role nobody logs in as, and once
-     identity's migration 0010 has made `identity.data_request` its read policy and
-     `identity.data_requests_open()`, a SECURITY DEFINER function it owns that counts every
-     tenant's open and overdue data requests (the DataRequestOverdue alert's gauges). An owner that
-     is not a superuser is made a member of the role WITH INHERIT FALSE, SET TRUE: it does not
-     inherit the role's reads, but it may SET ROLE to it and read through its policy (the
-     runbook does), which is no more than the tables' owner could do anyway. Only `cw_identity`
-     and the image's role (`cw_app`, which `make product-role` grants it too) may EXECUTE it; the
-     role makes those grants itself, as the function's owner. Run the file after the release that
-     adds migration 0010, or the gauges report nothing.
+   - The same file makes two NOLOGIN directory roles nobody logs in as, each owning SECURITY
+     DEFINER functions that read across tenants and answer listed columns only:
+     `cw_identity_directory` with `identity.data_requests_open()` (every tenant's open and
+     overdue data requests, counted for the DataRequestOverdue alert's gauges; its read policy on
+     `data_request`, once migration 0010 has made the table) and `identity.tenant_directory()`
+     (the admin tenant list: the tenant, its newest subscription's plan key and status and its
+     user counts; read policies on `tenant`, `app_user` and `billing_subscription` and SELECT on
+     the columns it reads, once migrations 0003 and 0008 have made them), and
+     `cw_profile_directory` with `profile.attribute_usage()` (how many profile nodes hold each
+     attribute in each state, for the ontology browser) and `profile.tenant_directory()` (the
+     ids of the tenants that have profile nodes, which the worker's financial year schedule
+     visits; read policies on `profile_attribute` and `profile_node`, once profile's migration
+     0001 has made them). An owner that is not a superuser is made a member of each role WITH
+     INHERIT FALSE, SET TRUE: it does not inherit the role's reads, but it may SET ROLE to it
+     and read through its policies (the runbook does), which is no more than the tables' owner
+     could do anyway. Only the schema's own role (`cw_identity`, `cw_profile`) and the image's
+     role (`cw_app`, which `make product-role` grants it too) may EXECUTE each function; the role
+     makes those grants itself, as the function's owner. Run the file after the release that
+     adds the migrations each function reads, or the gauges report nothing, the admin tenant list
+     and the attribute usage answer 500 and the financial year schedule visits nobody.
    - Point each service's `CW_DATABASE_URL` at its own role wherever the migrations run with
      another URL. The combined image does: `cw-mvp release` reads the owner's URL from
      `CW_MIGRATION_DATABASE_URL`. The per-service Fly apps do not yet: their release command,

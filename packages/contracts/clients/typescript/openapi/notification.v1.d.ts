@@ -123,7 +123,13 @@ export type paths = {
     };
     get?: never;
     put?: never;
-    /** Queue a notification that failed for good again; 409 in any other state */
+    /**
+     * Queue a notification that failed for good again, for a reason (tenant admins, admins); 409 in any other state
+     * @description The resend is written to the tenant's audit trail as ``notification.resent`` with the
+     *     reason and the actor. ``recipient``, when given, must be the notification's own address
+     *     (422 otherwise). A retry with the same ``Idempotency-Key`` and body gets the first answer
+     *     back (``Idempotent-Replayed: true``); the same key with another body is a 422.
+     */
     post: operations["resend_notification_v1_notification_notifications__notification_id__resend_post"];
     delete?: never;
     options?: never;
@@ -815,6 +821,23 @@ export type components = {
      * @enum {string}
      */
     RecipientRole: "owner" | "staff" | "ca_admin" | "ca_staff";
+    /**
+     * ResendIn
+     * @description Why a failed notification is sent again, and, when the admin wants to be sure of the
+     *     address, which one.
+     */
+    ResendIn: {
+      /**
+       * Reason
+       * @description Why it is resent (a support case, a provider outage), 1 to 2000 characters once trimmed; written to the audit trail. A blank one is a 422
+       */
+      reason: string;
+      /**
+       * Recipient
+       * @description The address the admin means (a WhatsApp number or an email address): it must be the notification's own, else nothing is queued (422); left out, the notification goes to its address
+       */
+      recipient?: string | null;
+    };
     /** SendIn */
     SendIn: {
       /**
@@ -1263,7 +1286,9 @@ export interface operations {
   resend_notification_v1_notification_notifications__notification_id__resend_post: {
     parameters: {
       query?: never;
-      header?: {
+      header: {
+        /** @description A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours */
+        "Idempotency-Key": string;
         /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
         "x-tenant-id"?: string | null;
       };
@@ -1272,7 +1297,11 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ResendIn"];
+      };
+    };
     responses: {
       /** @description Successful Response */
       200: {
@@ -1281,6 +1310,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["NotificationOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
         };
       };
       /** @description Unauthorized */
@@ -1321,6 +1359,15 @@ export interface operations {
       };
       /** @description Unprocessable Entity */
       422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Required */
+      428: {
         headers: {
           [name: string]: unknown;
         };

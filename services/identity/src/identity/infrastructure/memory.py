@@ -8,8 +8,9 @@ rows of its own tenant, none when it has no tenant, and refuses to write another
 audit entry of no tenant is allowed). A unit works on a copy of the store, so units run one at a
 time (a store-level lock held from open to commit or rollback): two overlapping requests, of one
 tenant or of two, cannot both start from the same copy and lose each other's writes.
-``MemoryChannelStore`` does the same for channel consents, and ``MemoryDataRequestDirectory``
-counts every tenant's open data requests as ``identity.data_requests_open()`` does.
+``MemoryChannelStore`` does the same for channel consents, ``MemoryDataRequestDirectory``
+counts every tenant's open data requests as ``identity.data_requests_open()`` does, and
+``MemoryTenantDirectory`` lists every tenant as ``identity.tenant_directory()`` does.
 """
 
 import threading
@@ -37,6 +38,7 @@ from identity.domain.data_requests import (
     OpenRequests,
     counts_by_kind,
 )
+from identity.domain.directory import TenantSummary
 from identity.domain.errors import InternalTenantExistsError, SubjectRegisteredError
 from identity.domain.pages import ExportAfter
 from identity.domain.repository import UnitOfWork
@@ -493,3 +495,53 @@ class MemoryDataRequestDirectory:
         return counts_by_kind(
             OpenRequests(kind, open_, overdue) for kind, (open_, overdue) in found.items()
         )
+
+
+class MemoryTenantDirectory:
+    """``TenantDirectory`` over a ``MemoryStore``: every tenant's summary, as
+    ``identity.tenant_directory()`` answers it; ``query`` is matched as given, as the function
+    matches it (``ListTenants`` trims it)."""
+
+    def __init__(self, store: MemoryStore) -> None:
+        self._store = store
+
+    def page(self, query: str, after: TenantId | None, limit: int) -> list[TenantSummary]:
+        tenants = sorted(self._store.tenants.values(), key=_tenant_position)
+        if after is not None:
+            start = self._store.tenants.get(after)
+            if start is None:
+                return []
+            tenants = [t for t in tenants if _tenant_position(t) > _tenant_position(start)]
+        wanted = query.casefold()
+        if wanted:
+            tenants = [t for t in tenants if wanted in t.name.casefold() or str(t.id) == wanted]
+        return [self._summary(tenant) for tenant in tenants[:limit]]
+
+    def get(self, tenant_id: TenantId) -> TenantSummary | None:
+        tenant = self._store.tenants.get(tenant_id)
+        return None if tenant is None else self._summary(tenant)
+
+    def _summary(self, tenant: Tenant) -> TenantSummary:
+        users = [u for u in self._store.users.values() if u.tenant_id == tenant.id]
+        subscriptions = [
+            s for s in self._store.billing.subscriptions.values() if s.tenant_id == tenant.id
+        ]
+        newest = max(
+            subscriptions, key=lambda s: (s.started_at, s.provider_subscription_id), default=None
+        )
+        return TenantSummary(
+            id=tenant.id,
+            kind=tenant.kind,
+            name=tenant.name,
+            status=tenant.status,
+            created_at=tenant.created_at,
+            plan_key=None if newest is None else newest.plan_key,
+            subscription_status=None if newest is None else newest.status,
+            users=len(users),
+            active_users=sum(1 for u in users if u.is_active),
+        )
+
+
+def _tenant_position(tenant: Tenant) -> tuple[str, UUID]:
+    """Where a tenant sorts in the directory: by name, then id, as Postgres pages them."""
+    return (tenant.name, tenant.id.value)

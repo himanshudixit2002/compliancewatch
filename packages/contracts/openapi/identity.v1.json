@@ -1,6 +1,76 @@
 {
   "components": {
     "schemas": {
+      "AdminTenantOut": {
+        "description": "One tenant as the regulatory team's admin lists it: the tenant, the plan key and status\nof its newest subscription (null without one; what the plan entitles the tenant to is the\nentitlements route's answer) and how many users it has, how many of them active.",
+        "properties": {
+          "active_users": {
+            "title": "Active Users",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TenantKind"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "plan_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The newest subscription's plan; null without one",
+            "title": "Plan Key"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TenantStatus"
+          },
+          "subscription_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The newest subscription's status, whatever it is; null without one"
+          },
+          "users": {
+            "description": "Every user of the tenant, disabled ones included",
+            "title": "Users",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "name",
+          "status",
+          "created_at",
+          "plan_key",
+          "subscription_status",
+          "users",
+          "active_users"
+        ],
+        "title": "AdminTenantOut",
+        "type": "object"
+      },
       "AuditActorOut": {
         "properties": {
           "id": {
@@ -1205,6 +1275,35 @@
         "title": "MembershipOut",
         "type": "object"
       },
+      "Page_AdminTenantOut_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminTenantOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Send as cursor to read the next page; null on the last page",
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[AdminTenantOut]",
+        "type": "object"
+      },
       "Page_AuditEntryOut_": {
         "properties": {
           "items": {
@@ -1622,6 +1721,16 @@
         "title": "SubscriptionOut",
         "type": "object"
       },
+      "SubscriptionStatus": {
+        "enum": [
+          "created",
+          "active",
+          "past_due",
+          "cancelled"
+        ],
+        "title": "SubscriptionStatus",
+        "type": "string"
+      },
       "TenantIn": {
         "additionalProperties": false,
         "properties": {
@@ -1965,6 +2074,281 @@
           }
         },
         "summary": "The public keys access tokens are signed with (RFC 7517)",
+        "tags": [
+          "identity"
+        ]
+      }
+    },
+    "/v1/identity/admin/tenants": {
+      "get": {
+        "operationId": "list_tenants_v1_identity_admin_tenants_get",
+        "parameters": [
+          {
+            "description": "Keep the tenants whose name contains this, any case, or whose id is it; surrounding whitespace is ignored",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "Keep the tenants whose name contains this, any case, or whose id is it; surrounding whitespace is ignored",
+              "maxLength": 200,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Items per page, 1 to 200",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Items per page, 1 to 200",
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The next_cursor of the previous page; absent for the first page",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The next_cursor of the previous page; absent for the first page",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_AdminTenantOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Every tenant with its plan and user counts, a page at a time (internal admins)",
+        "tags": [
+          "identity"
+        ]
+      }
+    },
+    "/v1/identity/admin/tenants/{tenant_id}": {
+      "get": {
+        "operationId": "read_tenant_v1_identity_admin_tenants__tenant_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminTenantOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "One tenant with its plan and user counts (internal admins)",
+        "tags": [
+          "identity"
+        ]
+      }
+    },
+    "/v1/identity/admin/tenants/{tenant_id}/users": {
+      "get": {
+        "description": "The read is written to the tenant's audit trail as ``tenant.users_read`` with the\nreason; 422 without the ``x-reason`` header or with only whitespace in it, 404 for a tenant\nidentity does not know.",
+        "operationId": "read_tenant_users_v1_identity_admin_tenants__tenant_id__users_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Why the users are read (a support case, a security review), 1 to 500 characters once trimmed; written to the tenant's audit trail with the read. Required: a read without it, or with only whitespace in it, is a 422.",
+            "in": "header",
+            "name": "x-reason",
+            "required": true,
+            "schema": {
+              "description": "Why the users are read (a support case, a security review), 1 to 500 characters once trimmed; written to the tenant's audit trail with the read. Required: a read without it, or with only whitespace in it, is a 422.",
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "X-Reason",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsersOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "A tenant's users with their roles, for a reason that is audited (internal admins)",
         "tags": [
           "identity"
         ]

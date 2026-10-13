@@ -30,6 +30,8 @@ REASONS: Final[tuple[str, ...]] = (
     "confirm_financial_year",
     "verify_registration",
 )
+CLOSED_BY: Final[tuple[str, ...]] = ("answer", "resolve")
+OUTCOMES: Final[tuple[str, ...]] = ("answered", "confirmed", "dismissed")
 TENANT_SETTING: Final[str] = "app.tenant_id"
 TENANT_TABLES: Final[tuple[str, ...]] = (
     "profile_node",
@@ -137,6 +139,23 @@ class ReviewTaskRow(Base):
             ["node_id"], ["profile_node.id"], name="fk_review_task_node_id_profile_node"
         ),
         CheckConstraint(sql_in_list("reason", REASONS), name="ck_review_task_reason"),
+        CheckConstraint("(open) = (closed_at IS NULL)", name="ck_review_task_closed"),
+        CheckConstraint(
+            "(closed_at IS NULL) = (closed_by IS NULL) AND (closed_by IS NULL OR "
+            + sql_in_list("closed_by", CLOSED_BY)
+            + ")",
+            name="ck_review_task_closed_by",
+        ),
+        CheckConstraint(
+            "(closed_at IS NULL) = (outcome IS NULL) AND (outcome IS NULL OR "
+            + sql_in_list("outcome", OUTCOMES)
+            + ")",
+            name="ck_review_task_outcome",
+        ),
+        CheckConstraint(
+            "(closed_by = 'answer') = (outcome = 'answered') OR closed_by IS NULL",
+            name="ck_review_task_answered",
+        ),
         Index("ix_review_task_open", "tenant_id", "open"),
         {
             "comment": (
@@ -153,3 +172,8 @@ class ReviewTaskRow(Base):
     fy_label: Mapped[str] = mapped_column(String(7), nullable=False, server_default="")
     open: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # The closure (migration 0005): null while the task is open.
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    closed_by: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    outcome: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    note: Mapped[str] = mapped_column(Text, nullable=False, server_default="")

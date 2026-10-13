@@ -10,7 +10,7 @@ as row-level security would."""
 
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Self
 from uuid import UUID
 
@@ -55,6 +55,7 @@ from identity.domain.data_requests import (
     OpenRequests,
     counts_by_kind,
 )
+from identity.domain.directory import TenantSummary
 from identity.domain.errors import InternalTenantExistsError, SubjectRegisteredError
 from identity.domain.pages import ExportAfter
 from identity.domain.repository import UnitOfWork
@@ -286,6 +287,12 @@ def _to_data_request(row: DataRequestRow) -> DataRequest:
 OPEN_REQUESTS_SQL = "SELECT kind, open, overdue FROM identity.data_requests_open()"
 """The directory function infra/dev/postgres/roles.sql makes: counts of every tenant's open
 requests, which row-level security would hide from this service's own role."""
+TENANT_DIRECTORY_SQL = (
+    "SELECT id, kind, name, status, created_at, plan_key, subscription_status, users, "
+    "active_users FROM identity.tenant_directory(:q, :after, :lim, :only)"
+)
+"""The other directory function: every tenant's summary, which row-level security would hide
+from this service's own role too."""
 
 
 class PostgresDataRequestDirectory:
@@ -304,6 +311,47 @@ class PostgresDataRequestDirectory:
             for row in rows
             if row.kind in {kind.value for kind in DataRequestKind}
         )
+
+
+class PostgresTenantDirectory:
+    """``TenantDirectory`` through ``identity.tenant_directory()``, which runs as the NOLOGIN
+    role cw_identity_directory and answers the summary columns only."""
+
+    def __init__(self, engine: Engine) -> None:
+        self._engine = engine
+
+    def page(self, query: str, after: TenantId | None, limit: int) -> list[TenantSummary]:
+        values = {
+            "q": query,
+            "after": None if after is None else after.value,
+            "lim": limit,
+            "only": None,
+        }
+        with self._engine.connect() as connection:
+            rows = connection.execute(text(TENANT_DIRECTORY_SQL), values).all()
+        return [_tenant_summary(row) for row in rows]
+
+    def get(self, tenant_id: TenantId) -> TenantSummary | None:
+        values = {"q": None, "after": None, "lim": 1, "only": tenant_id.value}
+        with self._engine.connect() as connection:
+            row = connection.execute(text(TENANT_DIRECTORY_SQL), values).first()
+        return None if row is None else _tenant_summary(row)
+
+
+def _tenant_summary(row: Any) -> TenantSummary:
+    return TenantSummary(
+        id=TenantId(row.id),
+        kind=TenantKind(row.kind),
+        name=row.name,
+        status=TenantStatus(row.status),
+        created_at=row.created_at.astimezone(UTC),
+        plan_key=row.plan_key or None,
+        subscription_status=(
+            None if not row.subscription_status else SubscriptionStatus(row.subscription_status)
+        ),
+        users=int(row.users),
+        active_users=int(row.active_users),
+    )
 
 
 class SqlAlchemyTenantRepository:

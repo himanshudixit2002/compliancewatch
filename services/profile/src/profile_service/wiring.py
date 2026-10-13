@@ -23,7 +23,12 @@ from profile_service.application.export import ExportTenantData
 from profile_service.application.onboarding import OnboardingChecklist
 from profile_service.application.prefill import PrefillFromGstin
 from profile_service.application.registration import RegisterNodes
-from profile_service.domain.repository import UnitOfWorkFactory
+from profile_service.application.review_tasks import ResolveReviewTask
+from profile_service.domain.repository import (
+    AttributeUsageReader,
+    TenantDirectory,
+    UnitOfWorkFactory,
+)
 from profile_service.settings import ProfileSettings
 from py_common.idempotency import IdempotencyStore
 
@@ -49,5 +54,10 @@ class Wiring:
     add_registration: AddRegistration
     onboarding: OnboardingChecklist
     export_data: ExportTenantData
+    resolve_review_task: ResolveReviewTask
+    attribute_usage: AttributeUsageReader
+    """Every tenant's attribute counts, for the regulatory team's read."""
+    tenant_directory: TenantDirectory
+    """The tenants that have nodes, which the worker's financial year schedule visits."""
     erased_tenants: ErasedTenants
     """The tenants the profile has erased: its routes answer them 410."""

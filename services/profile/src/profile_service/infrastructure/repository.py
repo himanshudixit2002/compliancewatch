@@ -33,9 +33,12 @@ from profile_service.domain.errors import ProfileNodeNotFoundError
 from profile_service.domain.model import (
     AttributeKey,
     AttributeRecord,
+    AttributeUsage,
     NodeAttribute,
     ProfileNode,
     ProfileVersion,
+    ReviewClosedBy,
+    ReviewOutcome,
     ReviewReason,
     ReviewTask,
     ValueState,
@@ -202,11 +205,36 @@ class SqlAlchemyProfileRepository:
         self._session.flush()
 
     def open_review_tasks(self, node_id: BusinessId | None = None) -> Sequence[ReviewTask]:
-        statement = select(ReviewTaskRow).where(ReviewTaskRow.open.is_(True))
+        return self._review_tasks(node_id, open_only=True)
+
+    def review_tasks(self, node_id: BusinessId | None = None) -> Sequence[ReviewTask]:
+        return self._review_tasks(node_id, open_only=False)
+
+    def _review_tasks(self, node_id: BusinessId | None, *, open_only: bool) -> list[ReviewTask]:
+        statement = select(ReviewTaskRow)
+        if open_only:
+            statement = statement.where(ReviewTaskRow.open.is_(True))
         if node_id is not None:
             statement = statement.where(ReviewTaskRow.node_id == node_id.value)
-        rows = self._session.scalars(statement.order_by(ReviewTaskRow.created_at)).all()
+        rows = self._session.scalars(
+            statement.order_by(ReviewTaskRow.created_at, ReviewTaskRow.id)
+        ).all()
         return [_review_task(row) for row in rows]
+
+    def get_review_task(self, task_id: BusinessId) -> ReviewTask | None:
+        row = self._session.get(ReviewTaskRow, task_id.value)
+        return None if row is None else _review_task(row)
+
+    def save_review_task(self, task: ReviewTask) -> None:
+        row = self._session.get(ReviewTaskRow, task.id.value)
+        if row is None:
+            raise ValueError(f"review task {task.id} is not stored")
+        row.open = task.open
+        row.closed_at = task.closed_at
+        row.closed_by = None if task.closed_by is None else task.closed_by.value
+        row.outcome = None if task.outcome is None else task.outcome.value
+        row.note = task.note
+        self._session.flush()
 
     def export_nodes(self, after: NodeCursor | None, limit: int) -> Sequence[ProfileNode]:
         node = ProfileNodeRow
@@ -331,7 +359,47 @@ def _review_task(row: ReviewTaskRow) -> ReviewTask:
         as_of_fy=None if row.fy_label == "" else FinancialYear.parse(row.fy_label),
         open=row.open,
         created_at=row.created_at.astimezone(UTC),
+        closed_at=None if row.closed_at is None else row.closed_at.astimezone(UTC),
+        closed_by=None if row.closed_by is None else ReviewClosedBy(row.closed_by),
+        outcome=None if row.outcome is None else ReviewOutcome(row.outcome),
+        note=row.note,
     )
+
+
+ATTRIBUTE_USAGE_SQL = "SELECT key, state, count AS holders FROM profile.attribute_usage()"
+TENANT_DIRECTORY_SQL = "SELECT tenant_id FROM profile.tenant_directory()"
+"""The directory functions infra/dev/postgres/roles.sql makes, which run as the NOLOGIN role
+cw_profile_directory: counts and tenant ids across every tenant, which row-level security would
+hide from this service's own role."""
+
+
+class PostgresAttributeUsage:
+    """``AttributeUsageReader`` through ``profile.attribute_usage()``. Until the role step has
+    made the function, the read fails."""
+
+    def __init__(self, engine: Engine) -> None:
+        self._engine = engine
+
+    def usage(self) -> Sequence[AttributeUsage]:
+        with self._engine.connect() as connection:
+            rows = connection.execute(text(ATTRIBUTE_USAGE_SQL)).all()
+        return [
+            AttributeUsage(row.key, ValueState(row.state), int(row.holders))
+            for row in rows
+            if row.state in {state.value for state in ValueState}
+        ]
+
+
+class PostgresTenantDirectory:
+    """``TenantDirectory`` through ``profile.tenant_directory()``."""
+
+    def __init__(self, engine: Engine) -> None:
+        self._engine = engine
+
+    def tenants(self) -> Sequence[TenantId]:
+        with self._engine.connect() as connection:
+            found = connection.execute(text(TENANT_DIRECTORY_SQL)).scalars()
+            return [TenantId(value) for value in found]
 
 
 LIKE_ESCAPE = "\\"

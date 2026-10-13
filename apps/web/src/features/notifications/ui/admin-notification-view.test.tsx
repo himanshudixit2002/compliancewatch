@@ -59,6 +59,10 @@ describe("AdminNotificationView", () => {
     expect(valueOf(container, "Obligation id")).toBe(OBLIGATION_ID);
     expect(valueOf(container, "Business id")).toBe(BUSINESS_ID);
     expect(screen.getByText("Resend a notification: not offered yet")).toBeDefined();
+    // The route is built (M3-8); what is missing is the page's reason dialog (W11), and the
+    // banner says so rather than claiming the route takes no reason.
+    expect(screen.getByText(/The console does not offer resending yet: the dialog/)).toBeDefined();
+    expect(container.textContent).not.toContain("the route on main does not take");
     expect(container.querySelector("[data-slot='resend-awaits']")?.textContent).toContain(
       "POST /v1/notification/notifications/{notification_id}/resend (services track (WP30), requiring Idempotency-Key)",
     );

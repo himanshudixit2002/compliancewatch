@@ -11,6 +11,15 @@ member of it acts for:
 
 Profiles are tenant data, so no tenant at all is this service's own 401 ``tenant-required``.
 ``Caller`` is the principal, from which the routes take who changed a value.
+
+``ResolverTenant`` is the tenant of a review task's resolve: a tenant admin (owner, ca_admin)
+acting in the tenant their token names, or a service with tenant:act. The regulatory team has no
+grant on it: a user acts in the tenant their token names, and the internal tenant holds no
+profile nodes, so one would be dead; a cross-tenant resolve would need an audited reason, as the
+identity users read has, and none is built. ``RegulatoryReader`` guards the admin read of the
+attribute usage across tenants:
+an analyst, a reviewer or an admin a verified token names; outside header mode a request without a
+token is a 401, and in header mode the anonymous caller passes, as on every route.
 """
 
 from datetime import datetime
@@ -19,13 +28,22 @@ from uuid import UUID
 
 from fastapi import Depends, Request
 
-from domain_kernel.access import TENANT_MEMBER_ROLES, Principal, Role, Scope
+from domain_kernel.access import (
+    REGULATORY_ROLES,
+    TENANT_ADMIN_ROLES,
+    TENANT_MEMBER_ROLES,
+    Principal,
+    Role,
+    Scope,
+)
 from domain_kernel.events import utc_now
 from domain_kernel.ids import TenantId, UserId
 from profile_service.domain.errors import TenantRequiredError
 from profile_service.wiring import Wiring
+from py_common.auth.errors import AuthTokenRequiredError
 from py_common.auth.fastapi import (
     CurrentPrincipal,
+    authenticator_of,
     data_export_scope,
     require_roles,
     tenant_scope,
@@ -52,6 +70,36 @@ async def member_tenant(
     return tenant
 
 
+resolver = require_roles(TENANT_ADMIN_ROLES, scopes={Scope.TENANT_ACT})
+"""Who closes a review task by hand: a tenant admin (owner, ca_admin) of the tenant their token
+names, or a service with tenant:act; the anonymous principal of ``header`` mode passes. An
+analyst or an admin is refused (403): their token names the internal tenant, which has no nodes."""
+
+
+async def resolver_tenant(
+    principal: Annotated[Principal, Depends(resolver)],
+    tenant: Annotated[TenantId, Depends(tenant_of_request)],
+) -> TenantId:
+    """The request's tenant, once the caller is known to be one who may resolve its tasks."""
+    return tenant
+
+
+regulatory = require_roles(REGULATORY_ROLES)
+
+
+async def regulatory_reader(
+    request: Request, principal: Annotated[Principal, Depends(regulatory)]
+) -> Principal:
+    """An analyst, a reviewer or an admin a verified token names; outside header mode a request
+    without a token is a 401."""
+    if not principal.is_authenticated and authenticator_of(request).mode != "header":
+        raise AuthTokenRequiredError(
+            "The attribute usage needs a regulatory role's access token as "
+            "Authorization: Bearer <token>"
+        )
+    return principal
+
+
 def wiring(request: Request) -> Wiring:
     wired: Wiring = request.app.state.wiring
     return wired
@@ -72,6 +120,8 @@ PUBLIC_ROUTE: Final[dict[str, Any]] = {"x-roles": list(PUBLIC_ROLES)}
 """``openapi_extra`` of a public route every member of the tenant may call."""
 
 Tenant = Annotated[TenantId, Depends(member_tenant)]
+ResolverTenant = Annotated[TenantId, Depends(resolver_tenant)]
+RegulatoryReader = Annotated[Principal, Depends(regulatory_reader)]
 ExportTenant = Annotated[TenantId, Depends(export_tenant)]
 Caller = CurrentPrincipal
 Wired = Annotated[Wiring, Depends(wiring)]

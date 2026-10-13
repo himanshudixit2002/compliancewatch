@@ -692,7 +692,7 @@
   "adminNotifications.tenantFact": "Tenant {tenant}",
   "adminNotifications.backToList": "All notifications of this business",
   "adminNotifications.resendTitle": "{title}: not offered yet",
-  "adminNotifications.resendBody": "Resending a notification that failed for good needs a reason, the admin role and an Idempotency-Key, which the route on main does not take. It waits for:",
+  "adminNotifications.resendBody": "The console does not offer resending yet: the dialog that asks for the reason and sends it with the Idempotency-Key the hardened route requires is W11's. It will call:",
   "adminNotifications.tenantNeeded": "The notification service keeps each tenant's notifications apart. Name the tenant this notification belongs to.",
   "adminNotifications.tenantFormLabel": "The notification's tenant",
   "adminNotifications.open": "Open the notification",

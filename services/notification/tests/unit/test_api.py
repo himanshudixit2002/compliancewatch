@@ -292,14 +292,19 @@ def test_statuses_move_a_sent_notification_on_and_the_history_shows_it() -> None
 def test_a_failed_notification_can_be_resent_once_and_nothing_else_can() -> None:
     app, channel = receipts_app()
     failed_body = send_body()
+    resend = {"reason": "Example: the provider was down"}
     with TestClient(app) as client:
         failed = client.post("/v1/notification/send", json=failed_body, headers=TENANT).json()
         assert failed["outcome"] == "failed", "outside the window with a draft template"
         path = f"/v1/notification/notifications/{failed_body['notification_id']}/resend"
-        resent = client.post(path, headers=TENANT)
-        again = client.post(path, headers=TENANT)
-        missing = client.post(f"/v1/notification/notifications/{uuid4()}/resend", headers=TENANT)
-        without_tenant = client.post(path)
+        resent = client.post(path, json=resend, headers={**TENANT, **resend_key()})
+        again = client.post(path, json=resend, headers={**TENANT, **resend_key()})
+        missing = client.post(
+            f"/v1/notification/notifications/{uuid4()}/resend",
+            json=resend,
+            headers={**TENANT, **resend_key()},
+        )
+        without_tenant = client.post(path, json=resend, headers=resend_key())
     assert resent.status_code == 200, resent.text
     assert (resent.json()["state"], resent.json()["attempts"], resent.json()["error"]) == (
         "queued",
@@ -311,6 +316,10 @@ def test_a_failed_notification_can_be_resent_once_and_nothing_else_can() -> None
     assert missing.status_code == 404
     assert without_tenant.status_code == 401
     assert channel.sent == []
+
+
+def resend_key() -> dict[str, str]:
+    return {"Idempotency-Key": uuid4().hex}
 
 
 def test_the_history_pages_newest_first_and_filters_by_state() -> None:

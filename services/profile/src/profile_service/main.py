@@ -4,7 +4,10 @@ Guide section 11: wiring of interfaces to implementations happens here, never in
 The caller and its tenant come from ``py_common.auth`` by ``CW_AUTH_MODE`` (``api.deps``). A new
 GSTIN registration is checked against the tenant's plan while the flag ``identity.plan_limits``
 is on for it, reading ``GET {CW_IDENTITY_URL}/v1/identity/entitlements`` with this service's own
-token (``infrastructure.entitlements``).
+token (``infrastructure.entitlements``). The regulatory team reads the attribute usage across
+tenants through ``profile.attribute_usage()`` (``api.admin``), and the worker's financial year
+schedule lists the tenants through ``profile.tenant_directory()``: both SECURITY DEFINER functions
+of the NOLOGIN directory role, in memory their twins over the store.
 """
 
 from collections.abc import Awaitable, Callable
@@ -17,6 +20,7 @@ from domain_kernel.erasure import ErasedTenants
 from domain_kernel.errors import DomainError, InvalidAttributeValueError, UnknownAttributeError
 from domain_kernel.ontology import Ontology, OntologyWording
 from profile_service import __version__
+from profile_service.api.admin import router as admin_router
 from profile_service.api.businesses import router as businesses_router
 from profile_service.api.ontology import router as ontology_router
 from profile_service.api.router import router
@@ -37,6 +41,7 @@ from profile_service.application.export import ExportTenantData
 from profile_service.application.onboarding import OnboardingChecklist
 from profile_service.application.prefill import PrefillFromGstin
 from profile_service.application.registration import RegisterNodes
+from profile_service.application.review_tasks import ResolveReviewTask
 from profile_service.domain.entitlements import EntitlementsReader
 from profile_service.domain.errors import (
     AttributeLevelMismatchError,
@@ -48,11 +53,17 @@ from profile_service.domain.errors import (
     PlanLimitReachedError,
     ProfileNodeNotFoundError,
     RegistrationAmbiguousError,
+    ReviewTaskClosedError,
+    ReviewTaskNotFoundError,
     TenantRequiredError,
 )
 from profile_service.domain.flags import FeatureFlags
 from profile_service.domain.lookup import GstinLookupProvider
-from profile_service.domain.repository import UnitOfWorkFactory
+from profile_service.domain.repository import (
+    AttributeUsageReader,
+    TenantDirectory,
+    UnitOfWorkFactory,
+)
 from profile_service.infrastructure.entitlements import FlaggedEntitlements, HttpEntitlements
 from profile_service.infrastructure.flags import OpenFeatureFlags
 from profile_service.infrastructure.lookup import (
@@ -61,9 +72,15 @@ from profile_service.infrastructure.lookup import (
     StaticLookupProvider,
 )
 from profile_service.infrastructure.lookup_http import HttpGstinLookupProvider
-from profile_service.infrastructure.memory import MemoryStore
+from profile_service.infrastructure.memory import (
+    MemoryAttributeUsage,
+    MemoryStore,
+    MemoryTenantDirectory,
+)
 from profile_service.infrastructure.repository import (
     JsonLinesEvalRecorder,
+    PostgresAttributeUsage,
+    PostgresTenantDirectory,
     PostgresUnitOfWorkFactory,
 )
 from profile_service.settings import ProfileSettings
@@ -91,6 +108,8 @@ PROBLEM_STATUS: dict[type[DomainError], int] = {
     UnknownAttributeError: 422,
     PlanLimitReachedError: 402,
     EntitlementsMisconfiguredError: 503,
+    ReviewTaskNotFoundError: 404,
+    ReviewTaskClosedError: 409,
 }
 
 
@@ -122,10 +141,13 @@ def wire(
     ping: Callable[[], bool]
     idempotency: IdempotencyStore
     erased: ErasedTenants
+    usage: AttributeUsageReader
+    tenants: TenantDirectory
     if settings.profile_store == "memory":
         memory = MemoryStore()
         unit_of_work, ping, idempotency = memory, memory.ping, MemoryIdempotencyStore()
         erased = memory.erased
+        usage, tenants = MemoryAttributeUsage(memory), MemoryTenantDirectory(memory)
     else:
         recorder = (
             None
@@ -136,6 +158,8 @@ def wire(
         unit_of_work, ping = postgres, postgres.ping
         idempotency = SqlAlchemyIdempotencyStore(postgres.engine)
         erased = PostgresErasedTenants.pooled(settings.database_url)
+        usage = PostgresAttributeUsage(postgres.engine)
+        tenants = PostgresTenantDirectory(postgres.engine)
 
     async def store_ready() -> bool:
         return await run_in_threadpool(ping)
@@ -161,6 +185,9 @@ def wire(
         add_registration=AddRegistration(unit_of_work, prefill, entitlements=entitlements),
         onboarding=OnboardingChecklist(unit_of_work, loaded),
         export_data=ExportTenantData(unit_of_work),
+        resolve_review_task=ResolveReviewTask(unit_of_work),
+        attribute_usage=usage,
+        tenant_directory=tenants,
         erased_tenants=erased,
     )
 
@@ -202,7 +229,7 @@ def build_app(
     app = create_app(
         service_name=SERVICE_NAME,
         version=__version__,
-        routers=[router, businesses_router, ontology_router],
+        routers=[router, businesses_router, ontology_router, admin_router],
         settings=settings,
         readiness_checks=[("store", wiring.store_ready), ("ontology", _ontology_ready(wiring))],
         problem_status=PROBLEM_STATUS,

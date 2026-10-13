@@ -30,6 +30,13 @@ class ProfileSettings(Settings):
     profile_gstin_lookup_api_key: SecretStr | None = None
     profile_gstin_lookup_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
     """How long one lookup may take; a slower provider counts as unavailable."""
+    profile_fy_schedule_enabled: bool = False
+    """The flag ``profile.fy_schedule`` (``CW_PROFILE_FY_SCHEDULE_ENABLED``, owner core-product,
+    off): the worker runs the financial year schedule once a day, which opens the
+    confirm_financial_year tasks of every tenant for the year that has turned on 1 April IST,
+    once per tenant, entity, attribute and year (``application.fy_schedule``). Off, the worker
+    hosts no such job and the route ``POST /v1/profile/financial-year-confirmations`` and the
+    ``profile-fy-confirm`` command remain the way to open them."""
 
     @model_validator(mode="after")
     def _require_lookup_connection(self) -> Self:

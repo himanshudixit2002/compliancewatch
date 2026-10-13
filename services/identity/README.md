@@ -36,6 +36,9 @@ Design reference: Project Foundation guide, sections 7, 14 and 16.
 | `POST /v1/identity/data-requests` | Ask for a copy of the tenant's data (`kind` export) or its deletion (`kind` deletion: the tenant is shut at once and every service erases it), due 30 days later; the tenant's owner or CA admin, or the regulatory team's admin naming the tenant in `tenant_id` as a support request with a reason; 403 `identity-tenant-deleting` once the tenant asked for its deletion, 422 `identity-tenant-not-erasable` for the internal tenant |
 | `GET /v1/identity/data-requests`, `GET /v1/identity/data-requests/{request_id}` | The tenant's requests, newest first, or one (404 `identity-data-request-not-found`), each with its deadline, whether it is overdue, the services that answered it (held its export, or erased the tenant) and those still pending; owners and CA admins, of a tenant being deleted too |
 | `GET /v1/identity/data-requests/{request_id}/export` | The export as a JSON attachment, assembled now and never stored (409 `identity-export-not-ready` for a request that is not an export); owners and CA admins |
+| `GET /v1/identity/admin/tenants?q&limit&cursor` | Every tenant a page at a time, in the order of (name, id): id, kind, name, status, when it was created, the plan key and status of its newest subscription (null without one) and its user counts, never a person's details; `q` keeps the tenants whose name contains it or whose id is it; an admin of the internal tenant (403 for anyone else) |
+| `GET /v1/identity/admin/tenants/{tenant_id}` | One tenant's summary, as the list shows it; 404 `identity-tenant-not-found`; internal admins |
+| `GET /v1/identity/admin/tenants/{tenant_id}/users` | A tenant's users with their roles, for a reason given in the `x-reason` header (422 without it); every read is written to that tenant's audit trail as `tenant.users_read` with the reason, the tenant id and the admin, and nothing of the users; internal admins |
 | `GET /v1/identity/erasures/{tenant_id}` | What identity holds of a tenant's deletion, which every other service's erasure consumer checks before erasing: the tenant's `status`, whether it is `internal`, and the `deletion_event_id` it last sent for the open deletion request (null when none); 404 `identity-tenant-not-found`; a service with `erasure:verify` (internal listener only) |
 
 Purposes: `terms`, `privacy_notice`, `profile_processing`, `whatsapp_reminders`,
@@ -87,6 +90,23 @@ tenant's audit trail names the admin who recorded it, as it names every actor. T
 `data_request` (migration 0010), under forced row-level security; `data_request.created` and
 `data_request.exported` go to the tenant's audit trail. Once identity has erased a tenant, its
 tenant routes answer 410 `tenant-erased` (its `erased_tenant` marker).
+
+Admin reads (`/v1/identity/admin/tenants`, `application/admin.py`). The regulatory team's admin
+sees every tenant at once, which row-level security would otherwise hide from identity's own role:
+the list and the single read go through `identity.tenant_directory()`, a SECURITY DEFINER function
+owned by the NOLOGIN role `cw_identity_directory` (`infra/dev/postgres/roles.sql`, next to
+`data_requests_open()`) that answers the summary columns only: the tenant, the plan key and status
+of its newest subscription (what the plan entitles the tenant to stays the entitlements route's
+answer) and how many users it has, how many of them active. A tenant's users are read in a unit of
+work of that tenant, which needs a reason: a GET carries it in the `x-reason` header, never in the
+URL, which every access log keeps. The read is written to the tenant's own trail as
+`tenant.users_read` with the reason, the tenant id, the admin as the actor and how many users were
+read, and no name, address or number, so the tenant's owners see who looked and why; the admin's
+own trail (the platform's rows and the internal tenant's) does not hold it. The caller is checked
+as a support request's maker is: an active admin of the internal tenant whose session is current;
+a customer tenant's owner, staff and services are refused (403), and outside header mode a request
+without a token is a 401. The composition classes the three routes `admin`, so the public listener
+serves them in token mode only. Nothing is stored by a read.
 
 Deletion (the erasure cascade; `docs/runbooks/data-requests.md`). A deletion request turns the
 tenant `deletion_requested` in the transaction that records it, with `tenant.deletion.requested`

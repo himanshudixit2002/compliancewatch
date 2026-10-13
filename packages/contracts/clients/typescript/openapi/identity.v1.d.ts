@@ -52,6 +52,62 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  "/v1/identity/admin/tenants": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Every tenant with its plan and user counts, a page at a time (internal admins) */
+    get: operations["list_tenants_v1_identity_admin_tenants_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/identity/admin/tenants/{tenant_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** One tenant with its plan and user counts (internal admins) */
+    get: operations["read_tenant_v1_identity_admin_tenants__tenant_id__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/identity/admin/tenants/{tenant_id}/users": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * A tenant's users with their roles, for a reason that is audited (internal admins)
+     * @description The read is written to the tenant's audit trail as ``tenant.users_read`` with the
+     *     reason; 422 without the ``x-reason`` header or with only whitespace in it, 404 for a tenant
+     *     identity does not know.
+     */
+    get: operations["read_tenant_users_v1_identity_admin_tenants__tenant_id__users_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/identity/audit": {
     parameters: {
       query?: never;
@@ -483,6 +539,42 @@ export type paths = {
 export type webhooks = Record<string, never>;
 export type components = {
   schemas: {
+    /**
+     * AdminTenantOut
+     * @description One tenant as the regulatory team's admin lists it: the tenant, the plan key and status
+     *     of its newest subscription (null without one; what the plan entitles the tenant to is the
+     *     entitlements route's answer) and how many users it has, how many of them active.
+     */
+    AdminTenantOut: {
+      /** Active Users */
+      active_users: number;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      kind: components["schemas"]["TenantKind"];
+      /** Name */
+      name: string;
+      /**
+       * Plan Key
+       * @description The newest subscription's plan; null without one
+       */
+      plan_key: string | null;
+      status: components["schemas"]["TenantStatus"];
+      /** @description The newest subscription's status, whatever it is; null without one */
+      subscription_status: components["schemas"]["SubscriptionStatus"] | null;
+      /**
+       * Users
+       * @description Every user of the tenant, disabled ones included
+       */
+      users: number;
+    };
     /** AuditActorOut */
     AuditActorOut: {
       /**
@@ -1077,6 +1169,16 @@ export type components = {
        */
       user_id: string;
     };
+    /** Page[AdminTenantOut] */
+    Page_AdminTenantOut_: {
+      /** Items */
+      items: components["schemas"]["AdminTenantOut"][];
+      /**
+       * Next Cursor
+       * @description Send as cursor to read the next page; null on the last page
+       */
+      next_cursor: string | null;
+    };
     /** Page[AuditEntryOut] */
     Page_AuditEntryOut_: {
       /** Items */
@@ -1288,6 +1390,11 @@ export type components = {
       /** Status */
       status: string;
     };
+    /**
+     * SubscriptionStatus
+     * @enum {string}
+     */
+    SubscriptionStatus: "created" | "active" | "past_due" | "cancelled";
     /** TenantIn */
     TenantIn: {
       /**
@@ -1491,6 +1598,179 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["JwksOut"];
+        };
+      };
+    };
+  };
+  list_tenants_v1_identity_admin_tenants_get: {
+    parameters: {
+      query?: {
+        /** @description The next_cursor of the previous page; absent for the first page */
+        cursor?: string | null;
+        /** @description Items per page, 1 to 200 */
+        limit?: number;
+        /** @description Keep the tenants whose name contains this, any case, or whose id is it; surrounding whitespace is ignored */
+        q?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Page_AdminTenantOut_"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  read_tenant_v1_identity_admin_tenants__tenant_id__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenant_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminTenantOut"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  read_tenant_users_v1_identity_admin_tenants__tenant_id__users_get: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description Why the users are read (a support case, a security review), 1 to 500 characters once trimmed; written to the tenant's audit trail with the read. Required: a read without it, or with only whitespace in it, is a 422. */
+        "x-reason": string;
+      };
+      path: {
+        tenant_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["UsersOut"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
         };
       };
     };

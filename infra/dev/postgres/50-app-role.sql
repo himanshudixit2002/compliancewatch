@@ -34,11 +34,12 @@ FROM pg_namespace
 WHERE nspname IN ('identity', 'profile', 'rulebook', 'applicability', 'obligation',
                   'notification', 'qa', 'llm_gateway', 'eval', 'pipeline', 'audit') \gexec
 
--- The count of every tenant's open data requests (roles.sql, the identity directory), once
--- identity's migrations and make db-roles have made it. Granted as the function's owner,
--- cw_identity_directory: an owner that is not a superuser holds no grant option on it in its own
--- role (roles.sql made it a member WITH INHERIT FALSE, SET TRUE), so its own GRANT would only
--- warn. The three statements run in order, the role reset last.
+-- The directory functions (roles.sql): identity's count of every tenant's open data requests
+-- and its admin tenant list, and profile's attribute usage and tenant list, once each service's
+-- migrations and make db-roles have made them. Granted as each function's owner, the NOLOGIN
+-- directory role: an owner that is not a superuser holds no grant option on them in its own role
+-- (roles.sql made it a member WITH INHERIT FALSE, SET TRUE), so its own GRANT would only warn.
+-- Each block's statements run in order, the role reset last.
 SELECT statement
 FROM unnest(ARRAY[
        'SET ROLE cw_identity_directory',
@@ -46,4 +47,25 @@ FROM unnest(ARRAY[
        'RESET ROLE'
      ]) WITH ORDINALITY AS steps(statement, step)
 WHERE to_regprocedure('identity.data_requests_open()') IS NOT NULL
+ORDER BY step \gexec
+
+SELECT statement
+FROM unnest(ARRAY[
+       'SET ROLE cw_identity_directory',
+       format('GRANT EXECUTE ON FUNCTION identity.tenant_directory(text, uuid, integer, uuid) '
+              'TO %I', :'app_user'),
+       'RESET ROLE'
+     ]) WITH ORDINALITY AS steps(statement, step)
+WHERE to_regprocedure('identity.tenant_directory(text, uuid, integer, uuid)') IS NOT NULL
+ORDER BY step \gexec
+
+SELECT statement
+FROM unnest(ARRAY[
+       'SET ROLE cw_profile_directory',
+       format('GRANT EXECUTE ON FUNCTION profile.attribute_usage() TO %I', :'app_user'),
+       format('GRANT EXECUTE ON FUNCTION profile.tenant_directory() TO %I', :'app_user'),
+       'RESET ROLE'
+     ]) WITH ORDINALITY AS steps(statement, step)
+WHERE to_regprocedure('profile.attribute_usage()') IS NOT NULL
+  AND to_regprocedure('profile.tenant_directory()') IS NOT NULL
 ORDER BY step \gexec

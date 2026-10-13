@@ -27,6 +27,7 @@ from sqlalchemy import Connection, Engine, create_engine, inspect, select, text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from testcontainers.community.postgres import PostgresContainer
 
+from domain_kernel.audit import AuditActor
 from domain_kernel.channels import Channel
 from domain_kernel.dedupe import DedupeKey
 from domain_kernel.ids import (
@@ -49,7 +50,7 @@ from notification.application.recipients import (
     RegisterRecipient,
     RemoveRecipient,
 )
-from notification.application.resend import ResendNotification
+from notification.application.resend import RESENT_ACTION, ResendNotification
 from notification.application.retention import PurgeExpired
 from notification.application.send import SendNow
 from notification.domain.errors import RecipientNotFoundError, ResendNotAllowedError
@@ -73,6 +74,7 @@ from notification.domain.routing import ObligationNotice
 from notification.infrastructure.repository import PostgresUnitOfWorkFactory, SqlAlchemyUnitOfWork
 from notification.infrastructure.work_index import PostgresWorkIndex, claim_rows
 from notification.testing import NOON_IST, FakeChannel, FakeRuleVersionReader
+from py_common.audit.testing import install_audit_table, read_audit_entries
 from py_common.db_roles import apply_roles, as_role
 from py_common.events import EventMessage, to_message
 from py_common.outbox import (
@@ -105,6 +107,9 @@ TABLES = {
 GROUP = "notification.obligations"
 LEASE = timedelta(seconds=60)
 
+RESENDER = AuditActor.system("test-admin")
+"""Who resends, as the audit row names them."""
+
 
 @pytest.fixture(scope="module")
 def database_url() -> Iterator[str]:
@@ -124,6 +129,12 @@ def migrated(database_url: str) -> Iterator[Config]:
         env.setenv("CW_DB_SCHEMA", SCHEMA)
         config = Config(str(SERVICE_DIR / "alembic.ini"))
         command.upgrade(config, "head")
+        # audit.event as identity's migration makes it, before the roles are applied, so
+        # cw_notification may add rows to it (the resend writes one).
+        installer = create_engine(database_url)
+        with installer.begin() as connection:
+            install_audit_table(connection)
+        installer.dispose()
         yield config
 
 
@@ -1143,7 +1154,8 @@ def test_receipts_move_notifications_on_and_a_failed_one_is_resent(
         "notification.sent",
     ]
 
-    resent = ResendNotification(factory, clock=lambda: later).run(tenant, failed_one)
+    resend = ResendNotification(factory, clock=lambda: later)
+    resent = resend.run(tenant, failed_one, reason="Example: the provider was down", actor=RESENDER)
     assert (resent.state, resent.attempts) == (DeliveryState.QUEUED, 0)
     with engine.connect() as connection:
         work = connection.execute(
@@ -1152,7 +1164,15 @@ def test_receipts_move_notifications_on_and_a_failed_one_is_resent(
         ).one()
     assert (work.status, work.available_at) == ("pending", later), "due again with it"
     with pytest.raises(ResendNotAllowedError):
-        ResendNotification(factory, clock=lambda: later).run(tenant, read_one)
+        resend.run(tenant, read_one, reason="Example: again", actor=RESENDER)
+    with engine.connect() as connection:
+        resent_rows = read_audit_entries(connection, action=RESENT_ACTION)
+    (entry,) = [row for row in resent_rows if row.subject_id == str(failed_one)]
+    assert (entry.tenant_id, entry.reason, entry.actor) == (
+        tenant,
+        "Example: the provider was down",
+        RESENDER,
+    )
     purge(factory, tenant)
 
 

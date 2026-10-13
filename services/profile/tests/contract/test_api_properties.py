@@ -56,6 +56,8 @@ OPERATIONS = frozenset(
         "GET /v1/profile/ping",
         "POST /v1/profile/registrations",
         "POST /v1/profile/registrations/{node_id}/prefill",
+        "POST /v1/profile/nodes/{node_id}/review-tasks/{task_id}/resolve",
+        "GET /v1/profile/admin/attribute-usage",
     }
 )
 TOKEN_OPERATIONS = OPERATIONS - {"GET /health", "GET /ready", "GET /v1/profile/ping"}

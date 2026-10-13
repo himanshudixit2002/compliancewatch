@@ -97,6 +97,21 @@ class ResendNotAllowedError(DomainError):
         super().__init__(f"notification {notification_id} is {state}; only a failed one is resent")
 
 
+class ResendRecipientMismatchError(DomainError):
+    """The resend named a recipient the notification is not addressed to (422): nothing is
+    queued, so a resend never reaches an address the admin did not mean."""
+
+    type_slug = "notification-resend-recipient-mismatch"
+    title = "Notification is not addressed to that recipient"
+
+    def __init__(self, notification_id: str) -> None:
+        super().__init__(
+            f"notification {notification_id} is not addressed to the recipient named; leave "
+            "recipient out to resend it to its own address"
+        )
+        self.notification_id = notification_id
+
+
 class ReceiptsDisabledError(DomainError):
     """The receipt routes fail closed: without a configured token nothing is accepted."""
 
