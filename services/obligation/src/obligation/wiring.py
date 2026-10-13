@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from domain_kernel.erasure import ErasedTenants
 from obligation.application.changes import ApplyDeadlineChange, CloseObligation, WithdrawRule
+from obligation.application.error_reports import ListErrorReports, ReportError
 from obligation.application.export import ExportTenantData
 from obligation.application.materialise import MaterialiseObligations
 from obligation.application.queries import ListBusinessObligations, ListObligations
@@ -36,6 +37,8 @@ class Wiring:
     change_status: ChangeStatus
     assign: AssignObligation
     add_comment: AddComment
+    report_error: ReportError
+    list_error_reports: ListErrorReports
     export_tenant_data: ExportTenantData
     erased_tenants: ErasedTenants
     """The tenants the obligation service has erased: its routes answer them 410."""

@@ -24,10 +24,26 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from domain_kernel.status import ClosureReason, ObligationStatus, RuleVersionStatus
 from obligation.domain.comments import MAX_AUTHOR_LABEL_CHARS, MAX_COMMENT_CHARS
+from obligation.domain.error_reports import (
+    MAX_DESCRIPTION_CHARS,
+    MAX_NOTES_CHARS,
+    ErrorCategory,
+    ErrorReportStatus,
+)
 from obligation.domain.events import RescheduleReason
 from obligation.domain.history import MAX_NOTE_CHARS, ChangeKind
 
 STATUSES: Final[tuple[str, ...]] = tuple(status.value for status in ObligationStatus)
+ERROR_CATEGORIES: Final[tuple[str, ...]] = tuple(category.value for category in ErrorCategory)
+ERROR_REPORT_STATUSES: Final[tuple[str, ...]] = tuple(status.value for status in ErrorReportStatus)
+ERROR_REPORT_STATE: Final[str] = (
+    "(status = 'submitted' AND decided_at IS NULL AND correcting_rule_version_id IS NULL) "
+    "OR (status = 'rejected' AND decided_at IS NOT NULL AND correcting_rule_version_id IS NULL) "
+    "OR (status = 'confirmed' AND decided_at IS NOT NULL"
+    " AND correcting_rule_version_id IS NOT NULL)"
+)
+"""A report is decided exactly once, and only a confirmed one names a correcting version
+(migration 0007)."""
 CLOSURE_REASONS: Final[tuple[str, ...]] = tuple(reason.value for reason in ClosureReason)
 CHANGE_KINDS: Final[tuple[str, ...]] = tuple(kind.value for kind in ChangeKind)
 CHANGE_REASONS: Final[tuple[str, ...]] = (
@@ -215,6 +231,61 @@ class ObligationCommentRow(Base):
     )
     body: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ErrorReportRow(Base):
+    """An error a tenant's member reported in one of its obligations, with the regulatory team's
+    decision once it comes back (migration 0007). The description is the reporter's text, kept
+    under row-level security; it leaves the service masked."""
+
+    __tablename__ = "error_report"
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="pk_error_report"),
+        ForeignKeyConstraint(
+            ["obligation_id"],
+            ["obligation.id"],
+            name="fk_error_report_obligation_id_obligation",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(sql_in_list("category", ERROR_CATEGORIES), name="ck_error_report_category"),
+        CheckConstraint(
+            sql_in_list("status", ERROR_REPORT_STATUSES), name="ck_error_report_status"
+        ),
+        CheckConstraint(
+            f"char_length(description) BETWEEN 1 AND {MAX_DESCRIPTION_CHARS}",
+            name="ck_error_report_description",
+        ),
+        CheckConstraint(f"char_length(notes) <= {MAX_NOTES_CHARS}", name="ck_error_report_notes"),
+        CheckConstraint(ERROR_REPORT_STATE, name="ck_error_report_state"),
+        Index("ix_error_report_tenant_status", "tenant_id", "status", "submitted_at"),
+        {
+            "comment": (
+                "Errors a tenant's members reported in its obligations, each decided once by the "
+                "regulatory team through the rulebook. The description is the reporter's text; "
+                "the rulebook gets it masked. Row-level security by tenant_id."
+            )
+        },
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    obligation_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    business_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    rule_version_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    category: Mapped[str] = mapped_column(String(16), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    submitted_by: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, nullable=True, comment="The user who reported it; null when no token named them"
+    )
+    submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    notes: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default="", comment="What the analyst said about the decision"
+    )
+    correcting_rule_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, nullable=True, comment="For a confirmed report, the version that corrects it"
+    )
 
 
 class ObligationReminderRow(Base):

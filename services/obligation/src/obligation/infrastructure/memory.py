@@ -1,12 +1,13 @@
 """In-memory repository and unit of work: the fakes for tests and the app before Postgres.
 
-A unit of work works on a copy of the obligations, the cached rule versions and the applied
-decisions, and replaces them when the block exits cleanly; the events, changes, comments,
-reminders and audit entries it writes wait until then too. Units run one at a time (a store-level
-lock held from open to commit or rollback), so two overlapping requests, of one tenant or of two,
-cannot both start from the same copy and lose each other's writes, and a ``lock``ed read needs no
-lock of its own. ``MemoryStore.rule_version_refs`` reads and writes the cached versions outside a
-unit, under the same lock, as the rule events consumer does on its connection.
+A unit of work works on a copy of the obligations, the cached rule versions, the applied
+decisions and the error reports, and replaces them when the block exits cleanly; the events,
+changes, comments, reminders and audit entries it writes wait until then too. Units run one at a
+time (a store-level lock held from open to commit or rollback), so two overlapping requests, of
+one tenant or of two, cannot both start from the same copy and lose each other's writes, and a
+``lock``ed read needs no lock of its own. ``MemoryStore.rule_version_refs`` reads and writes the
+cached versions outside a unit, under the same lock, as the rule events consumer does on its
+connection.
 """
 
 import threading
@@ -20,10 +21,11 @@ from domain_kernel.events import DomainEvent
 from domain_kernel.ids import BusinessId, ObligationId, RuleVersionId, TenantId
 from domain_kernel.status import ObligationStatus
 from obligation.domain.comments import ObligationComment
+from obligation.domain.error_reports import ErrorReport, ErrorReportId, ErrorReportStatus
 from obligation.domain.history import ObligationChange
 from obligation.domain.model import Obligation, period_matches
 from obligation.domain.reminders import Reminder
-from obligation.domain.repository import ExportAfter, ListingAfter, UnitOfWork
+from obligation.domain.repository import ExportAfter, ListingAfter, ReportAfter, UnitOfWork
 from obligation.domain.rule_versions import AppliedDecision, RuleVersionRef
 from py_common.audit import MemoryAuditSink
 from py_common.erasure import MemoryErasedTenants
@@ -260,6 +262,56 @@ class MemoryAppliedDecisions:
         return sorted(found, key=lambda d: (d.business_id.value, d.rule_version_id.value))
 
 
+class MemoryErrorReportLog:
+    """The tenant's error reports on the unit's working copy; a report is keyed by its id, as
+    the table is, so a second ``add`` of one id is refused."""
+
+    def __init__(self, store: dict[ErrorReportId, ErrorReport], tenant_id: TenantId) -> None:
+        self._store = store
+        self._tenant_id = tenant_id
+
+    def add(self, report: ErrorReport) -> None:
+        if report.tenant_id != self._tenant_id:
+            raise ValueError(f"error report {report.id} belongs to another tenant")
+        if report.id in self._store:
+            raise ValueError(f"duplicate error report {report.id}")
+        self._store[report.id] = report
+
+    def get(self, report_id: ErrorReportId, *, lock: bool = False) -> ErrorReport | None:
+        report = self._store.get(report_id)
+        return report if report is not None and report.tenant_id == self._tenant_id else None
+
+    def save(self, report: ErrorReport) -> None:
+        if report.tenant_id != self._tenant_id:
+            raise ValueError(f"error report {report.id} belongs to another tenant")
+        self._store[report.id] = report
+
+    def page(
+        self,
+        *,
+        status: ErrorReportStatus | None,
+        after: ReportAfter | None,
+        limit: int,
+    ) -> Sequence[ErrorReport]:
+        found = [
+            report
+            for report in self._store.values()
+            if report.tenant_id == self._tenant_id
+            and (status is None or report.status is status)
+            and (after is None or _report_key(report) < (after.submitted_at, after.report_id.value))
+        ]
+        return sorted(found, key=_report_key, reverse=True)[:limit]
+
+    def export_page(self, after: ExportAfter | None, limit: int) -> Sequence[ErrorReport]:
+        found = [r for r in self._store.values() if r.tenant_id == self._tenant_id]
+        return _export_page(found, lambda r: (r.submitted_at, r.id.value), after, limit)
+
+
+def _report_key(report: ErrorReport) -> tuple[datetime, UUID]:
+    """Submission time and id: the list runs newest first, as Postgres sorts it."""
+    return (report.submitted_at, report.id.value)
+
+
 class MemoryUnitOfWork:
     def __init__(
         self,
@@ -272,6 +324,7 @@ class MemoryUnitOfWork:
         decisions: dict[DecisionKey, AppliedDecision] | None = None,
         comments: list[ObligationComment] | None = None,
         audit: list[AuditEntry] | None = None,
+        error_reports: dict[ErrorReportId, ErrorReport] | None = None,
     ) -> None:
         self._committed = store
         self._working: dict[ObligationId, Obligation] = {}
@@ -279,10 +332,13 @@ class MemoryUnitOfWork:
         self._working_refs: dict[RuleVersionId, RuleVersionRef] = {}
         self._committed_decisions = {} if decisions is None else decisions
         self._working_decisions: dict[DecisionKey, AppliedDecision] = {}
+        self._committed_reports = {} if error_reports is None else error_reports
+        self._working_reports: dict[ErrorReportId, ErrorReport] = {}
         self.obligations = MemoryObligationRepository(self._working, tenant_id)
         self.events = MemoryEventSink(events)
         self.history = MemoryChangeLog([] if changes is None else changes, tenant_id)
         self.comments = MemoryCommentLog([] if comments is None else comments, tenant_id)
+        self.error_reports = MemoryErrorReportLog(self._working_reports, tenant_id)
         self.reminders = MemoryReminderLog([] if reminders is None else reminders, tenant_id)
         self.rule_versions = MemoryRuleVersionRefs(self._working_refs)
         self.decisions = MemoryAppliedDecisions(self._working_decisions, tenant_id)
@@ -295,6 +351,8 @@ class MemoryUnitOfWork:
         self._working_refs.update(self._committed_refs)
         self._working_decisions.clear()
         self._working_decisions.update(self._committed_decisions)
+        self._working_reports.clear()
+        self._working_reports.update(self._committed_reports)
         return self
 
     def __exit__(self, exc_type: object, *exc_info: object) -> None:
@@ -305,6 +363,8 @@ class MemoryUnitOfWork:
             self._committed_refs.update(self._working_refs)
             self._committed_decisions.clear()
             self._committed_decisions.update(self._working_decisions)
+            self._committed_reports.clear()
+            self._committed_reports.update(self._working_reports)
             self.events.commit()
             self.history.commit()
             self.comments.commit()
@@ -325,6 +385,7 @@ class MemoryStore:
         self.reminders: list[Reminder] = []
         self.rule_versions: dict[RuleVersionId, RuleVersionRef] = {}
         self.decisions: dict[DecisionKey, AppliedDecision] = {}
+        self.error_reports: dict[ErrorReportId, ErrorReport] = {}
         self.audit: list[AuditEntry] = []
         self.erased = MemoryErasedTenants()
         self._lock = threading.Lock()
@@ -354,6 +415,7 @@ class MemoryStore:
                 self.decisions,
                 self.comments,
                 self.audit,
+                self.error_reports,
             ) as uow,
         ):
             yield uow

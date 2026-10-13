@@ -60,18 +60,26 @@ from domain_kernel.ids import (
 from domain_kernel.recurrence import Period
 from domain_kernel.status import ClosureReason, ObligationStatus, RuleVersionStatus
 from obligation.domain.comments import CommentId, ObligationComment
+from obligation.domain.error_reports import (
+    ErrorCategory,
+    ErrorReport,
+    ErrorReportId,
+    ErrorReportStatus,
+)
 from obligation.domain.history import ChangeKind, ObligationChange
 from obligation.domain.model import Obligation
 from obligation.domain.reminders import Reminder
 from obligation.domain.repository import (
     ExportAfter,
     ListingAfter,
+    ReportAfter,
     UnitOfWork,
     UnitOfWorkFactory,
 )
 from obligation.domain.rule_versions import AppliedDecision, Citation, RuleVersionRef
 from obligation.infrastructure.models import (
     TENANT_SETTING,
+    ErrorReportRow,
     ObligationChangeRow,
     ObligationCommentRow,
     ObligationDecisionRow,
@@ -283,6 +291,7 @@ class SqlAlchemyUnitOfWork:
         self.events = OutboxSink(connection, writer)
         self.history = SqlAlchemyChangeLog(session)
         self.comments = SqlAlchemyCommentLog(session)
+        self.error_reports = SqlAlchemyErrorReportLog(session)
         self.reminders = SqlAlchemyReminderLog(session)
         self.rule_versions = SqlAlchemyRuleVersionRefs(connection)
         self.decisions = SqlAlchemyAppliedDecisions(connection, tenant_id)
@@ -547,6 +556,98 @@ def _to_comment(row: ObligationCommentRow) -> ObligationComment:
         author_label=row.author_label,
         body=row.body,
         created_at=row.created_at.astimezone(UTC),
+    )
+
+
+class SqlAlchemyErrorReportLog:
+    """The error reports on the unit of work's session; row-level security scopes them to the
+    tenant."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, report: ErrorReport) -> None:
+        self._session.add(_to_report_row(report))
+        self._session.flush()
+
+    def get(self, report_id: ErrorReportId, *, lock: bool = False) -> ErrorReport | None:
+        statement = select(ErrorReportRow).where(ErrorReportRow.id == report_id.value)
+        if lock:
+            statement = statement.with_for_update(of=ErrorReportRow)
+        row = self._session.scalars(
+            statement.execution_options(populate_existing=True)
+        ).one_or_none()
+        return None if row is None else _to_report(row)
+
+    def save(self, report: ErrorReport) -> None:
+        self._session.merge(_to_report_row(report))
+        self._session.flush()
+
+    def page(
+        self,
+        *,
+        status: ErrorReportStatus | None,
+        after: ReportAfter | None,
+        limit: int,
+    ) -> Sequence[ErrorReport]:
+        statement = (
+            select(ErrorReportRow)
+            .order_by(ErrorReportRow.submitted_at.desc(), ErrorReportRow.id.desc())
+            .limit(limit)
+        )
+        if status is not None:
+            statement = statement.where(ErrorReportRow.status == status.value)
+        if after is not None:
+            statement = statement.where(
+                tuple_(ErrorReportRow.submitted_at, ErrorReportRow.id)
+                < tuple_(after.submitted_at, after.report_id.value)
+            )
+        return [_to_report(row) for row in self._session.scalars(statement).all()]
+
+    def export_page(self, after: ExportAfter | None, limit: int) -> Sequence[ErrorReport]:
+        statement = _export_page(
+            select(ErrorReportRow), ErrorReportRow.submitted_at, ErrorReportRow.id, after, limit
+        )
+        return [_to_report(row) for row in self._session.scalars(statement).all()]
+
+
+def _to_report_row(report: ErrorReport) -> ErrorReportRow:
+    return ErrorReportRow(
+        id=report.id.value,
+        tenant_id=report.tenant_id.value,
+        obligation_id=report.obligation_id.value,
+        business_id=report.business_id.value,
+        rule_version_id=report.rule_version_id.value,
+        category=report.category.value,
+        description=report.description,
+        status=report.status.value,
+        submitted_by=_uuid(report.submitted_by),
+        submitted_at=report.submitted_at,
+        decided_at=report.decided_at,
+        notes=report.notes,
+        correcting_rule_version_id=None
+        if report.correcting_rule_version_id is None
+        else report.correcting_rule_version_id.value,
+    )
+
+
+def _to_report(row: ErrorReportRow) -> ErrorReport:
+    return ErrorReport(
+        id=ErrorReportId(row.id),
+        tenant_id=TenantId(row.tenant_id),
+        obligation_id=ObligationId(row.obligation_id),
+        business_id=BusinessId(row.business_id),
+        rule_version_id=RuleVersionId(row.rule_version_id),
+        category=ErrorCategory(row.category),
+        description=row.description,
+        status=ErrorReportStatus(row.status),
+        submitted_by=_user(row.submitted_by),
+        submitted_at=row.submitted_at.astimezone(UTC),
+        decided_at=None if row.decided_at is None else row.decided_at.astimezone(UTC),
+        notes=row.notes,
+        correcting_rule_version_id=None
+        if row.correcting_rule_version_id is None
+        else RuleVersionId(row.correcting_rule_version_id),
     )
 
 

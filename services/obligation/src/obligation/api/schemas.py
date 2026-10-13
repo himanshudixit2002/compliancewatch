@@ -19,6 +19,12 @@ from obligation.application.export import TenantDataExport
 from obligation.application.queries import ListedObligation
 from obligation.application.tracking import MIN_WAIVER_CHARS, ObligationDetail, StatusAction
 from obligation.domain.comments import MAX_COMMENT_CHARS, ObligationComment
+from obligation.domain.error_reports import (
+    MAX_DESCRIPTION_CHARS,
+    ErrorCategory,
+    ErrorReport,
+    ErrorReportStatus,
+)
 from obligation.domain.history import MAX_NOTE_CHARS, ChangeKind, ObligationChange
 from obligation.domain.model import Obligation
 from obligation.domain.rule_versions import Citation, RuleVersionRef
@@ -272,12 +278,73 @@ class CommentIn(BaseModel):
     ]
 
 
+class ErrorReportIn(BaseModel):
+    """What is wrong with an obligation: ``category`` names the kind of error and
+    ``description`` the reporter's account, 1 to 2,000 characters once trimmed. The description
+    is kept as written for the tenant and leaves the service masked for personal identifiers."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    category: ErrorCategory
+    description: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_DESCRIPTION_CHARS),
+        Field(description=f"What is wrong, 1 to {MAX_DESCRIPTION_CHARS} characters once trimmed"),
+    ]
+
+
+class ErrorReportOut(BaseModel):
+    """One error report. ``status`` is ``submitted`` until the regulatory team decides it:
+    ``confirmed`` with ``correcting_rule_version_id``, the rule version that corrects the reported
+    one (its publication reaches the obligations), or ``rejected``; ``notes`` is what the analyst
+    said. ``submitted_by`` is the user a verified token named, null when none did."""
+
+    report_id: UUID
+    obligation_id: UUID
+    business_id: UUID
+    rule_version_id: UUID
+    category: ErrorCategory
+    description: str
+    status: ErrorReportStatus
+    submitted_by: UUID | None
+    submitted_at: datetime
+    decided_at: datetime | None
+    notes: str
+    correcting_rule_version_id: UUID | None
+
+    @classmethod
+    def from_report(cls, report: ErrorReport) -> "ErrorReportOut":
+        return cls(
+            report_id=report.id.value,
+            obligation_id=report.obligation_id.value,
+            business_id=report.business_id.value,
+            rule_version_id=report.rule_version_id.value,
+            category=report.category,
+            description=report.description,
+            status=report.status,
+            submitted_by=_uuid(report.submitted_by),
+            submitted_at=report.submitted_at.astimezone(UTC),
+            decided_at=_utc(report.decided_at),
+            notes=report.notes,
+            correcting_rule_version_id=_uuid(report.correcting_rule_version_id),
+        )
+
+
+class ErrorReportCursor(BaseModel):
+    """Where a page of a tenant's error reports ends: when the last one was submitted and its
+    id."""
+
+    submitted_at: AwareDatetime
+    id: UUID
+
+
 class DataExportOut(BaseModel):
     """The obligation service's part of a tenant's data export. ``sections`` holds every section,
     an empty list when the tenant has nothing in it: ``obligations`` (every obligation, in any
-    status), ``changes`` (the change log of each) and ``comments``, each oldest first and then by
-    id. Rows carry the fields of the records under their own names, ids as strings, instants and
-    days in ISO 8601, enums as their values."""
+    status), ``changes`` (the change log of each), ``comments`` and ``error_reports`` (the errors
+    its members reported, with the decisions), each oldest first and then by id. Rows carry the
+    fields of the records under their own names, ids as strings, instants and days in ISO 8601,
+    enums as their values."""
 
     service: str
     tenant_id: UUID

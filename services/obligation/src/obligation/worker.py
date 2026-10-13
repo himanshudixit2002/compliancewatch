@@ -27,6 +27,14 @@ process that hosts several services adds to its own:
   ``CW_OBLIGATION_RULE_EVENTS_ENABLED`` (flag ``obligation.rule_events``) off it still consumes,
   so its offsets keep up, and changes nothing. What it cannot handle goes to
   ``<topic>.obligation.rules.dlq``.
+- a consumer in group ``obligation.error-decisions`` of error_report.decided
+  (``application.error_reports.ApplyErrorDecision``): the regulatory team's decision on a report
+  a tenant's member made moves the report to confirmed, with the version that corrects the
+  reported one, or rejected, with its ``error_report.decided`` audit row, on a unit of work that
+  joins the consumer's transaction. A decision delivered again finds the report decided and
+  changes nothing; one for a report the tenant has no row of is retried and then dead-lettered
+  to ``error_report.decided.obligation.error-decisions.dlq``, and one of an erased tenant is
+  only marked processed.
 - a consumer in group ``obligation.erasure`` of ``tenant.deletion.requested``
   (``py_common.erasure``): while the flag ``identity.tenant_erasure`` is off for the tenant it
   only logs ``erasure.off``; on, it checks the event with identity (one identity did not send is
@@ -55,6 +63,7 @@ from sqlalchemy import Connection, create_engine
 from sqlalchemy.pool import NullPool
 
 from cw_contracts.events.applicability_decided_v1 import ApplicabilityDecidedV1
+from cw_contracts.events.error_report_decided_v1 import ErrorReportDecidedV1
 from cw_contracts.events.rule_deadline_changed_v1 import RuleDeadlineChangedV1
 from cw_contracts.events.rule_published_v1 import RulePublishedV1
 from cw_contracts.events.rule_superseded_v1 import RuleSupersededV1
@@ -63,6 +72,7 @@ from domain_kernel.ids import BusinessId, DecisionId, EventId, RuleVersionId, Te
 from domain_kernel.predicates import Applicability
 from obligation import __version__
 from obligation.application.decisions import ApplyDecision, Decision, DecisionApplied, DecisionPlan
+from obligation.application.error_reports import ApplyErrorDecision, ErrorDecision
 from obligation.application.reminders import SendDueReminders
 from obligation.application.rule_events import (
     RuleDeadlineChanged,
@@ -74,6 +84,7 @@ from obligation.application.rule_events import (
     RuleWithdrawn,
 )
 from obligation.application.window import RollWindow
+from obligation.domain.error_reports import ErrorOutcome, ErrorReportId
 from obligation.domain.events import RescheduleReason
 from obligation.domain.ports import RuleVersionReader
 from obligation.domain.repository import RuleVersionRefs, TenantDirectory, UnitOfWorkFactory
@@ -95,12 +106,13 @@ from py_common.erasure import (
     erased_on_connection,
     erasure_component,
     erasure_switch,
+    skip_erased,
     skip_erased_write,
     verifier_from,
 )
 from py_common.events import EventMessage
 from py_common.logging import get_logger
-from py_common.outbox import read_first_store, read_then_write
+from py_common.outbox import read_first_store, read_then_write, sync_handler
 from py_common.outbox.consumer import Handler
 from py_common.runtime import (
     IST,
@@ -120,6 +132,9 @@ SUPERSEDED_TOPIC: Final = "rule.superseded"
 WITHDRAWN_TOPIC: Final = "rule.withdrawn"
 DEADLINE_TOPIC: Final = "rule.deadline_changed"
 RULE_TOPICS: Final = (PUBLISHED_TOPIC, SUPERSEDED_TOPIC, WITHDRAWN_TOPIC, DEADLINE_TOPIC)
+ERROR_DECISIONS_GROUP_ID: Final = "obligation.error-decisions"
+ERROR_DECIDED_TOPIC: Final = "error_report.decided"
+ERROR_TOPICS: Final = (ERROR_DECIDED_TOPIC,)
 SWEEP_JOB: Final = "obligation-reminder-sweep"
 WINDOW_JOB: Final = "obligation-window"
 WINDOW_AT: Final = time(2, 30, tzinfo=IST)
@@ -304,6 +319,57 @@ def rules_handler(
     return read_then_write(read, write)
 
 
+def error_decision_from(message: EventMessage) -> ErrorDecision:
+    """The decision an error_report.decided message carries; a payload its contract refuses, or
+    a message without its tenant, raises."""
+    if message.tenant_id is None:
+        raise MissingTenantError(f"{message.topic} event {message.event_id} carries no tenant")
+    payload = ErrorReportDecidedV1.model_validate(message.payload)
+    return ErrorDecision(
+        event_id=EventId(message.event_id),
+        tenant_id=TenantId(message.tenant_id),
+        report_id=ErrorReportId(payload.report_id),
+        rule_version_id=RuleVersionId(payload.rule_version_id),
+        outcome=ErrorOutcome(payload.outcome.value),
+        notes=payload.notes,
+        correcting_rule_version_id=None
+        if payload.correcting_rule_version_id is None
+        else RuleVersionId(payload.correcting_rule_version_id),
+        decided_at=payload.decided_at,
+    )
+
+
+def error_decision_handler(
+    apply: ApplyErrorDecision,
+    *,
+    units_on: UnitsOnConnection = PostgresUnitOfWorkFactory.on_connection,
+    erased_on: ErasedOn = erased_on_connection,
+) -> Handler:
+    """The handler of error_report.decided: the decision on the consumer's connection, unless
+    the report's tenant is erased here. ``units_on`` and ``erased_on`` make the units and the
+    erased markers there; tests pass the memory store's."""
+
+    def handle(message: EventMessage, connection: Connection) -> None:
+        if message.topic != ERROR_DECIDED_TOPIC:
+            log.info(
+                "obligation.event_ignored", topic=message.topic, event_id=str(message.event_id)
+            )
+            return
+        decision = error_decision_from(message)
+        applied = apply.run(decision, units_on(connection))
+        log.info(
+            "obligation.error_decision_applied",
+            event_id=str(message.event_id),
+            report_id=str(decision.report_id),
+            tenant_id=str(decision.tenant_id),
+            outcome=decision.outcome.value,
+            status=applied.report.status.value,
+            changed=applied.changed,
+        )
+
+    return sync_handler(skip_erased(ERASURE_SERVICE, handle, erased_on=erased_on))
+
+
 def sweep_job(sweep: SendDueReminders) -> Callable[[], None]:
     """One reminder sweep, logged with what it published."""
 
@@ -368,7 +434,7 @@ def components(
     erasure: Enabled | None = None,
     verifier: ErasureVerifier | None = None,
 ) -> WorkerComponents:
-    """The three consumers and, when ``CW_OBLIGATION_SWEEP_ENABLED`` is on, the reminder sweep
+    """The four consumers and, when ``CW_OBLIGATION_SWEEP_ENABLED`` is on, the reminder sweep
     and the rolling window; ``rules`` replaces the rulebook reader, ``erasure`` the flag of the
     erasure consumer and ``verifier`` identity's check."""
     if settings.obligation_store != "postgres":
@@ -404,6 +470,11 @@ def components(
                 topics=RULE_TOPICS,
                 handler=rules_handler(events),
                 store_factory=read_first_store,
+            ),
+            ConsumerComponent(
+                group_id=ERROR_DECISIONS_GROUP_ID,
+                topics=ERROR_TOPICS,
+                handler=error_decision_handler(ApplyErrorDecision()),
             ),
             erasure_component(
                 ERASURE_SERVICE,

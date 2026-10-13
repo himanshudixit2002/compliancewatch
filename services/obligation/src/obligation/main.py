@@ -3,8 +3,10 @@
 Guide section 11: wiring of interfaces to implementations happens here, never inside the layers.
 The use cases run on the Postgres unit of work (row-level security by tenant, events through the
 outbox, audit entries into ``audit.event``). The API reads a business's obligations and one
-obligation whole, and lets the tenant's members start, complete, waive, assign and comment on
-one, and hands the tenant's admins and identity the service's part of a tenant's data export;
+obligation whole, lets the tenant's members start, complete, waive, assign and comment on
+one and report an error in it (behind the flag ``obligation.error_reports``, read through
+``py_common.flags``), and hands the tenant's admins and identity the service's part of a tenant's
+data export;
 the caller and its tenant come from ``py_common.auth`` by ``CW_AUTH_MODE`` (``api.deps``).
 The writes take an Idempotency-Key, kept next to the obligations (``idempotency_key``, migration
 0005) and each key in its own short transaction. The detail reads the rulebook at
@@ -26,6 +28,7 @@ from domain_kernel.errors import DomainError, InvalidTransitionError
 from obligation import __version__
 from obligation.api.router import business_router, public_router, router
 from obligation.application.changes import ApplyDeadlineChange, CloseObligation, WithdrawRule
+from obligation.application.error_reports import ListErrorReports, ReportError
 from obligation.application.export import ExportTenantData
 from obligation.application.materialise import MaterialiseObligations
 from obligation.application.queries import ListBusinessObligations, ListObligations
@@ -38,6 +41,9 @@ from obligation.application.tracking import (
 from obligation.domain.errors import (
     AssigneeNotMemberError,
     BusinessNotFoundError,
+    ErrorReportDecidedError,
+    ErrorReportNotFoundError,
+    ErrorReportsDisabledError,
     IdentityUnavailableError,
     ObligationClosedError,
     ObligationNotFoundError,
@@ -46,8 +52,10 @@ from obligation.domain.errors import (
     ProfileUnavailableError,
     RulebookUnavailableError,
 )
+from obligation.domain.flags import FeatureFlags
 from obligation.domain.ports import ProfileNodes, RuleVersionReader, TenantMembers
 from obligation.domain.repository import UnitOfWorkFactory
+from obligation.infrastructure.flags import OpenFeatureFlags
 from obligation.infrastructure.identity_client import HttpTenantMembers
 from obligation.infrastructure.memory import MemoryStore
 from obligation.infrastructure.profile_client import HttpProfileNodes
@@ -59,6 +67,7 @@ from py_common.app import create_app, module_app
 from py_common.auth import TokenSource, service_auth_from
 from py_common.auth.fastapi import Authenticator
 from py_common.erasure import PostgresErasedTenants
+from py_common.flags import configure_flags
 from py_common.idempotency import IdempotencyStore, MemoryIdempotencyStore
 from py_common.idempotency.sqlalchemy import SqlAlchemyIdempotencyStore
 
@@ -68,6 +77,9 @@ PROBLEM_STATUS: dict[type[DomainError], int] = {
     ObligationWindowInvalidError: 422,
     ObligationNotFoundError: 404,
     BusinessNotFoundError: 404,
+    ErrorReportsDisabledError: 404,
+    ErrorReportNotFoundError: 404,
+    ErrorReportDecidedError: 409,
     ObligationClosedError: 409,
     InvalidTransitionError: 422,
     AssigneeNotMemberError: 422,
@@ -84,10 +96,15 @@ def wire(
     members: TenantMembers | None = None,
     profiles: ProfileNodes | None = None,
     token_source: TokenSource | None = None,
+    flags: FeatureFlags | None = None,
 ) -> Wiring:
     """The use cases on the store the settings name, reading the rulebook, the identity service
     and the profile service over HTTP unless ``rules``, ``members`` and ``profiles`` are
-    given."""
+    given. Without ``flags`` the process-wide OpenFeature provider is configured from the
+    settings and answers them (the report route's ``obligation.error_reports``)."""
+    if flags is None:
+        configure_flags(settings)
+        flags = OpenFeatureFlags()
     unit_of_work: UnitOfWorkFactory
     ping: Callable[[], bool]
     idempotency: IdempotencyStore
@@ -125,6 +142,8 @@ def wire(
         change_status=ChangeStatus(unit_of_work),
         assign=AssignObligation(unit_of_work, members),
         add_comment=AddComment(unit_of_work),
+        report_error=ReportError(unit_of_work, flags),
+        list_error_reports=ListErrorReports(unit_of_work),
         export_tenant_data=ExportTenantData(unit_of_work),
         erased_tenants=erased,
     )
@@ -138,13 +157,20 @@ def build_app(
     profiles: ProfileNodes | None = None,
     authenticator: Authenticator | None = None,
     token_source: TokenSource | None = None,
+    flags: FeatureFlags | None = None,
 ) -> FastAPI:
     """``authenticator`` replaces the one ``CW_AUTH_MODE`` describes and ``token_source`` the
     service client's tokens; a process that hosts identity passes identity's own. ``rules``,
-    ``members`` and ``profiles`` replace the rulebook, identity and profile clients."""
+    ``members`` and ``profiles`` replace the rulebook, identity and profile clients, and
+    ``flags`` the OpenFeature flags (tests and demos)."""
     settings = settings or ObligationSettings(service_name=SERVICE_NAME)
     wiring = wire(
-        settings, rules=rules, members=members, profiles=profiles, token_source=token_source
+        settings,
+        rules=rules,
+        members=members,
+        profiles=profiles,
+        token_source=token_source,
+        flags=flags,
     )
     app = create_app(
         service_name=SERVICE_NAME,
