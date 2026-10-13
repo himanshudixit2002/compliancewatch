@@ -248,7 +248,10 @@ request, so Unleash can turn it on without a restart). The report is kept as wri
 `error_report` (migration 0007: row-level security by tenant, an index on tenant, status and
 submission time, a check that a report is decided exactly once), and error_report.submitted
 leaves for the rulebook with the description masked for personal identifiers (the kernel's
-`mask_pii`): the rulebook, which every tenant shares, never holds a tenant's personal data. The
+`mask_pii_in`, the record patterns every log line and audit row is masked with: a lower-case PAN
+or GSTIN, a URL-encoded address and the wider phone shapes too; cut to the 2,000-character limit,
+since a token can be longer than the address it replaces): the rulebook, which every tenant
+shares, never holds a tenant's personal data, and masks the text once more on arrival. The
 worker's consumer of error_report.decided, group `obligation.error-decisions`, records the
 regulatory team's decision on the report (confirmed, with the version that corrects the reported
 one, or rejected, with the analyst's notes) with an `error_report.decided` audit row, in the

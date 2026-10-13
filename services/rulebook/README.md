@@ -409,7 +409,9 @@ A tenant's member reports an error in an obligation at the obligation service (g
 G06; behind its flag `obligation.error_reports`), which emits error_report.submitted with the
 description masked for personal identifiers. The worker always hosts the consumer of that topic in
 group `rulebook.error-reports` (`application.error_reports.IntakeErrorReport`): each report
-becomes one row of `error_report_review` (migration 0013), its id derived from the report's, so a
+becomes one row of `error_report_review` (migration 0013), its description masked once more with
+the kernel's record patterns (`mask_pii_in`, cut to the 2,000-character limit), so the rulebook
+never depends on the producer, and its id derived from the report's, so a
 redelivered or replayed event finds the row and changes nothing; a payload the contract refuses
 or a report about a version the rulebook does not hold is retried and then dead-lettered to
 `error_report.submitted.rulebook.error-reports.dlq`, and a report of an erased tenant is only
@@ -435,9 +437,11 @@ it first checks the event with identity (`GET /v1/identity/erasures/{tenant_id}`
 tenant's open deletion request, or one for the internal tenant, erases nothing and is refused (a
 `tenant.erasure_refused` audit row, dead-lettered at once); identity unreachable is retried, then
 dead-lettered. Otherwise it nulls the tenant and empties the masked text of the tenant's rows of
-`error_report_review`, keeping each decision as a fact about the rule version, and deletes nothing
-else: the rest of the rulebook is regulatory data of no tenant (documents, rules and their
-versions, citations, candidates and the review of all of them). It answers tenant.data.erased
+`error_report_review`, keeping each decision as a fact about the rule version, prunes the
+tenant's published or dead `outbox_event` rows (the error_report.decided events keyed by the
+tenant; pending ones go out with the relay), and deletes nothing else: the rest of the rulebook
+is regulatory data of no tenant (documents, rules and their versions, citations, candidates and
+the review of all of them). It answers tenant.data.erased
 (service rulebook) with the count of reviews it pseudonymised and the tables it keeps, each with
 its reason, and writes a `tenant.erased` audit row and its erased marker (`erased_tenant`,
 migration 0012), so the deletion request can complete (`infrastructure.erasure`). From then on the
