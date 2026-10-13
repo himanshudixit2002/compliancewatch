@@ -197,7 +197,8 @@ describe("FakeAuthProvider", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.kind).toBe("validation");
-    expect(providerFailureKind(result.error)).toBe("invalid_contact");
+    expect(providerFailureKind(result.error)).toBe("invalid_persona");
+    expect(result.error.problem?.title).toBe("Check the sign-in details");
     expect(result.error.fieldErrors).toEqual({
       displayName: ["Enter a display name."],
       roles: ["Choose at least one role."],

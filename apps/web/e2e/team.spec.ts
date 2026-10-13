@@ -94,8 +94,8 @@ test.describe("team", () => {
       name: "Example new analyst",
       roles: ["Analyst"],
     });
-    const row = page.locator("tbody tr").filter({ hasText: "Example new analyst" });
-    await expect(row).toContainText(email);
+    const row = page.locator("tbody tr").filter({ hasText: email });
+    await expect(row).toContainText("Example new analyst");
     await expect(row).toContainText("Analyst");
   });
 

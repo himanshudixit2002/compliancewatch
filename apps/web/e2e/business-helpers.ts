@@ -19,7 +19,9 @@ export function newTenantPersona(
     tenantKind,
     roles,
     displayName: `Example user ${suffix}`,
-    tenantId: randomUUID(),
+    // Identity keeps one internal tenant: a regulatory persona joins it, so a new tenant id
+    // is only for a business or a CA firm.
+    ...(tenantKind === "internal" ? {} : { tenantId: randomUUID() }),
   };
 }
 

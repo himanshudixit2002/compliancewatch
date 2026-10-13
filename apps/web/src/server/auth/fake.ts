@@ -283,7 +283,7 @@ export class FakeAuthProvider implements AuthProvider {
     const errors = validateFakeSignIn(input);
     if (Object.keys(errors).length > 0) {
       return Promise.resolve(
-        err(providerFailure("invalid_contact", undefined, { fieldErrors: errors })),
+        err(providerFailure("invalid_persona", undefined, { fieldErrors: errors })),
       );
     }
     const tenantId = input.tenantId?.trim() || defaultTenantId(input.tenantKind);

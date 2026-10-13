@@ -64,7 +64,7 @@ test.describe("admin home", () => {
     const sources = sidebar.getByRole("link", { name: "Sources", exact: true });
     await expect(sources).toHaveAccessibleDescription("");
     const team = sidebar.getByRole("link", { name: "Internal users", exact: true });
-    await expect(team).toHaveAccessibleDescription("Not built");
+    await expect(team).toHaveAccessibleDescription("");
     const audit = sidebar.getByRole("link", { name: "Audit trail", exact: true });
     await expect(audit).toHaveAccessibleDescription("Not built");
     const tenants = sidebar.getByRole("link", { name: "Tenants", exact: true });

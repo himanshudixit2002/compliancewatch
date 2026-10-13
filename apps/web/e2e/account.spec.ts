@@ -31,10 +31,9 @@ test.describe("account", () => {
       await expect(facts).toContainText("Mobile number");
       await expect(facts).toContainText("Account name");
     }
-    await expect(page.getByRole("link", { name: "Two-step verification" })).toHaveAttribute(
-      "href",
-      "/account/mfa",
-    );
+    await expect(
+      page.locator("[data-slot='account']").getByRole("link", { name: "Two-step verification" }),
+    ).toHaveAttribute("href", "/account/mfa");
     await expect(page.locator("main form[data-slot='sign-out']")).toHaveAttribute(
       "action",
       "/sign-out",

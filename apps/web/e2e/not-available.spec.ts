@@ -86,18 +86,18 @@ test.describe("not available yet", () => {
     checkA11y,
     signIn,
   }) => {
-    // Internal users is an admin-only tool: an analyst gets a 404 there.
+    // The audit trail waits for identity's audit route, which is on main.
     await signIn(ADMIN);
-    await page.goto("/admin/team");
-    await expect(page.getByRole("heading", { level: 1, name: "Internal users" })).toBeVisible();
+    await page.goto("/admin/audit");
+    await expect(page.getByRole("heading", { level: 1, name: "Audit trail" })).toBeVisible();
     await expect(page.getByText("Not available yet")).toBeVisible();
     await expect(
       page.getByText(
         "The backend for this screen is on main. The screen itself has not been built yet.",
       ),
     ).toBeVisible();
-    await expect(page.getByText("GET /v1/identity/users", { exact: true })).toBeVisible();
-    await expect(page.getByText("services track (WP14)").first()).toBeVisible();
+    await expect(page.getByText("GET /v1/identity/audit", { exact: true })).toBeVisible();
+    await expect(page.getByText("services track (WP17)").first()).toBeVisible();
     await expect(page.getByText("This screen waits for:")).toHaveCount(0);
     await checkA11y();
   });

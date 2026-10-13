@@ -17,7 +17,7 @@ test.describe("sign-up", () => {
     await expect(page.getByRole("heading", { level: 1, name: "Sign in" })).toBeVisible();
     await expect(page.getByText(/any six digits pass/)).toBeVisible();
     await checkA11y();
-    await page.getByLabel(/Mobile number/).fill(phone.slice(3));
+    await page.getByLabel(/Mobile number/).fill(phone);
     await page.getByRole("button", { name: "Send code" }).click();
     await expect(page.getByLabel(/^Code/)).toBeVisible();
     await expect(page.locator("[data-slot='code-sent-to']")).toContainText(phone);
@@ -103,7 +103,7 @@ test.describe("sign-up", () => {
     await expect(
       page.getByText(/Sign in with your mobile number or email address first/),
     ).toBeVisible();
-    await page.getByRole("link", { name: "Sign in" }).click();
+    await page.getByRole("main").getByRole("link", { name: "Sign in" }).click();
     await expect(page).toHaveURL(/\/sign-in$/);
     await checkA11y();
   });

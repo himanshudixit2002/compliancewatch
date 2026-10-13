@@ -113,8 +113,8 @@ describe("signIn (the development persona)", () => {
     expect(state).toEqual({
       status: "error",
       problem: {
-        type: "urn:compliancewatch:problem:web-provider-invalid-contact",
-        title: "Check the phone number or email address",
+        type: "urn:compliancewatch:problem:web-provider-invalid-persona",
+        title: "Check the sign-in details",
         correlationId: "",
       },
       fieldErrors: {

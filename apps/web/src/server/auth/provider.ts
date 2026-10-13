@@ -118,6 +118,7 @@ export type ProviderFailureKind =
   | "unavailable"
   | "invalid_link"
   | "invalid_contact"
+  | "invalid_persona"
   | "unsupported";
 
 const FAILURE_KINDS: Readonly<Record<ProviderFailureKind, Exclude<ApiErrorKind, "network">>> = {
@@ -127,6 +128,7 @@ const FAILURE_KINDS: Readonly<Record<ProviderFailureKind, Exclude<ApiErrorKind, 
   unavailable: "unavailable",
   invalid_link: "unauthenticated",
   invalid_contact: "validation",
+  invalid_persona: "validation",
   unsupported: "bad_request",
 };
 
@@ -137,6 +139,7 @@ const FAILURE_TITLES: Readonly<Record<ProviderFailureKind, string>> = {
   unavailable: "The sign-in provider is not available right now",
   invalid_link: "That sign-in link is not valid any more",
   invalid_contact: "Check the phone number or email address",
+  invalid_persona: "Check the sign-in details",
   unsupported: "The sign-in provider cannot do this",
 };
 

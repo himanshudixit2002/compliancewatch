@@ -78,7 +78,10 @@ test.describe("two-step verification", () => {
     await signIn(OWNER);
     await page.goto("/account");
     await expect(page.locator("dl[data-slot='key-value']")).toContainText("Not verified");
-    await page.getByRole("link", { name: "Two-step verification" }).click();
+    await page
+      .locator("[data-slot='account']")
+      .getByRole("link", { name: "Two-step verification" })
+      .click();
     await expect(page).toHaveURL(/\/account\/mfa$/);
     await expect(page.getByText(/Your roles do not require one/)).toBeVisible();
     await checkA11y();
