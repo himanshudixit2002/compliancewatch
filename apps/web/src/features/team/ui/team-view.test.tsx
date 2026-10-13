@@ -16,6 +16,7 @@ const MEMBERS: TeamMember[] = [
     id: "u2",
     name: "Example staff member",
     email: "staff@example.com",
+    phone: "",
     roles: [],
     status: "disabled",
     joinedAt: "2000-05-02T05:00:00Z",
@@ -24,6 +25,7 @@ const MEMBERS: TeamMember[] = [
     id: "u1",
     name: "Example owner",
     email: "owner@example.com",
+    phone: "+910000000001",
     roles: ["owner", "compliance_lead"],
     status: "active",
     joinedAt: "2000-04-10T05:00:00Z",
@@ -71,6 +73,45 @@ describe("TeamView", () => {
     );
     const stats = container.querySelectorAll("[data-slot='stat-card']");
     expect(stats[2]?.getAttribute("data-tone")).toBe("neutral");
+  });
+
+  it("adds the invite dialog and each active member's controls for a tenant admin", async () => {
+    const idle = () => Promise.resolve({ status: "idle" as const });
+    const { container } = render(
+      <TeamView
+        title="Team"
+        members={MEMBERS}
+        crumbs={CRUMBS}
+        tabs={TABS}
+        management={{
+          screenId: "owner.settings.team",
+          currentUserId: "u1",
+          fields: {
+            screen: "screen",
+            userId: "userId",
+            contact: "contact",
+            displayName: "displayName",
+            roles: "roles",
+            reason: "reason",
+          },
+          roles: [{ value: "owner", label: "Owner", needsMfa: false }],
+          lastAdminId: "u1",
+          billingHref: "/settings/billing",
+          actions: { invite: idle, changeRoles: idle, disable: idle },
+          mfaNote: "Every internal role signs in with a second factor.",
+        }}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Invite" })).toBeDefined();
+    expect(screen.getByText("Every internal role signs in with a second factor.")).toBeDefined();
+    const rows = container.querySelectorAll("tbody tr");
+    expect(rows[0]?.textContent).toContain("(you)");
+    expect(rows[0]?.querySelector("[data-slot='member-actions']")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Change the roles of Example owner" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Disable Example owner" })).toBeNull();
+    expect(rows[1]?.querySelector("[data-slot='member-actions']")).toBeNull();
+    expect(rows[1]?.textContent).toContain("Disabled");
+    expect(await runAxe(container)).toHaveNoViolations();
   });
 
   it("explains an empty team instead of an empty table", async () => {

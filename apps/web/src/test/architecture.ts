@@ -233,7 +233,6 @@ export const PARKED_FEATURES: Readonly<Record<string, readonly string[]>> = {
   "admin-tenants": ["admin.tenants"],
   "settings-activity": ["owner.settings.activity"],
   "settings-data-rights": ["owner.settings.data-rights"],
-  team: ["owner.settings.team"],
 };
 
 /** The feature folders (their names under features/) that a file of the app layer imports. */

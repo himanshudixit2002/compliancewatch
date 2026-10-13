@@ -12,15 +12,18 @@ export interface SettingsHeaderProps {
   crumbs: readonly Crumb[];
   /** The settings pages the session may open, for the row of tabs. */
   tabs: readonly NavLink[];
+  /** Buttons or dialogs aligned to the end of the header (a team page's invite). */
+  actions?: ReactNode;
 }
 
 /** The top of every settings page: breadcrumbs back to Settings, the one h1, and the tabs. */
-export function SettingsHeader({ title, description, crumbs, tabs }: SettingsHeaderProps) {
+export function SettingsHeader({ title, description, crumbs, tabs, actions }: SettingsHeaderProps) {
   return (
     <div data-slot="settings-header" className="flex flex-col gap-4">
       <PageHeader
         title={title}
         description={description}
+        actions={actions}
         breadcrumbs={<Breadcrumbs crumbs={crumbs} />}
       />
       <SectionNav items={tabs} label={t("settings.tabs")} />
