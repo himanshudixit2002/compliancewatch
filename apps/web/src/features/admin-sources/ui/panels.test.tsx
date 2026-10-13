@@ -42,7 +42,7 @@ describe("SettingsPanel", () => {
     await user.click(screen.getByRole("checkbox", { name: /^Paused/ }));
     await user.type(screen.getByLabelText(/^Why/), "Example reason of enough length");
     await user.click(save);
-    const dialog = screen.getByRole("dialog", { name: "Save these settings?" });
+    const dialog = await screen.findByRole("dialog", { name: "Save these settings?" });
     await user.click(within(dialog).getByRole("button", { name: "Save the settings" }));
     await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Saved: paused."));
     expect(sent).toEqual([
@@ -80,7 +80,7 @@ describe("SettingsPanel", () => {
     await user.type(screen.getByLabelText(/^Why/), "Example reason of enough length");
     await user.click(screen.getByRole("button", { name: "Save the settings" }));
     await user.click(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Save the settings" }),
+      within(await screen.findByRole("dialog")).getByRole("button", { name: "Save the settings" }),
     );
     await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Saved: cadence."));
     expect(action.mock.calls[0]?.[1].get("rendered_cadence_seconds")).toBe("7200");
@@ -97,7 +97,7 @@ describe("SettingsPanel", () => {
     await user.type(screen.getByLabelText(/^Why/), "Example second reason, long enough");
     await user.click(screen.getByRole("button", { name: "Save the settings" }));
     await user.click(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Save the settings" }),
+      within(await screen.findByRole("dialog")).getByRole("button", { name: "Save the settings" }),
     );
     await waitFor(() => expect(action).toHaveBeenCalledTimes(2));
     const second = action.mock.calls[1]?.[1];
@@ -121,7 +121,7 @@ describe("SettingsPanel", () => {
     await user.type(screen.getByLabelText(/^Why/), "Example reason of enough length");
     await user.click(screen.getByRole("button", { name: "Save the settings" }));
     await user.click(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Save the settings" }),
+      within(await screen.findByRole("dialog")).getByRole("button", { name: "Save the settings" }),
     );
     await waitFor(() => expect(screen.getByText("Example cadence message")).toBeDefined());
     expect(screen.getByText("Example name message")).toBeDefined();
@@ -149,7 +149,7 @@ describe("FetchPanel", () => {
     expect(container.textContent).toContain("off by default");
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Fetch now" }));
-    const dialog = screen.getByRole("dialog", { name: "Fetch this source now?" });
+    const dialog = await screen.findByRole("dialog", { name: "Fetch this source now?" });
     await user.type(within(dialog).getByRole("textbox"), "Example reason of enough length");
     await user.click(within(dialog).getByRole("button", { name: "Fetch now" }));
     await waitFor(() =>
@@ -247,7 +247,7 @@ describe("UploadPanel", () => {
     const user = userEvent.setup();
     await fill(user, PDF());
     await user.click(screen.getByRole("button", { name: "Upload the document" }));
-    const dialog = screen.getByRole("dialog", { name: "Upload example.pdf?" });
+    const dialog = await screen.findByRole("dialog", { name: "Upload example.pdf?" });
     expect(dialog.textContent).toContain("Example statutes");
     await user.click(within(dialog).getByRole("button", { name: "Upload the document" }));
     await waitFor(() =>
@@ -306,7 +306,9 @@ describe("UploadPanel", () => {
     await fill(user, PDF());
     await user.click(screen.getByRole("button", { name: "Upload the document" }));
     await user.click(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Upload the document" }),
+      within(await screen.findByRole("dialog")).getByRole("button", {
+        name: "Upload the document",
+      }),
     );
     await waitFor(() => expect(screen.getByText("No answer came back")).toBeDefined(), {
       timeout: 5000,

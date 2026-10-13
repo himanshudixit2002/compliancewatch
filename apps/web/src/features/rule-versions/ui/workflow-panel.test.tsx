@@ -41,7 +41,7 @@ describe("WorkflowPanel", () => {
     expect(screen.getByText(/version read does not carry them yet/)).toBeDefined();
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Submit for review" }));
-    const dialog = screen.getByRole("dialog", { name: "Submit for review: version 1" });
+    const dialog = await screen.findByRole("dialog", { name: "Submit for review: version 1" });
     expect(dialog.textContent).toContain("starts a new review round");
     await user.click(within(dialog).getByRole("checkbox"));
     await user.type(within(dialog).getByLabelText(/Note/), "Example note");
@@ -84,13 +84,17 @@ describe("WorkflowPanel", () => {
     expect(screen.getByText(/This one is high impact/)).toBeDefined();
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Approve" }));
-    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Approve" }));
+    await user.click(
+      within(await screen.findByRole("dialog")).getByRole("button", { name: "Approve" }),
+    );
     await waitFor(() => expect(screen.getByText("Example analyst (you)")).toBeDefined());
     expect(screen.getByRole("status").textContent).toContain(
       "1 of 2 approvals in this round. It needs a second approver: a different reviewer or admin.",
     );
     await user.click(screen.getByRole("button", { name: "Approve" }));
-    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Approve" }));
+    await user.click(
+      within(await screen.findByRole("dialog")).getByRole("button", { name: "Approve" }),
+    );
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("req-example-3"));
     const step = container.querySelector('[data-step="approve"]') as HTMLElement;
     expect(within(step).getByText("Example approver already approved")).toBeDefined();
@@ -115,7 +119,7 @@ describe("WorkflowPanel", () => {
     renderPanel(action, { steps: ["approve", "return"] });
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Return to draft" }));
-    const dialog = screen.getByRole("dialog");
+    const dialog = await screen.findByRole("dialog");
     const confirm = within(dialog).getByRole("button", { name: "Return to draft" });
     await user.type(within(dialog).getByRole("textbox"), "Too short");
     expect((confirm as HTMLButtonElement).disabled).toBe(true);
@@ -181,7 +185,9 @@ describe("WorkflowPanel", () => {
     );
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Publish" }));
-    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Publish" }));
+    await user.click(
+      within(await screen.findByRole("dialog")).getByRole("button", { name: "Publish" }),
+    );
     await waitFor(() => expect(screen.getByRole("alert").textContent).toBe("Example note error"));
   });
 });

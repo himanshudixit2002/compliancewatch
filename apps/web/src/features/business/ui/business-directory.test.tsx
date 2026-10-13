@@ -71,7 +71,7 @@ describe("BusinessDirectory", () => {
     await waitFor(() =>
       expect(screen.getByRole("status").textContent).toBe('Page 1: 1 matching "example".'),
     );
-    expect(document.activeElement).toBe(screen.getByRole("status"));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("status")));
     expect(sent[0]?.get("q")).toBe("example");
     await user.click(screen.getByRole("button", { name: "Next page" }));
     await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Page 2"));

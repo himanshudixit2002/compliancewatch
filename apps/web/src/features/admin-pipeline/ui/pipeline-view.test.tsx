@@ -296,7 +296,7 @@ describe("OutboxTable", () => {
     expect(row?.textContent).toContain("Example broker error");
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: /^Requeue/ }));
-    const dialog = screen.getByRole("dialog", { name: "Requeue this document.parsed row?" });
+    const dialog = await screen.findByRole("dialog", { name: "Requeue this document.parsed row?" });
     await user.type(within(dialog).getByRole("textbox"), "Example cause is fixed now");
     await user.click(within(dialog).getByRole("button", { name: "Requeue" }));
     await waitFor(() =>

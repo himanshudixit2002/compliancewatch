@@ -153,7 +153,9 @@ describe("TaskPanel", () => {
     expect(submit.disabled).toBe(true);
     await user.type(screen.getByLabelText(/^Why/), "Example reason of enough length");
     await user.click(submit);
-    const dialog = screen.getByRole("dialog", { name: "Resolve the task on Example notice 1?" });
+    const dialog = await screen.findByRole("dialog", {
+      name: "Resolve the task on Example notice 1?",
+    });
     expect(dialog.textContent).toContain("clauses in it: 2");
     await user.click(within(dialog).getByRole("button", { name: "Resolve with this transcript" }));
     await waitFor(() =>
@@ -191,9 +193,11 @@ describe("TaskPanel", () => {
     await user.selectOptions(screen.getByLabelText(/^Its type/), "circular");
     await user.type(screen.getByLabelText(/^Why/), "Example reason of enough length");
     await user.click(screen.getByRole("button", { name: "Resolve the triage" }));
-    expect(screen.getByRole("dialog").textContent).toContain("extracts its rule candidate");
+    expect((await screen.findByRole("dialog")).textContent).toContain(
+      "extracts its rule candidate",
+    );
     await user.click(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Resolve the triage" }),
+      within(await screen.findByRole("dialog")).getByRole("button", { name: "Resolve the triage" }),
     );
     await waitFor(() => expect(screen.getByText("The task is closed already")).toBeDefined());
     expect(screen.getByText("Example type message")).toBeDefined();
@@ -201,11 +205,13 @@ describe("TaskPanel", () => {
     await user.click(screen.getByRole("radio", { name: "A regulator's document" }));
     await user.selectOptions(screen.getByLabelText(/^Its type/), "statute");
     await user.click(screen.getByRole("button", { name: "Resolve the triage" }));
-    expect(screen.getByRole("dialog").textContent).toContain("keeps it for reference");
-    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
+    expect((await screen.findByRole("dialog")).textContent).toContain("keeps it for reference");
+    await user.click(
+      within(await screen.findByRole("dialog")).getByRole("button", { name: "Cancel" }),
+    );
     await user.click(screen.getByRole("radio", { name: "Not a regulatory document" }));
     await user.click(screen.getByRole("button", { name: "Resolve the triage" }));
-    expect(screen.getByRole("dialog").textContent).toContain("set aside");
+    expect((await screen.findByRole("dialog")).textContent).toContain("set aside");
   });
 
   it("dismisses a task with a reason", async () => {
@@ -221,7 +227,9 @@ describe("TaskPanel", () => {
     );
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Dismiss the task" }));
-    const dialog = screen.getByRole("dialog", { name: "Dismiss the task on Example notice 1?" });
+    const dialog = await screen.findByRole("dialog", {
+      name: "Dismiss the task on Example notice 1?",
+    });
     expect(dialog.textContent).toContain("held for triage");
     await user.type(within(dialog).getByRole("textbox"), "Example duplicate of another notice");
     await user.click(within(dialog).getByRole("button", { name: "Dismiss the task" }));
@@ -242,7 +250,7 @@ describe("TaskPanel", () => {
     );
     await user.click(screen.getAllByRole("button", { name: "Dismiss the task" })[1] as HTMLElement);
     expect(
-      screen.getByRole("dialog", { name: "Dismiss the task on Example two?" }).textContent,
+      (await screen.findByRole("dialog", { name: "Dismiss the task on Example two?" })).textContent,
     ).toContain("unread by any parser");
   });
 });

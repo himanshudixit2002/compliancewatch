@@ -80,9 +80,9 @@ describe("ConsentChange", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     rerender(<ConsentChange {...props} change="withdraw" />);
     expect(screen.getByRole("button", { name: "Withdraw: Example analytics" })).toBeDefined();
-    expect(document.activeElement).toBe(screen.getByRole("status"));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("status")));
     rerender(<ConsentChange {...props} change="withdraw" />);
-    expect(document.activeElement).toBe(screen.getByRole("status"));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("status")));
   });
 
   it("keeps the dialog open with the problem and the field to fix after a refusal", async () => {

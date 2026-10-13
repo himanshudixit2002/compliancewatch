@@ -63,7 +63,7 @@ describe("BulkPanel", () => {
     await user.click(
       screen.getByRole("button", { name: "Send the change card to 2 affected businesses" }),
     );
-    const dialog = screen.getByRole("dialog", { name: "Send the change card?" });
+    const dialog = await screen.findByRole("dialog", { name: "Send the change card?" });
     expect(dialog.textContent).toContain("nobody gets it twice");
     await user.click(within(dialog).getByRole("button", { name: "Send the change card" }));
     await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Example sent."));
@@ -77,7 +77,9 @@ describe("BulkPanel", () => {
       screen.getByRole("button", { name: "Send the change card to 2 affected businesses" }),
     );
     await user.click(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Send the change card" }),
+      within(await screen.findByRole("dialog")).getByRole("button", {
+        name: "Send the change card",
+      }),
     );
     await waitFor(() =>
       expect(screen.getByRole("status").textContent).toBe("Example already sent."),
@@ -107,7 +109,9 @@ describe("BulkPanel", () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: /Send the change card/ }));
     await user.click(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Send the change card" }),
+      within(await screen.findByRole("dialog")).getByRole("button", {
+        name: "Send the change card",
+      }),
     );
     await waitFor(() => expect(screen.getByText("No answer arrived")).toBeDefined());
     await user.click(screen.getByRole("button", { name: "Try again" }));
@@ -129,7 +133,9 @@ describe("BulkPanel", () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: /Send the change card/ }));
     await user.click(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Send the change card" }),
+      within(await screen.findByRole("dialog")).getByRole("button", {
+        name: "Send the change card",
+      }),
     );
     await waitFor(() => expect(screen.getByText("Example bulk off")).toBeDefined());
     expect(screen.getByText("req-example-8")).toBeDefined();

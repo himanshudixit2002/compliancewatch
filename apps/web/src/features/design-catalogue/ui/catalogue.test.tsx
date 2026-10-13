@@ -45,7 +45,7 @@ describe("Catalogue", () => {
     const user = userEvent.setup();
     render(<Catalogue />);
     await user.click(screen.getByRole("button", { name: "Open dialog" }));
-    expect(screen.getByRole("dialog", { name: "Example dialog" })).toBeDefined();
+    expect(await screen.findByRole("dialog", { name: "Example dialog" })).toBeDefined();
     await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: "Open confirm dialog" }));
     await user.click(screen.getByRole("button", { name: "Delete" }));
@@ -59,7 +59,7 @@ describe("Catalogue", () => {
       await user.click(screen.getByRole("button", { name }));
     }
     await user.click(screen.getByRole("button", { name: "Open sheet" }));
-    expect(screen.getByRole("dialog", { name: "Example sheet" })).toBeDefined();
+    expect(await screen.findByRole("dialog", { name: "Example sheet" })).toBeDefined();
   });
 
   it("selects a day on the calendar", async () => {

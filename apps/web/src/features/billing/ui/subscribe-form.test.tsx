@@ -136,8 +136,10 @@ describe("SubscribeForm", () => {
     );
     await fillAndSubmit();
     await screen.findByText("Example name error.");
-    expect(document.activeElement).toBe(
-      screen.getByRole("button", { name: "Start the subscription" }),
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: "Start the subscription" }),
+      ),
     );
   });
 

@@ -66,7 +66,7 @@ describe("CandidateDecisions", () => {
       EXAMPLE_OTHER_VERSION_ID,
     );
     await user.click(submit);
-    const dialog = screen.getByRole("dialog", {
+    const dialog = await screen.findByRole("dialog", {
       name: "Approve Extends deadline: Form EXAMPLE-1?",
     });
     expect(dialog.textContent).toContain(
@@ -109,7 +109,9 @@ describe("CandidateDecisions", () => {
     await user.selectOptions(screen.getByLabelText(/^Why reject/), "duplicate");
     await user.type(screen.getAllByLabelText(/^Note/)[1] as HTMLElement, "Example note");
     await user.click(submit);
-    const dialog = screen.getByRole("dialog", { name: "Reject Extends deadline: Form EXAMPLE-1?" });
+    const dialog = await screen.findByRole("dialog", {
+      name: "Reject Extends deadline: Form EXAMPLE-1?",
+    });
     expect(dialog.textContent).toContain("rejected (A duplicate)");
     await user.click(within(dialog).getByRole("button", { name: "Reject the candidate" }));
     await waitFor(() => expect(screen.getByText("Example candidate closed")).toBeDefined());
@@ -133,7 +135,9 @@ describe("CandidateDecisions", () => {
     await user.selectOptions(screen.getByLabelText(/^Why reject/), "duplicate");
     await user.click(screen.getByRole("button", { name: "Reject the candidate" }));
     await user.click(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Reject the candidate" }),
+      within(await screen.findByRole("dialog")).getByRole("button", {
+        name: "Reject the candidate",
+      }),
     );
     await waitFor(() =>
       expect(screen.getByRole("status").textContent).toBe("Example already rejected."),
@@ -159,7 +163,7 @@ describe("CandidateDecisions", () => {
       EXAMPLE_VERSION_ID,
     );
     await user.click(screen.getByRole("button", { name: "Approve the candidate" }));
-    const dialog = screen.getByRole("dialog");
+    const dialog = await screen.findByRole("dialog");
     expect(dialog.textContent).toContain("to the aligned entity");
     await user.click(within(dialog).getByRole("button", { name: "Approve the candidate" }));
     await waitFor(() => expect(screen.getByText("Example refused")).toBeDefined());

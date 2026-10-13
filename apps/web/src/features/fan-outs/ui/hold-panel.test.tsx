@@ -49,7 +49,7 @@ describe("HoldPanel", () => {
     expect(screen.getByText("No hold is set: fan-outs run as rules are published.")).toBeDefined();
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Hold every fan-out" }));
-    const dialog = screen.getByRole("dialog", { name: "Hold every fan-out?" });
+    const dialog = await screen.findByRole("dialog", { name: "Hold every fan-out?" });
     const confirm = within(dialog).getByRole("button", { name: "Hold every fan-out" });
     await user.type(within(dialog).getByRole("textbox"), "Too short");
     expect((confirm as HTMLButtonElement).disabled).toBe(true);
@@ -74,7 +74,7 @@ describe("HoldPanel", () => {
     render(<HoldPanel hold={HELD} canControl action={action} />);
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Release the hold" }));
-    const dialog = screen.getByRole("dialog", { name: "Release the hold?" });
+    const dialog = await screen.findByRole("dialog", { name: "Release the hold?" });
     await user.type(within(dialog).getByRole("textbox"), "Example deploy finished");
     await user.click(within(dialog).getByRole("button", { name: "Release the hold" }));
     await waitFor(() => expect(screen.getByText("Example engine unavailable")).toBeDefined());

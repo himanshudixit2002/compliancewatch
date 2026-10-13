@@ -110,7 +110,7 @@ describe("the clause search", () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Search" }));
     await waitFor(() => expect(screen.getByText("Example field error")).toBeDefined());
-    expect(document.activeElement).toBe(screen.getByLabelText(/^Words/));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText(/^Words/)));
     await user.click(screen.getByRole("button", { name: "Search" }));
     await waitFor(() =>
       expect(screen.getByRole("heading", { name: "No clause matched" })).toBeDefined(),

@@ -26,7 +26,7 @@ describe("RollbackPanel", () => {
     expect(await runAxe(container)).toHaveNoViolations();
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Roll back this version" }));
-    const dialog = screen.getByRole("dialog", { name: "Roll back example_rule v2?" });
+    const dialog = await screen.findByRole("dialog", { name: "Roll back example_rule v2?" });
     expect(dialog.textContent).toContain("It cannot be undone.");
     expect(dialog.getAttribute("data-destructive")).toBe("true");
     const confirm = within(dialog).getByRole("button", { name: "Withdraw the version" });
@@ -56,7 +56,7 @@ describe("RollbackPanel", () => {
     );
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Roll back this version" }));
-    const dialog = screen.getByRole("dialog");
+    const dialog = await screen.findByRole("dialog");
     await user.type(within(dialog).getByRole("textbox"), "Example wrong due date");
     await user.click(within(dialog).getByRole("button", { name: "Withdraw the version" }));
     await waitFor(() => expect(screen.getByText("Example version is not published")).toBeDefined());

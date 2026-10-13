@@ -139,7 +139,7 @@ describe("DocumentView", () => {
     await user.selectOptions(within(panel).getByLabelText(/^Read it as/), "press_release");
     await user.type(within(panel).getByLabelText(/^Why/), "Example reason of enough length");
     await user.click(within(panel).getByRole("button", { name: "Retry the document" }));
-    const dialog = screen.getByRole("dialog", { name: "Retry Example notice 1?" });
+    const dialog = await screen.findByRole("dialog", { name: "Retry Example notice 1?" });
     expect(dialog.textContent).toContain("as a Press release");
     await user.click(within(dialog).getByRole("button", { name: "Retry the document" }));
     await waitFor(() =>
@@ -200,7 +200,9 @@ describe("DocumentView", () => {
     const retry = async () => {
       await user.click(within(panel).getByRole("button", { name: "Retry the document" }));
       await user.click(
-        within(screen.getByRole("dialog")).getByRole("button", { name: "Retry the document" }),
+        within(await screen.findByRole("dialog")).getByRole("button", {
+          name: "Retry the document",
+        }),
       );
     };
     await user.type(within(panel).getByLabelText(/^Why/), "Example reason of enough length");
@@ -248,6 +250,6 @@ describe("DocumentView", () => {
     expect(within(panel).getByText(/No rule is extracted from this type/)).toBeDefined();
     await user.type(within(panel).getByLabelText(/^Why/), "Example reason of enough length");
     await user.click(within(panel).getByRole("button", { name: "Retry the document" }));
-    expect(screen.getByRole("dialog").textContent).toContain("from Extract");
+    expect((await screen.findByRole("dialog")).textContent).toContain("from Extract");
   });
 });

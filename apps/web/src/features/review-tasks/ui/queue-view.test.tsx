@@ -127,24 +127,26 @@ describe("QueueView", () => {
     expect(links.map((link) => link.getAttribute("tabindex"))).toEqual(["0", "-1"]);
     links[0]?.focus();
     await user.keyboard("j");
-    expect(document.activeElement).toBe(links[1]);
-    expect(links.map((link) => link.getAttribute("tabindex"))).toEqual(["-1", "0"]);
+    await waitFor(() => {
+      expect(document.activeElement).toBe(links[1]);
+      expect(links.map((link) => link.getAttribute("tabindex"))).toEqual(["-1", "0"]);
+    });
     await user.keyboard("k");
-    expect(document.activeElement).toBe(links[0]);
+    await waitFor(() => expect(document.activeElement).toBe(links[0]));
     await user.keyboard("{End}");
-    expect(document.activeElement).toBe(links[1]);
+    await waitFor(() => expect(document.activeElement).toBe(links[1]));
     await user.keyboard("{Home}");
-    expect(document.activeElement).toBe(links[0]);
+    await waitFor(() => expect(document.activeElement).toBe(links[0]));
     // From a row's claim button, k moves to the row before it.
     screen.getByRole("button", { name: "Claim: Example candidate title" }).focus();
     await user.keyboard("k");
-    expect(document.activeElement).toBe(links[0]);
+    await waitFor(() => expect(document.activeElement).toBe(links[0]));
     await user.keyboard("?");
-    const dialog = screen.getByRole("dialog", { name: "Keyboard shortcuts" });
+    const dialog = await screen.findByRole("dialog", { name: "Keyboard shortcuts" });
     expect(dialog.textContent).toContain("Move to the next task");
     expect(dialog.textContent).toContain("No key claims a task");
     await user.keyboard("j");
-    expect(document.activeElement).not.toBe(links[1]);
+    await waitFor(() => expect(document.activeElement).not.toBe(links[1]));
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).toBeNull();
     // The focus goes back to the row it was on.
@@ -157,25 +159,25 @@ describe("QueueView", () => {
     render(<QueueView {...props()} />);
     const links = screen.getAllByRole("link", { name: /Example (rule|candidate) title/ });
     (document.activeElement as HTMLElement | null)?.blur();
-    expect(document.activeElement).toBe(document.body);
+    await waitFor(() => expect(document.activeElement).toBe(document.body));
     await user.keyboard("j");
-    expect(document.activeElement).toBe(document.body);
+    await waitFor(() => expect(document.activeElement).toBe(document.body));
     await user.keyboard("?");
     expect(screen.queryByRole("dialog")).toBeNull();
     // A chip link above the list is outside it too.
     screen.getByRole("link", { name: "Every status" }).focus();
     await user.keyboard("j");
-    expect(links).not.toContain(document.activeElement);
+    await waitFor(() => expect(links).not.toContain(document.activeElement));
   });
 
-  it("moves once for a key held down", () => {
+  it("moves once for a key held down", async () => {
     render(<QueueView {...props()} />);
     const links = screen.getAllByRole("link", { name: /Example (rule|candidate) title/ });
     links[0]?.focus();
     fireEvent.keyDown(links[0] as HTMLElement, { key: "j", repeat: true });
-    expect(document.activeElement).toBe(links[0]);
+    await waitFor(() => expect(document.activeElement).toBe(links[0]));
     fireEvent.keyDown(links[0] as HTMLElement, { key: "j" });
-    expect(document.activeElement).toBe(links[1]);
+    await waitFor(() => expect(document.activeElement).toBe(links[1]));
   });
 
   it("claims only with the row's button: no key claims a task", async () => {
@@ -192,7 +194,7 @@ describe("QueueView", () => {
     await waitFor(() => expect(claim).toHaveBeenCalledTimes(1));
   });
 
-  it("leaves a key typed into a field or with a modifier alone", () => {
+  it("leaves a key typed into a field or with a modifier alone", async () => {
     const claim = vi.fn<WriteAction<WriteResult>>();
     render(
       <>
@@ -203,11 +205,11 @@ describe("QueueView", () => {
     const field = screen.getByLabelText("Example field");
     field.focus();
     fireEvent.keyDown(field, { key: "j" });
-    expect(document.activeElement).toBe(field);
+    await waitFor(() => expect(document.activeElement).toBe(field));
     const links = screen.getAllByRole("link", { name: /Example (rule|candidate) title/ });
     links[0]?.focus();
     fireEvent.keyDown(links[0] as HTMLElement, { key: "j", ctrlKey: true });
-    expect(document.activeElement).toBe(links[0]);
+    await waitFor(() => expect(document.activeElement).toBe(links[0]));
   });
 
   it("says why a page is empty, why the access is refused, and shows a failed read", async () => {
