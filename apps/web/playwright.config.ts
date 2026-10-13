@@ -9,7 +9,10 @@ import { defineConfig, devices } from "@playwright/test";
  * and the web.publish_actions, web.admin_rulebook_writes and web.qa_enabled flags on (their
  * overrides count in local and test only), so the rule version specs can cite, submit, approve and
  * return drafts, the review specs can decide entity groups and relation candidates, and the ask
- * specs can ask.
+ * specs can ask. The /admin allow-list is set (10.0.0.0/8, the proxy headers trusted) and every
+ * request of the browser projects claims an address inside it, so the gate runs for real and
+ * admin-allowlist.spec.ts can open a context from outside; /me is re-read every two seconds, so
+ * revocation.spec.ts sees a disabled colleague signed out within a wait it can afford.
  *
  * Three projects:
  *   chromium     every spec but e2e/product, against the services `make web-stack` starts (`make
@@ -36,6 +39,12 @@ const PORT = Number(process.env.PORT ?? 3000);
 const BASE_URL = `http://localhost:${PORT}`;
 const CI = process.env.CI !== undefined && process.env.CI !== "" && process.env.CI !== "false";
 const E2E_SESSION_SECRET = Buffer.alloc(32, "e2e").toString("base64");
+
+/** The /admin allow-list the e2e server runs with, and the address every request claims. */
+export const E2E_ADMIN_ALLOWLIST = "10.0.0.0/8";
+export const E2E_CLIENT_ADDRESS = "10.0.0.7";
+/** How often the proxy re-reads /me in the e2e run, so a revocation shows within seconds. */
+const E2E_RECHECK_SECONDS = "2";
 
 /** The product's internal listener, when the product project is the one being run. */
 const PRODUCT_URL = process.env.CW_E2E_PRODUCT_URL?.trim().replace(/\/+$/, "") || undefined;
@@ -80,7 +89,14 @@ export default defineConfig({
   forbidOnly: CI,
   retries: CI ? 1 : 0,
   reporter: CI ? [["list"], ["html", { open: "never" }]] : "list",
-  use: { baseURL: BASE_URL, trace: "on-first-retry" },
+  // Every request names a client address inside the allow-list the server is started with
+  // (below), so the /admin gate runs for real; admin-allowlist.spec.ts opens a context from
+  // outside it.
+  use: {
+    baseURL: BASE_URL,
+    trace: "on-first-retry",
+    extraHTTPHeaders: { "x-forwarded-for": E2E_CLIENT_ADDRESS },
+  },
   projects: [
     { name: "stack-guard", testMatch: /stack-guard\.setup\.ts$/ },
     {
@@ -107,6 +123,13 @@ export default defineConfig({
       CW_WEB_FLAG_PUBLISH_ACTIONS: process.env.CW_WEB_FLAG_PUBLISH_ACTIONS ?? "true",
       CW_WEB_FLAG_ADMIN_RULEBOOK_WRITES: process.env.CW_WEB_FLAG_ADMIN_RULEBOOK_WRITES ?? "true",
       CW_WEB_FLAG_QA_ENABLED: process.env.CW_WEB_FLAG_QA_ENABLED ?? "true",
+      // The /admin allow-list and the proxy headers it reads (the chromium project's requests
+      // all carry a client address inside the list), and the re-read interval a revocation
+      // spec waits for.
+      CW_WEB_ADMIN_IP_ALLOWLIST: process.env.CW_WEB_ADMIN_IP_ALLOWLIST ?? E2E_ADMIN_ALLOWLIST,
+      CW_WEB_TRUST_FORWARDED_IP: process.env.CW_WEB_TRUST_FORWARDED_IP ?? "true",
+      CW_WEB_SESSION_RECHECK_SECONDS:
+        process.env.CW_WEB_SESSION_RECHECK_SECONDS ?? E2E_RECHECK_SECONDS,
       ...productServiceUrls(),
     },
   },
