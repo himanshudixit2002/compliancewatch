@@ -193,6 +193,11 @@ def test_the_list_pages_and_searches_by_name_or_id(client: TestClient, setup: Se
     foreign = client.get(TENANTS, params={"cursor": "bm90LWEtY3Vyc29y"}, headers=setup.admin)
     assert foreign.status_code == 422
     assert foreign.json()["type"].endswith(":pagination-cursor-invalid")
+    largest = client.get(TENANTS, params={"limit": 200}, headers=setup.admin)
+    assert largest.status_code == 200, "a full page reads one row past it"
+    assert len(largest.json()["items"]) == 3
+    too_many = client.get(TENANTS, params={"limit": 201}, headers=setup.admin)
+    assert too_many.status_code == 422
 
 
 def test_the_admin_reads_one_tenant_and_404_for_an_unknown_id(

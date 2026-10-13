@@ -342,7 +342,7 @@ def test_running_the_file_again_changes_nothing_and_cuts_a_widened_role_back(
 DIRECTORY_ROLE = "cw_identity_directory"
 PROFILE_DIRECTORY_ROLE = "cw_profile_directory"
 TENANT_DIRECTORY = "SELECT * FROM identity.tenant_directory(:q, :after, :lim, :only)"
-ATTRIBUTE_USAGE = "SELECT key, state, count FROM profile.attribute_usage()"
+ATTRIBUTE_USAGE = "SELECT key, state, count AS holders FROM profile.attribute_usage()"
 PROFILE_TENANTS = "SELECT tenant_id FROM profile.tenant_directory()"
 
 
@@ -525,7 +525,7 @@ def test_the_profile_directory_counts_attributes_and_lists_tenants_for_profile_o
         _insert_node(connection, traders, {key: "known"})
         _insert_node(connection, stores, {key: "known", f"{key}_b": "not_applicable"})
         usage = {
-            (row.key, row.state): row.count
+            (row.key, row.state): int(row.holders)
             for row in connection.execute(text(ATTRIBUTE_USAGE)).all()
         }
         assert usage[(key, "known")] == 2, "both tenants' nodes"

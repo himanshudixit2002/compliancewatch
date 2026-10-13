@@ -20,8 +20,9 @@ from identity.domain.tenancy import TenantKind, TenantStatus
 
 MAX_QUERY_CHARS: Final = 200
 """The longest search text the list takes: a tenant's name is at most that long."""
-MAX_PAGE: Final = 200
-"""The most tenants one page lists (``py_common.pagination.MAX_LIMIT``)."""
+MAX_PAGE: Final = 201
+"""The most tenants one read asks for: a page of ``py_common.pagination.MAX_LIMIT`` and the one
+row after it that says whether there is another page."""
 
 
 @dataclass(frozen=True, slots=True)

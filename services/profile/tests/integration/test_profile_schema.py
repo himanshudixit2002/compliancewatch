@@ -252,8 +252,11 @@ def test_downgrade_and_upgrade(migrated: Config, engine: Engine) -> None:
 
 
 def test_a_review_task_closes_by_an_answer_and_by_a_resolve_under_the_role(
-    app_engine: Engine, engine: Engine
+    database_url: str, app_engine: Engine, engine: Engine
 ) -> None:
+    # The roles again, as make migrate runs them after every migration: an earlier test's
+    # downgrade and upgrade remade the tables without the directory role's policies.
+    apply_roles(database_url)
     ontology = ontology_package.load()
     factory = PostgresUnitOfWorkFactory(app_engine)
     tenant, other = TenantId.new(), TenantId.new()
@@ -298,7 +301,7 @@ def test_a_review_task_closes_by_an_answer_and_by_a_resolve_under_the_role(
             connection.execute(
                 text(
                     "SELECT policyname FROM pg_policies WHERE schemaname = :s "
-                    "AND policyname LIKE '%\\_directory'"
+                    "AND policyname LIKE '%directory'"
                 ),
                 {"s": SCHEMA},
             ).scalars()
