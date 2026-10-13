@@ -369,3 +369,30 @@ class CandidatePayloadInvalidError(DomainError, ValueError):
 
     type_slug = "rulebook-candidate-payload-invalid"
     title = "Rule candidate event is invalid"
+
+
+class ErrorReviewNotFoundError(DomainError, LookupError):
+    """No error report with this id reached the rulebook."""
+
+    type_slug = "rulebook-error-review-not-found"
+    title = "Error report review not found"
+
+    def __init__(self, report_id: str) -> None:
+        super().__init__(f"no error report has the id {report_id}")
+        self.report_id = report_id
+
+
+class ErrorReviewClosedError(DomainError, ValueError):
+    """The report was decided: a decision is final."""
+
+    type_slug = "rulebook-error-review-closed"
+    title = "Error report review already decided"
+
+
+class CorrectingVersionRequiredError(DomainError, ValueError):
+    """Confirming a report names the rule version that corrects the reported one, and that
+    version must have a ``corrects`` relation to it (``POST .../relations/{id}/approve``, or the
+    relation an analyst's draft carries)."""
+
+    type_slug = "rulebook-correcting-version-required"
+    title = "A confirmed error report needs its correcting version"

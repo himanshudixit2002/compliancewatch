@@ -8,13 +8,22 @@ from typing import Protocol
 from uuid import UUID
 
 from domain_kernel.audit import AuditSink
-from domain_kernel.ids import CanonicalEntityId, ClauseId, DocumentId, RuleId, RuleVersionId, UserId
+from domain_kernel.ids import (
+    CanonicalEntityId,
+    ClauseId,
+    DocumentId,
+    RuleId,
+    RuleVersionId,
+    TenantId,
+    UserId,
+)
 from domain_kernel.knowledge import EntityType, RuleRelation
 from domain_kernel.status import RuleVersionStatus
 from domain_kernel.vectors import ClauseFilter, Vector
 from rulebook.domain.alignment import EntityLookup
 from rulebook.domain.changes import ChangeEntry, ChangeQuery
 from rulebook.domain.documents import StoredClause, StoredDocument
+from rulebook.domain.error_reports import ErrorReview, ErrorReviewGroup, ErrorReviewQuery
 from rulebook.domain.events import RulebookEvent
 from rulebook.domain.graph import (
     ClauseDetail,
@@ -360,6 +369,38 @@ class ReviewTaskRepository(Protocol):
         ...
 
 
+class ErrorReviewRepository(Protocol):
+    """Tenants' error reports as the regulatory team reviews them (``error_report_review``)."""
+
+    def add(self, review: ErrorReview) -> bool:
+        """Insert unless a review of the report exists; whether this call inserted it."""
+        ...
+
+    def by_report(self, report_id: UUID) -> ErrorReview | None: ...
+
+    def lock_by_report(self, report_id: UUID) -> ErrorReview | None:
+        """The report's review, locked for the rest of the transaction."""
+        ...
+
+    def save(self, review: ErrorReview) -> None:
+        """Write the decision, or the erasure's nulled tenant and emptied text."""
+        ...
+
+    def page(self, query: ErrorReviewQuery) -> Sequence[ErrorReview]:
+        """The reviews ``query`` admits, in queue order (``error_reports.queue_position``), at
+        most ``query.limit``."""
+        ...
+
+    def open_groups(self) -> Sequence[ErrorReviewGroup]:
+        """The open reviews counted per rule version, with the version's rule, number and
+        title, by rule version id."""
+        ...
+
+    def erase_tenant(self, tenant_id: TenantId) -> int:
+        """Null the tenant and empty the text of the tenant's reviews; how many."""
+        ...
+
+
 class EventSink(Protocol):
     """Where the rulebook's events go inside the transaction: the outbox, each keyed by its
     partition key (a rule event by its rule)."""
@@ -454,6 +495,9 @@ class KnowledgeUnitOfWork(Protocol):
 
     @property
     def rule_candidates(self) -> RuleCandidateRepository: ...
+
+    @property
+    def error_reviews(self) -> ErrorReviewRepository: ...
 
     @property
     def index(self) -> ClauseIndex: ...

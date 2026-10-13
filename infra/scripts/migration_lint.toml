@@ -266,3 +266,14 @@ its scores, the candidate itself and where its review got to. Global regulatory 
 every tenant, so there is no tenant_id; it holds analyst ids, nothing of a tenant (migration 0010 of
 rulebook).
 """
+
+[[exemptions]]
+table = "rulebook.error_report_review"
+kind = "exempt"
+reason = """
+A tenant's error report about an obligation as the regulatory team reviews it: the description
+already masked for personal identifiers by the obligation service, the rule version it is about and
+the decision. The regulatory team reads the queue across tenants, so there is no row-level security;
+tenant_id names the reporting tenant and is nullable because the tenant's erasure nulls it and
+empties the text, keeping the decision as a fact about the rule (migration 0013 of rulebook).
+"""

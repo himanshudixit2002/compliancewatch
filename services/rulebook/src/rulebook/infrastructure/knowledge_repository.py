@@ -70,9 +70,11 @@ from domain_kernel.ids import (
     CanonicalEntityId,
     ClauseId,
     DocumentId,
+    ObligationId,
     RuleId,
     RuleVersionId,
     SourceId,
+    TenantId,
     UserId,
 )
 from domain_kernel.knowledge import EntityRef, EntityType, RelationKind, RuleRelation
@@ -84,6 +86,14 @@ from py_common.outbox import OutboxWriter
 from rulebook.domain.alignment import ReviewReason
 from rulebook.domain.changes import CHANGE_ACTIONS, ChangeEntry, ChangeQuery, RuleChangeKind
 from rulebook.domain.documents import StoredClause, StoredDocument
+from rulebook.domain.error_reports import (
+    ErrorCategory,
+    ErrorReview,
+    ErrorReviewGroup,
+    ErrorReviewKey,
+    ErrorReviewQuery,
+    ErrorReviewStatus,
+)
 from rulebook.domain.errors import (
     ReviewTaskClosedError,
     ReviewTaskNotFoundError,
@@ -160,6 +170,7 @@ from rulebook.infrastructure.models import (
     ClauseRow,
     DocumentRow,
     EntityReviewRow,
+    ErrorReportReviewRow,
     ExtractionRunRow,
     RelationCandidateRow,
     ReviewTaskRow,
@@ -1068,6 +1079,7 @@ class SqlAlchemyCitationRepository:
 
 REVIEW_TASKS = ReviewTaskRow.__table__
 UNDECIDED_STATUSES = sorted(status.value for status in UNDECIDED)
+ERROR_REVIEWS = ErrorReportReviewRow.__table__
 
 
 class SqlAlchemyRuleCandidateRepository:
@@ -1310,6 +1322,162 @@ class SqlAlchemyReviewTaskRepository:
         )
 
 
+class SqlAlchemyErrorReviewRepository:
+    """The reviews of tenants' error reports, read and written as plain rows. ``add`` leaves it
+    to the unique report id to keep one review per report, so a redelivered event inserts
+    nothing."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, review: ErrorReview) -> bool:
+        statement = (
+            insert(ErrorReportReviewRow)
+            .values(_error_review_values(review))
+            .on_conflict_do_nothing()
+            .returning(ErrorReportReviewRow.id)
+        )
+        return self._session.execute(statement).first() is not None
+
+    def by_report(self, report_id: UUID) -> ErrorReview | None:
+        row = self._session.execute(
+            select(ERROR_REVIEWS).where(ERROR_REVIEWS.c.report_id == report_id)
+        ).first()
+        return None if row is None else _to_error_review(row)
+
+    def lock_by_report(self, report_id: UUID) -> ErrorReview | None:
+        row = self._session.execute(
+            select(ERROR_REVIEWS).where(ERROR_REVIEWS.c.report_id == report_id).with_for_update()
+        ).first()
+        return None if row is None else _to_error_review(row)
+
+    def save(self, review: ErrorReview) -> None:
+        values = _error_review_values(review)
+        for fixed in ("id", "report_id", "obligation_id", "rule_version_id", "category"):
+            values.pop(fixed)
+        self._session.execute(
+            update(ErrorReportReviewRow)
+            .where(ErrorReportReviewRow.id == review.review_id)
+            .values(values)
+        )
+
+    def page(self, query: ErrorReviewQuery) -> Sequence[ErrorReview]:
+        statement = (
+            select(ERROR_REVIEWS)
+            .order_by(
+                cast(ERROR_REVIEWS.c.rule_version_id, Text),
+                ERROR_REVIEWS.c.received_at,
+                ERROR_REVIEWS.c.id,
+            )
+            .limit(query.limit)
+        )
+        if query.status is not None:
+            statement = statement.where(ERROR_REVIEWS.c.status == query.status.value)
+        if query.rule_version_id is not None:
+            statement = statement.where(
+                ERROR_REVIEWS.c.rule_version_id == query.rule_version_id.value
+            )
+        if query.after is not None:
+            statement = statement.where(_after_review(query.after))
+        return [_to_error_review(row) for row in self._session.execute(statement).all()]
+
+    def open_groups(self) -> Sequence[ErrorReviewGroup]:
+        statement = (
+            select(
+                ERROR_REVIEWS.c.rule_version_id,
+                func.count().label("open_count"),
+                func.min(ERROR_REVIEWS.c.received_at).label("oldest"),
+                RuleRow.rule_key,
+                RuleVersionRow.version,
+                RuleVersionRow.title,
+            )
+            .outerjoin(RuleVersionRow, RuleVersionRow.id == ERROR_REVIEWS.c.rule_version_id)
+            .outerjoin(RuleRow, RuleRow.id == RuleVersionRow.rule_id)
+            .where(ERROR_REVIEWS.c.status == ErrorReviewStatus.OPEN.value)
+            .group_by(
+                ERROR_REVIEWS.c.rule_version_id,
+                RuleRow.rule_key,
+                RuleVersionRow.version,
+                RuleVersionRow.title,
+            )
+            .order_by(cast(ERROR_REVIEWS.c.rule_version_id, Text))
+        )
+        return [
+            ErrorReviewGroup(
+                rule_version_id=RuleVersionId(row.rule_version_id),
+                open_count=int(row.open_count),
+                oldest_received_at=row.oldest.astimezone(UTC),
+                rule_key=row.rule_key,
+                version=row.version,
+                title=row.title or "",
+            )
+            for row in self._session.execute(statement).all()
+        ]
+
+    def erase_tenant(self, tenant_id: TenantId) -> int:
+        erased = self._session.execute(
+            update(ErrorReportReviewRow)
+            .where(ErrorReportReviewRow.tenant_id == tenant_id.value)
+            .values(tenant_id=None, description_masked="")
+            .returning(ErrorReportReviewRow.id)
+        )
+        return len(erased.all())
+
+
+def _error_review_values(review: ErrorReview) -> dict[str, object]:
+    return {
+        "id": review.review_id,
+        "report_id": review.report_id,
+        "tenant_id": None if review.tenant_id is None else review.tenant_id.value,
+        "obligation_id": review.obligation_id.value,
+        "rule_version_id": review.rule_version_id.value,
+        "category": review.category.value,
+        "description_masked": review.description_masked,
+        "received_at": review.received_at,
+        "status": review.status.value,
+        "decided_by": None if review.decided_by is None else review.decided_by.value,
+        "decided_at": review.decided_at,
+        "notes": review.notes,
+        "correcting_rule_version_id": None
+        if review.correcting_rule_version_id is None
+        else review.correcting_rule_version_id.value,
+    }
+
+
+def _to_error_review(row: Any) -> ErrorReview:
+    return ErrorReview(
+        review_id=row.id,
+        report_id=row.report_id,
+        tenant_id=None if row.tenant_id is None else TenantId(row.tenant_id),
+        obligation_id=ObligationId(row.obligation_id),
+        rule_version_id=RuleVersionId(row.rule_version_id),
+        category=ErrorCategory(row.category),
+        description_masked=row.description_masked,
+        received_at=row.received_at.astimezone(UTC),
+        status=ErrorReviewStatus(row.status),
+        decided_by=None if row.decided_by is None else UserId(row.decided_by),
+        decided_at=None if row.decided_at is None else row.decided_at.astimezone(UTC),
+        notes=row.notes,
+        correcting_rule_version_id=None
+        if row.correcting_rule_version_id is None
+        else RuleVersionId(row.correcting_rule_version_id),
+    )
+
+
+def _after_review(key: ErrorReviewKey) -> ColumnElement[bool]:
+    """``queue_position(review) > key.position`` in SQL: a later rule version (by its id's
+    text), a later arrival, or a later id, in that order."""
+    reviews = ERROR_REVIEWS.c
+    version_text = cast(reviews.rule_version_id, Text)
+    return or_(
+        version_text > str(key.rule_version_id),
+        and_(
+            version_text == str(key.rule_version_id),
+            tuple_(reviews.received_at, reviews.id) > tuple_(key.received_at, key.review_id),
+        ),
+    )
+
+
 class SqlAlchemyEventSink:
     """Writes each event into ``outbox_event`` on the unit of work's connection, keyed by its
     rule, so the event commits or rolls back with the change it describes."""
@@ -1484,6 +1652,7 @@ class SqlAlchemyKnowledgeUnitOfWork:
         self._citations = SqlAlchemyCitationRepository(session)
         self._review_tasks = SqlAlchemyReviewTaskRepository(session)
         self._rule_candidates = SqlAlchemyRuleCandidateRepository(session)
+        self._error_reviews = SqlAlchemyErrorReviewRepository(session)
         self._index = SqlAlchemyClauseIndex(session)
         self._runs = SqlAlchemyRunRepository(session)
         self._events = SqlAlchemyEventSink(session, writer)
@@ -1532,6 +1701,10 @@ class SqlAlchemyKnowledgeUnitOfWork:
     @property
     def rule_candidates(self) -> SqlAlchemyRuleCandidateRepository:
         return self._rule_candidates
+
+    @property
+    def error_reviews(self) -> SqlAlchemyErrorReviewRepository:
+        return self._error_reviews
 
     @property
     def index(self) -> SqlAlchemyClauseIndex:

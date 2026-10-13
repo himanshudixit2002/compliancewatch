@@ -21,6 +21,7 @@ from domain_kernel.errors import InvariantViolationError
 from domain_kernel.events import DomainEvent
 from domain_kernel.ids import ClauseId, DocumentId, RuleId, RuleVersionId, UserId
 from domain_kernel.ontology import ATTRIBUTE_KEY_PATTERN
+from rulebook.domain.error_reports import ErrorReportDecided
 from rulebook.domain.intake import RuleRejectReason
 
 
@@ -190,5 +191,7 @@ class RuleRejected(DomainEvent):
         return str(self.document_id)
 
 
-type RulebookEvent = RuleEvent | RuleRejected
-"""Everything the rulebook writes to its outbox."""
+type RulebookEvent = RuleEvent | RuleRejected | ErrorReportDecided
+"""Everything the rulebook writes to its outbox: the rule events, the rejections of candidates
+and the decisions on tenants' error reports (``rulebook.domain.error_reports``, keyed by the
+tenant)."""
