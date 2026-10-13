@@ -19,11 +19,13 @@ mode, or ``dual`` mode without one) everything works as before tokens existed: t
   tenant's). Preferences are keyed by channel and address and name no tenant themselves.
 - ``PreferenceCaller``: for a change given on the web, the tenant (``resolve_tenant``: the
   user's own, a service's ``x-tenant-id`` with tenant:act, or the anonymous principal's
-  header), and for a web opt-in, which identity's consent must cover, the consent subject the
-  body names: the web app's word for its signed-in user, the trust boundary
-  ``notification.application.preferences`` describes. The ``api`` and ``support`` sources, which
-  skip the consent check, are a service's: a person's token never records one, and outside
-  header mode they need that service's token.
+  header), and for a web opt-in, which identity's consent must cover, the consent subject: a
+  user's token names its own user, and a body subject that differs is a 403; a service token
+  or the anonymous principal of header mode names it in the body, the web app's server's word
+  for its signed-in user, the trust boundary ``notification.application.preferences``
+  describes. The ``api`` and ``support`` sources, which skip the consent check, are a
+  service's: a person's token never records one, and outside header mode they need that
+  service's token.
 - ``ExportTenant`` (``/data-export``, ``py_common.auth.fastapi.data_export_scope``): a user with a
   tenant admin role (owner, ca_admin) for their own tenant, or a service only with a data:export
   token bound to that tenant and addressed to this service, as identity mints one per export.
@@ -99,6 +101,18 @@ class OptInCaller:
         """The request's tenant: a service's ``x-tenant-id`` with tenant:act, or the anonymous
         principal's header; None without."""
         return resolve_tenant(self.principal, self.offered_tenant)
+
+    def subject(self, named: str | None) -> str | None:
+        """The consent subject of a web opt-in: a person's token names its own user, and a
+        body naming anyone else is refused; any other caller names it in the body."""
+        if self.principal.kind is PrincipalKind.USER:
+            own = str(self.principal.user_id)
+            if named is not None and named != own:
+                raise AuthForbiddenError(
+                    "a person records a preference under their own consent subject"
+                )
+            return own
+        return named
 
     def require_service(self, source: str) -> None:
         """Outside header mode, a change only a service records needs its token; a person's

@@ -53,8 +53,9 @@ class PreferenceIn(Strict):
         max_length=254,
         description=(
             "The identity consent subject (the user id) whose consent covers a web opt-in "
-            "(opted_in with source web_onboarding or web_settings), as the web app's server "
-            "names its signed-in user; a web opt-in needs it. Ignored for anything else"
+            "(opted_in with source web_onboarding or web_settings); a web opt-in needs it. "
+            "With a user's token it is that user, and naming anyone else is a 403; a service "
+            "token names the web app's signed-in user. Ignored for anything else"
         ),
     )
 

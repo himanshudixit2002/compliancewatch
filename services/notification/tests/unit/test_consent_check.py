@@ -7,6 +7,7 @@ change given on the web keeps the tenant it was given for."""
 
 from collections.abc import Iterator
 from typing import Any
+from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
@@ -185,9 +186,19 @@ def test_a_service_token_names_the_tenant_with_tenant_act(consents: FakeConsentR
             headers={**without_tenant_act, **AS_TENANT},
         )
         assert keyword.status_code == 200, "only a web opt-in reads the tenant"
-        owner = bearer(ISSUER.user(TENANT, [Role.OWNER]))
+        owner = bearer(ISSUER.user(TENANT, [Role.OWNER], user_id=UserId(UUID(SUBJECT))))
         user = client.put(WA_PATH, json=web_opt_in(), headers=owner)
         assert user.status_code == 200, "a member's token sets a web preference of its tenant"
+        unnamed_subject = client.put(
+            WA_PATH, json={"opted_in": True, "source": "web_settings"}, headers=owner
+        )
+        assert unnamed_subject.status_code == 200, "the token's user is the subject"
+        colleague = bearer(ISSUER.user(TENANT, [Role.STAFF]))
+        as_someone_else = client.put(WA_PATH, json=web_opt_in(), headers=colleague)
+        assert (as_someone_else.status_code, problem(as_someone_else)) == (
+            403,
+            "auth-forbidden",
+        ), "a member never names a colleague's consent subject"
         by_person = client.put(WA_PATH, json={"opted_in": True, "source": "api"}, headers=owner)
         assert (by_person.status_code, problem(by_person)) == (403, "auth-forbidden"), (
             "a person never records a change only a service records"
@@ -198,7 +209,7 @@ def test_a_service_token_names_the_tenant_with_tenant_act(consents: FakeConsentR
             headers={**bearer(ISSUER.user(TenantId.new(), [Role.OWNER])), **AS_TENANT},
         )
         assert (other.status_code, problem(other)) == (403, "auth-tenant-mismatch")
-    assert consents.asked == [(TENANT, SUBJECT, WHATSAPP)] * 2
+    assert consents.asked == [(TENANT, SUBJECT, WHATSAPP)] * 3
 
 
 def test_an_address_identity_knows_is_not_the_subject_s_is_a_409(
