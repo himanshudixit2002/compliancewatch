@@ -2,8 +2,9 @@
 
 Identity assembles a tenant's export by asking every service for its part. ``ExportTenantData``
 answers for this one: the tenant's obligations in any status (``obligations``), the change log
-of every one of them (``changes``) and the comments on them (``comments``), each section oldest
-first and then by id. Each section is read in keyset pages of ``EXPORT_PAGE_SIZE`` rows inside
+of every one of them (``changes``), the comments on them (``comments``) and the errors its
+members reported in them with the decisions (``error_reports``), each section oldest first and
+then by id. Each section is read in keyset pages of ``EXPORT_PAGE_SIZE`` rows inside
 one unit of work of the tenant, so row-level security keeps every row to that tenant and no read
 is unbounded. Rows are plain JSON values: ids as strings, instants and days in ISO 8601, enums as
 their values, sequences as lists, a period as its start, end and label. The tenant's own id is
@@ -30,7 +31,8 @@ short."""
 OBLIGATIONS: Final = "obligations"
 CHANGES: Final = "changes"
 COMMENTS: Final = "comments"
-SECTIONS: Final = (OBLIGATIONS, CHANGES, COMMENTS)
+ERROR_REPORTS: Final = "error_reports"
+SECTIONS: Final = (OBLIGATIONS, CHANGES, COMMENTS, ERROR_REPORTS)
 LEFT_OFF: Final = frozenset({"tenant_id"})
 """Fields no row carries: the tenant is the export's."""
 
@@ -80,6 +82,11 @@ class ExportTenantData:
                 lambda comment: ExportAfter(comment.created_at, comment.id.value),
                 self._page_size,
             )
+            reports = _read_all(
+                uow.error_reports.export_page,
+                lambda report: ExportAfter(report.submitted_at, report.id.value),
+                self._page_size,
+            )
         return TenantDataExport(
             service=SERVICE_NAME,
             tenant_id=tenant_id,
@@ -88,6 +95,7 @@ class ExportTenantData:
                 OBLIGATIONS: [export_row(obligation) for obligation in obligations],
                 CHANGES: [export_row(change) for change in changes],
                 COMMENTS: [export_row(comment) for comment in comments],
+                ERROR_REPORTS: [export_row(report) for report in reports],
             },
         )
 

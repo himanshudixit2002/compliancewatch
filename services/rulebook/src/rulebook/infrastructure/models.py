@@ -63,6 +63,12 @@ from domain_kernel.status import RuleVersionStatus
 from domain_kernel.vectors import EMBEDDING_DIMS
 from rulebook.domain.alignment import ReviewReason
 from rulebook.domain.documents import CLAUSE_REF_PATTERN
+from rulebook.domain.error_reports import (
+    MAX_DESCRIPTION_CHARS,
+    MAX_NOTES_CHARS,
+    ErrorCategory,
+    ErrorReviewStatus,
+)
 from rulebook.domain.intake import CandidateOutcome, RuleCandidateStatus, RuleRejectReason
 from rulebook.domain.publication import DecisionAction
 from rulebook.domain.relations import CandidateRejectReason, CandidateStatus
@@ -823,6 +829,88 @@ class RuleCandidateRow(Base):
     )
     decided_by: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+ERROR_CATEGORIES: Final[tuple[str, ...]] = tuple(category.value for category in ErrorCategory)
+ERROR_REVIEW_STATUSES: Final[tuple[str, ...]] = tuple(s.value for s in ErrorReviewStatus)
+ERROR_REVIEW_STATE: Final[str] = (
+    "(status = 'open' AND decided_by IS NULL AND decided_at IS NULL"
+    " AND correcting_rule_version_id IS NULL)"
+    " OR (status = 'rejected' AND decided_by IS NOT NULL AND decided_at IS NOT NULL"
+    " AND correcting_rule_version_id IS NULL)"
+    " OR (status = 'confirmed' AND decided_by IS NOT NULL AND decided_at IS NOT NULL"
+    " AND correcting_rule_version_id IS NOT NULL)"
+)
+"""A review is decided exactly once, and only a confirmed one names a correcting version
+(migration 0013)."""
+
+
+class ErrorReportReviewRow(Base):
+    """A tenant's error report about an obligation, masked, as the regulatory team reviews it
+    (migration 0013): one row per report, decided once. Regulatory review shared by every
+    tenant, so no row-level security; an erasure nulls the tenant and empties the text."""
+
+    __tablename__ = "error_report_review"
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="pk_error_report_review"),
+        UniqueConstraint("report_id", name="uq_error_report_review_report_id"),
+        ForeignKeyConstraint(
+            ["rule_version_id"],
+            ["rule_version.id"],
+            name="fk_error_report_review_rule_version_id_rule_version",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["correcting_rule_version_id"],
+            ["rule_version.id"],
+            name="fk_error_report_review_correcting_rule_version_id_rule_version",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            sql_in_list("category", ERROR_CATEGORIES), name="ck_error_report_review_category"
+        ),
+        CheckConstraint(
+            sql_in_list("status", ERROR_REVIEW_STATUSES), name="ck_error_report_review_status"
+        ),
+        CheckConstraint(
+            f"char_length(description_masked) <= {MAX_DESCRIPTION_CHARS}",
+            name="ck_error_report_review_description",
+        ),
+        CheckConstraint(
+            f"char_length(notes) <= {MAX_NOTES_CHARS}", name="ck_error_report_review_notes"
+        ),
+        CheckConstraint(ERROR_REVIEW_STATE, name="ck_error_report_review_state"),
+        Index("ix_error_report_review_queue", "status", "rule_version_id", "received_at"),
+        Index("ix_error_report_review_tenant", "tenant_id"),
+        {
+            "comment": (
+                "Error reports tenants' members made about their obligations, masked, each "
+                "decided once by the regulatory team: confirmed with the version that corrects "
+                "the reported one, or rejected. Regulatory review shared by every tenant: no "
+                "row-level security; an erasure nulls the tenant and empties the text."
+            )
+        },
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid)
+    report_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    tenant_id: Mapped[UUID | None] = mapped_column(
+        Uuid, nullable=True, comment="The reporting tenant; null once the tenant was erased"
+    )
+    obligation_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    rule_version_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    category: Mapped[str] = mapped_column(String(16), nullable=False)
+    description_masked: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        comment="The reporter's account as the obligation service masked it; '' once erased",
+    )
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="open")
+    decided_by: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    notes: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    correcting_rule_version_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
 
 
 class CitationRow(Base):

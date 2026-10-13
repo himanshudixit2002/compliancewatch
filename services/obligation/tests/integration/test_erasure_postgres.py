@@ -1,9 +1,9 @@
 """Obligation's erasure on Postgres, as its own role cw_obligation under forced row-level
 security: the append-only changes and comments go only inside an erasure, the tenant's rows go
-in the order of the foreign keys and another tenant's stay, and the catalog shows every table of
-the schema with a tenant column erased or retained with a reason. A decision that arrives after
-the erasure writes nothing: the consumer finds the erased marker under the erasure's lock.
-Needs Docker."""
+in the order of the foreign keys (the error reports, RESTRICT on their obligation, before the
+obligations) and another tenant's stay, and the catalog shows every table of the schema with a
+tenant column erased or retained with a reason. A decision that arrives after the erasure writes
+nothing: the consumer finds the erased marker under the erasure's lock. Needs Docker."""
 
 import json
 from collections.abc import Iterator
@@ -23,6 +23,12 @@ from domain_kernel.erasure import DeletionRequest
 from domain_kernel.ids import CorrelationId, EventId, RuleVersionId, TenantId
 from obligation import worker
 from obligation.application.decisions import ApplyDecision
+from obligation.domain.error_reports import (
+    ErrorCategory,
+    ErrorReport,
+    ErrorReportId,
+    ErrorReportStatus,
+)
 from obligation.infrastructure.erasure import TABLES, PostgresObligationEraser
 from obligation.infrastructure.repository import PostgresUnitOfWorkFactory
 from obligation.testing import FakeRuleVersionReader, rule, tenant_records
@@ -73,6 +79,8 @@ def engine(database_url: str) -> Iterator[Engine]:
 
 
 def keep(factory: PostgresUnitOfWorkFactory, tenant: TenantId, count: int) -> None:
+    """``count`` obligations of ``tenant``, each with its changes, a comment and an error
+    report."""
     for index in range(count):
         records = tenant_records(tenant, NOW + timedelta(minutes=index))
         with factory(tenant) as uow:
@@ -80,6 +88,20 @@ def keep(factory: PostgresUnitOfWorkFactory, tenant: TenantId, count: int) -> No
             for change in records.changes:
                 uow.history.append(change)
             uow.comments.add(records.comment)
+            uow.error_reports.add(
+                ErrorReport(
+                    id=ErrorReportId.new(),
+                    tenant_id=tenant,
+                    obligation_id=records.obligation.id,
+                    business_id=records.obligation.business_id,
+                    rule_version_id=records.obligation.rule_version_id,
+                    category=ErrorCategory.DUE_DATE,
+                    description="Example: the due date reads the 20th (synthetic).",
+                    status=ErrorReportStatus.SUBMITTED,
+                    submitted_by=None,
+                    submitted_at=NOW + timedelta(minutes=index),
+                )
+            )
 
 
 def counts(engine: Engine, tenant: TenantId) -> dict[str, int]:
@@ -116,7 +138,11 @@ def test_the_tenant_s_obligations_go_and_another_s_stay(engine: Engine, database
     keep(factory, tenant, 3)
     keep(factory, other, 2)
     before, theirs = counts(engine, tenant), counts(engine, other)
-    assert (before["obligation"], before["obligation_comment"]) == (3, 3)
+    assert (before["obligation"], before["obligation_comment"], before["error_report"]) == (
+        3,
+        3,
+        3,
+    )
     assert before["obligation_tenant"] == 1
     assert refused_outside_an_erasure(engine, tenant), "the changes stay append-only"
     with engine.begin() as connection:

@@ -1,0 +1,17 @@
+{
+  "event_id": "f2a3b4c5-d6e7-4f8a-9b0c-1d2e3f4a5b6c",
+  "topic": "error_report.decided",
+  "schema_version": "1.0.0",
+  "occurred_at": "2000-02-04T09:40:00Z",
+  "tenant_id": "5b1f3d2e-7c4a-4e0b-9a6d-1f2e3d4c5b6a",
+  "correlation_id": "d3e4f5a6-b7c8-4d9e-9f0a-1b2c3d4e5f6a",
+  "causation_id": "e1f2a3b4-c5d6-4e7f-8a9b-0c1d2e3f4a5b",
+  "payload": {
+    "report_id": "7a8b9c0d-1e2f-4a3b-8c4d-5e6f7a8b9c0d",
+    "rule_version_id": "5f6a7b8c-9d0e-4f1a-8b2c-3d4e5f6a7b8c",
+    "outcome": "confirmed",
+    "notes": "Example: the notice of 2000-01 moved the date to the 25th; version 2 corrects it.",
+    "correcting_rule_version_id": "4e5f6a7b-8c9d-4e0f-9a1b-2c3d4e5f6a7b",
+    "decided_at": "2000-02-04T09:40:00Z"
+  }
+}

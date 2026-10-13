@@ -21,6 +21,14 @@ process that hosts several services adds to its own:
   registered takes it in. With the flag off no group reads the topic, so the candidates wait
   there (it keeps a month) and the group, once it starts, reads them from the beginning.
 
+- a consumer in group ``rulebook.error-reports`` of error_report.submitted
+  (``IntakeErrorReport``), always: each error a tenant's member reported in an obligation becomes
+  one review item for the regulatory team, its description already masked by the obligation
+  service, on the consumer's own connection, so the review and the ``processed_event`` row commit
+  together; a redelivered event finds the review and changes nothing. A payload the contract
+  refuses, or a report about a rule version the rulebook does not hold, fails, is retried, and
+  then goes to ``error_report.submitted.rulebook.error-reports.dlq``. An event of a tenant the
+  rulebook has erased is only marked processed (``py_common.erasure.skip_erased``).
 - a consumer in group ``rulebook.erasure`` of ``tenant.deletion.requested``
   (``py_common.erasure``), always: while the flag ``identity.tenant_erasure`` is off for the
   tenant it only logs ``erasure.off``; on, it checks the event with identity like every
@@ -42,11 +50,15 @@ from typing import Final
 from sqlalchemy import Connection
 
 from cw_contracts.events.rule_candidate_created_v1 import RuleCandidateCreatedV1
+from domain_kernel.ids import TenantId
 from py_common.erasure import (
     Enabled,
+    ErasedOn,
     ErasureVerifier,
+    erased_on_connection,
     erasure_component,
     erasure_switch,
+    skip_erased,
     verifier_from,
 )
 from py_common.events import EventMessage
@@ -63,6 +75,7 @@ from py_common.runtime import (
 )
 from rulebook import __version__
 from rulebook.application.alignment import Clock, default_clock
+from rulebook.application.error_reports import IntakeErrorReport
 from rulebook.application.intake import IngestRuleCandidate
 from rulebook.application.publication import ApplyDueTransitions
 from rulebook.domain.repository import KnowledgeUnitOfWorkFactory
@@ -78,6 +91,9 @@ TRANSITIONS_AT = time(0, 5, tzinfo=IST)
 CANDIDATES_GROUP_ID: Final = "rulebook.rule-candidates"
 CANDIDATE_TOPIC: Final = "rule.candidate.created"
 CANDIDATE_TOPICS: Final = (CANDIDATE_TOPIC,)
+ERROR_REPORTS_GROUP_ID: Final = "rulebook.error-reports"
+ERROR_REPORT_TOPIC: Final = "error_report.submitted"
+ERROR_REPORT_TOPICS: Final = (ERROR_REPORT_TOPIC,)
 
 log = get_logger(__name__)
 
@@ -151,6 +167,43 @@ def candidate_handler(
     return sync_handler(handle)
 
 
+class MissingTenantError(ValueError):
+    """An error report without the tenant it belongs to."""
+
+
+def error_report_handler(
+    *,
+    units_on: UnitsOnConnection = PostgresKnowledgeUnitOfWorkFactory.on_connection,
+    erased_on: ErasedOn = erased_on_connection,
+    clock: Clock = default_clock,
+) -> Handler:
+    """The handler of error_report.submitted: the report's review on the consumer's
+    connection, in the transaction that records the event as processed, unless the report's
+    tenant is erased here. ``units_on`` makes the units there and ``erased_on`` reads the
+    erased markers; tests pass the memory store's."""
+
+    def handle(message: EventMessage, connection: Connection) -> None:
+        if message.topic != ERROR_REPORT_TOPIC:
+            log.info("rulebook.event_ignored", topic=message.topic, event_id=str(message.event_id))
+            return
+        if message.tenant_id is None:
+            raise MissingTenantError(f"{message.topic} event {message.event_id} carries no tenant")
+        intake = IntakeErrorReport(units_on(connection), clock).run(
+            TenantId(message.tenant_id), message.payload
+        )
+        log.info(
+            "rulebook.error_report_received",
+            event_id=str(message.event_id),
+            report_id=str(intake.review.report_id),
+            tenant_id=str(message.tenant_id),
+            rule_version_id=str(intake.review.rule_version_id),
+            category=intake.review.category.value,
+            created=intake.created,
+        )
+
+    return sync_handler(skip_erased(ERASURE_SERVICE, handle, erased_on=erased_on))
+
+
 def components(
     settings: RulebookSettings,
     *,
@@ -158,8 +211,8 @@ def components(
     verifier: ErasureVerifier | None = None,
 ) -> WorkerComponents:
     """The daily transitions sweep while publishing is on, the candidate intake while its flag
-    is on, and the erasure consumer always; ``erasure`` replaces its flag and ``verifier``
-    identity's check."""
+    is on, and the error report intake and the erasure consumer always; ``erasure`` replaces
+    its flag and ``verifier`` identity's check."""
     if settings.rulebook_store != "postgres":
         raise ValueError("the rulebook worker needs CW_RULEBOOK_STORE=postgres")
     periodic: tuple[PeriodicComponent, ...] = ()
@@ -178,13 +231,20 @@ def components(
                 group_id=CANDIDATES_GROUP_ID, topics=CANDIDATE_TOPICS, handler=candidate_handler()
             ),
         )
+    error_reports_consumer = ConsumerComponent(
+        group_id=ERROR_REPORTS_GROUP_ID,
+        topics=ERROR_REPORT_TOPICS,
+        handler=error_report_handler(),
+    )
     erasure_consumer = erasure_component(
         ERASURE_SERVICE,
         PostgresRulebookEraser,
         enabled=erasure or erasure_switch(settings),
         verifier=verifier or verifier_from(settings),
     )
-    return WorkerComponents(consumers=(*consumers, erasure_consumer), periodic=periodic)
+    return WorkerComponents(
+        consumers=(*consumers, error_reports_consumer, erasure_consumer), periodic=periodic
+    )
 
 
 def main() -> None:

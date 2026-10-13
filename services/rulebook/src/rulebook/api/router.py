@@ -9,6 +9,7 @@ from fastapi import APIRouter
 from rulebook.api import (
     changes,
     documents,
+    error_reports,
     graph,
     publication,
     review,
@@ -22,6 +23,7 @@ public_router = changes.public_router
 router.include_router(documents.router)
 router.include_router(review.router)
 router.include_router(review_tasks.router)
+router.include_router(error_reports.router)
 router.include_router(rule_versions.router)
 router.include_router(publication.router)
 # Before graph: /clauses/unembedded must match ahead of /clauses/{clause_id}.

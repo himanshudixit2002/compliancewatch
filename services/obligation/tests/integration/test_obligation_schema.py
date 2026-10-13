@@ -41,6 +41,7 @@ TABLES = {
     "obligation",
     "obligation_change",
     "obligation_comment",
+    "error_report",
     "obligation_decision",
     "obligation_reminder",
     "obligation_tenant",

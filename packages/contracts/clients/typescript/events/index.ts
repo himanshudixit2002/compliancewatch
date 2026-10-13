@@ -5,6 +5,8 @@ export type { DocumentClassified } from "./document.classified.v1";
 export type { DocumentDiscovered } from "./document.discovered.v1";
 export type { DocumentParsed } from "./document.parsed.v1";
 export type { EventEnvelope } from "./envelope.v1";
+export type { ErrorReportDecided } from "./error_report.decided.v1";
+export type { ErrorReportSubmitted } from "./error_report.submitted.v1";
 export type { EvalRunCompleted } from "./eval.run.completed.v1";
 export type { NotificationFailed } from "./notification.failed.v1";
 export type { NotificationSent } from "./notification.sent.v1";
@@ -31,6 +33,8 @@ export const EVENT_TOPICS = {
   "document.classified": { version: "1.0.0", tenantScoped: false },
   "document.discovered": { version: "1.0.0", tenantScoped: false },
   "document.parsed": { version: "1.1.0", tenantScoped: false },
+  "error_report.decided": { version: "1.0.0", tenantScoped: true },
+  "error_report.submitted": { version: "1.0.0", tenantScoped: true },
   "eval.run.completed": { version: "1.0.0", tenantScoped: false },
   "notification.failed": { version: "1.0.1", tenantScoped: true },
   "notification.sent": { version: "1.0.1", tenantScoped: true },

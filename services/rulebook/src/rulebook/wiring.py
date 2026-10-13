@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from rulebook.application.alignment import AlignMentions
 from rulebook.application.changes import ListChanges
 from rulebook.application.documents import ReadDocument, RegisterDocument
+from rulebook.application.error_reports import DecideErrorReview, ListErrorReviews
 from rulebook.application.graph import (
     ListEntityClauses,
     ListRelations,
@@ -98,3 +99,5 @@ class Wiring:
     edit_review_draft: EditReviewDraft
     decide_review_task: DecideReviewTask
     read_review_stats: ReadReviewStats
+    list_error_reviews: ListErrorReviews
+    decide_error_review: DecideErrorReview

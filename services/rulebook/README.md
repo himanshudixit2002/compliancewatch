@@ -28,8 +28,9 @@ Design reference: Project Foundation guide, sections 7, 8, 9 and 14; Architectur
 
 Migrations `0001` to `0007` create fourteen tables in schema `rulebook`, `0008` lets a document be a
 statute, `0009` adds `review_task` and the `edited` decision, `0010` adds `rule_candidate`,
-candidate review tasks, `rule_version.candidate_id` and the consumer inbox `processed_event`, and
-`0011` ties a candidate's draft to its candidate and its task with composite foreign keys:
+candidate review tasks, `rule_version.candidate_id` and the consumer inbox `processed_event`,
+`0011` ties a candidate's draft to its candidate and its task with composite foreign keys, `0012`
+adds the erased marker `erased_tenant` and `0013` adds `error_report_review`:
 
 | Table | Purpose | Keys |
 | --- | --- | --- |
@@ -46,6 +47,7 @@ candidate review tasks, `rule_version.candidate_id` and the consumer inbox `proc
 | `rule_candidate` | A rule candidate the pipeline extracted (rule.candidate.created), keyed by the event's `candidate_id`: its document, regulator (lower case), model, prompt version, confidence, citation count, whether it asked for review, the outcome (`extracted`, `unparseable`), the rest of the event in `payload` (the candidate itself, its issues, the cited clause ids, the type, the source, the ontology version), the suggested rule key, whether it looks high impact, the event it came with, and its review: `status` (open, drafted, approved, rejected), the version drafted from it, the reject reason, who decided and when | pk `id`; fks `document_id` and `rule_version_id` (unique), and (`rule_version_id`, `id`) to `rule_version (id, candidate_id)` (0011), so the version a candidate names was drafted from it; CHECKs that the regulator is lower case, the scores in range and the status, version, reason and decision agree |
 | `outbox_event` | py-common's transactional outbox: the rule events and rule.rejected, written in the transaction of the change they describe and relayed to Kafka | see `py_common.outbox.schema` |
 | `processed_event` | py-common's consumer inbox: the rule.candidate.created events the worker's group `rulebook.rule-candidates` took in, so a redelivered one is skipped | see `py_common.outbox.schema` |
+| `error_report_review` | A tenant's error report about an obligation as the regulatory team reviews it (error_report.submitted): the report's id, the reporting tenant (nullable: an erasure nulls it), the obligation, the rule version, the category, the description as the obligation service masked it (emptied by an erasure), when it arrived, and the decision: `status` (`open`, `confirmed`, `rejected`), `decided_by`, `decided_at`, `notes`, `correcting_rule_version_id` (set exactly when confirmed). No row-level security: regulatory review the whole team reads across tenants, masked text only | pk `id` (derived from the report id); unique `report_id`; fks `rule_version_id` and `correcting_rule_version_id` to `rule_version` (restrict); index (`status`, `rule_version_id`, `received_at`) for the queue and `tenant_id` for the erasure |
 | `extraction_run` | One run of an extraction stage over a document: counts and run-level issues, including model output that could not become a candidate | pk `id` (derived from document, stage, extractor); fk `document_id` |
 | `entity_review` | A mention alignment could not resolve, with the reason (`no_match`, `ambiguous_alias`, `empty_name`, `unqualified`) and the analyst's decision | pk `id` (derived from clause, type, start); unique (`clause_id`, `entity_type`, `span_start`); CHECK that a decision is complete; partial index on open groups |
 | `relation_candidate` | A relation the model proposed before any rule version exists: target as named (and aligned entity), evidence clause and quote, confidence, issues, period and new due date for extensions, status | pk `id` (derived from document, relation, target, evidence clause); fks to `document`, `clause`, `canonical_entity`, `rule`; CHECKs on scores, quote length, decision |
@@ -129,6 +131,8 @@ writes in an order that holds at every statement, so the keys are not deferred.
 | `PATCH /v1/rulebook/review/tasks/{task_id}/draft` | `{actor_id, note?, title?, summary?, specification?, obligation_template?, recurrence?, effective_from?, effective_to?, todo?, citations?}`: the claimant edits the draft's content and cites clauses in one transaction; 409 `rulebook-review-task-not-claimed` for anyone else, `rulebook-rule-version-not-editable` past draft and `rulebook-candidate-not-drafted` for a candidate task with no draft yet; every quote is verified as `PUT .../citations` verifies it (422 `rulebook-citation-not-verified`, nothing stored). Recorded as an `edited` decision. Returns the task as `GET` does. Needs the review token |
 | `POST /v1/rulebook/review/tasks/{task_id}/decide` | `{actor_id, decision, note?, high_impact?, reason?}`: `approve`, `return` or `reject`, with the version's transition in the same transaction; a return or a rejection needs a note, and a candidate task's rejection a `reason` (`not_a_rule`, `wrong_extraction`, `duplicate`, `out_of_scope`, `unparseable`). A candidate task not drafted yet can only be rejected (409 `rulebook-candidate-not-drafted`). A rejection after drafting closes the draft and opens again the relation candidates approved onto it, their rule relations deleted. Returns the task, the version's lifecycle (null for a candidate rejected before drafting), the task a return opened, the candidate's status and the events written (rule.rejected). Needs the review token |
 | `GET /v1/rulebook/review/stats` | Tasks by status and by regulator, the decisions made, the median time from opening to decision, when the oldest task not decided yet was opened and its age, and `candidates`: the candidates decided, approved (and how many of those without an edit), rejected, and the acceptance rate, approved without edits over decided |
+| `GET /v1/rulebook/error-reports?status=&rule_version_id=&limit=&cursor=` | The error reports tenants' members made about their obligations (error_report.submitted, taken in by the worker), by the rule version they are about, then oldest first, a page of `limit` (1 to 200, 50) with a keyset cursor; open ones by default (`status` keeps `open`, `confirmed` or `rejected`), `rule_version_id` one version's. Each carries the description as the obligation service masked it (empty, with `tenant_id` null, once the tenant was erased), the category and, once decided, who decided, when, the notes and the correcting version; `groups` counts the open reports per rule version with the version's rule key, number and title, whatever the page shows. Open without a token in header and dual mode, as the other review queues; a token needs a regulatory role |
+| `POST /v1/rulebook/error-reports/{report_id}/decision` | `{actor_id, decision: "confirmed" \| "rejected", notes?, correcting_rule_version_id?}`: an analyst, reviewer or admin decides a report once (409 `rulebook-error-review-closed`). `confirmed` needs `correcting_rule_version_id`, a stored version with a `corrects` relation to the reported one, published or not (422 `rulebook-correcting-version-required` without one or without the relation; 404 `rulebook-rule-version-not-found` for a version the rulebook does not hold); publishing that version replaces the reported one and reaches the affected businesses through the rule events. The decision goes back to the obligation service as error_report.decided, keyed by the reporting tenant, with an `error_report_review.decided` audit row (a report of an erased tenant is decided for the record and emits nothing); 404 `rulebook-error-review-not-found` when no such report reached the rulebook. Needs the review token, or an analyst's access token, which names the actor whatever the body says |
 | `GET /v1/changes?since=&regulator=&limit=&cursor=` | The public API's changes feed: one item per published change, newest first, `limit` 1 to 100 (50) with a keyset cursor; see Changes feed below |
 
 Nothing is aligned by fuzzy matching and nothing is created without an analyst (ADR-017). With
@@ -399,6 +403,30 @@ which keeps the candidates a month; turned on, the group reads them from the sta
 leaves it off, so the product never writes candidates into the database it shares. A failed
 extraction is run again by ingesting the stored document again (the pipeline's business).
 
+## Error reports
+
+A tenant's member reports an error in an obligation at the obligation service (guide section 16,
+G06; behind its flag `obligation.error_reports`), which emits error_report.submitted with the
+description masked for personal identifiers. The worker always hosts the consumer of that topic in
+group `rulebook.error-reports` (`application.error_reports.IntakeErrorReport`): each report
+becomes one row of `error_report_review` (migration 0013), its description masked once more with
+the kernel's record patterns (`mask_pii_in`, cut to the 2,000-character limit), so the rulebook
+never depends on the producer, and its id derived from the report's, so a
+redelivered or replayed event finds the row and changes nothing; a payload the contract refuses
+or a report about a version the rulebook does not hold is retried and then dead-lettered to
+`error_report.submitted.rulebook.error-reports.dlq`, and a report of an erased tenant is only
+marked processed. The table is regulatory data the whole team reads across tenants, so it has no
+row-level security and holds masked text only (`infra/scripts/migration_lint.toml` exempts it
+with that reason). The queue (`GET /v1/rulebook/error-reports`) groups the open reports by the
+rule version they are about, and the decision (`POST .../error-reports/{report_id}/decision`)
+confirms a report with the version that corrects the reported one, which must carry a `corrects`
+relation to it (an analyst approves the relation onto the draft, as for any relation), or rejects
+it with notes; either way error_report.decided goes to the outbox keyed by the reporting tenant
+and the obligation service records it on the tenant's report. Publishing the correcting version
+through the lifecycle above supersedes the reported one, and the obligation service closes the
+obligations the correction takes over and makes them again from the correcting version; no event
+is added for it.
+
 ## Erasure
 
 The worker always hosts the consumer of tenant.deletion.requested in group `rulebook.erasure`. While
@@ -408,13 +436,18 @@ it first checks the event with identity (`GET /v1/identity/erasures/{tenant_id}`
 `CW_IDENTITY_URL`, the service client with `erasure:verify`, 5 s): one identity did not send for the
 tenant's open deletion request, or one for the internal tenant, erases nothing and is refused (a
 `tenant.erasure_refused` audit row, dead-lettered at once); identity unreachable is retried, then
-dead-lettered. Otherwise it erases nothing: the rulebook holds regulatory data of no tenant
-(documents, rules and their versions, citations, candidates and the review of all of them), and none
-of its tables references a tenant today. It answers tenant.data.erased (service rulebook) with an
-empty `tables` and the tables it keeps, each with its reason, and writes a `tenant.erased` audit row
-and its erased marker (`erased_tenant`, migration 0012), so the deletion request can complete
-(`infrastructure.erasure`). When a table gains a tenant reference (error reports, M3-7), its erasure
-nulls it there; `tests/integration/test_erasure_postgres.py` fails until it does.
+dead-lettered. Otherwise it nulls the tenant and empties the masked text of the tenant's rows of
+`error_report_review`, keeping each decision as a fact about the rule version, prunes the
+tenant's published or dead `outbox_event` rows (the error_report.decided events keyed by the
+tenant; pending ones go out with the relay), and deletes nothing else: the rest of the rulebook
+is regulatory data of no tenant (documents, rules and their versions, citations, candidates and
+the review of all of them). It answers tenant.data.erased
+(service rulebook) with the count of reviews it pseudonymised and the tables it keeps, each with
+its reason, and writes a `tenant.erased` audit row and its erased marker (`erased_tenant`,
+migration 0012), so the deletion request can complete (`infrastructure.erasure`). From then on the
+intake consumer only marks the tenant's reports processed and a decision on its review emits
+nothing. When another table gains a tenant reference, `tests/integration/test_erasure_postgres.py`
+fails until the eraser erases or retains it.
 
 ## Changes feed
 
@@ -550,12 +583,12 @@ shape without importing each other.
 
 ```
 src/rulebook/
-  api/             # routers (documents, review, review_tasks, rule_versions, publication, graph, search; changes, the public GET /v1/changes), request/response schemas, the write-token and review-token dependencies
-  application/     # use cases: documents.py, alignment.py, review.py, review_tasks.py (and drafting from a candidate), intake.py (the candidate intake), relations.py, rule_versions.py, publication.py, graph.py, search.py, changes.py, golden_export.py (decided candidates as draft golden cases); seed_loader.py
-  domain/          # documents.py, alignment.py, review.py, review_tasks.py, intake.py (rule candidates and the draft they propose), drafting.py (the checks of a draft's content), relations.py, rule_versions.py, publication.py (the planner), events.py, graph.py, search.py, changes.py (the feed), runs.py, ids.py, errors.py, repository.py, seed.py
-  infrastructure/  # models.py (with the Vector column type), knowledge_repository.py (Postgres unit of work and outbox sink), memory.py, seed_repository.py, review_metrics.py (the gauges of both review queues)
+  api/             # routers (documents, review, review_tasks, error_reports, rule_versions, publication, graph, search; changes, the public GET /v1/changes), request/response schemas, the write-token and review-token dependencies
+  application/     # use cases: documents.py, alignment.py, review.py, review_tasks.py (and drafting from a candidate), intake.py (the candidate intake), error_reports.py (the intake, queue and decisions of tenants' error reports), relations.py, rule_versions.py, publication.py, graph.py, search.py, changes.py, golden_export.py (decided candidates as draft golden cases); seed_loader.py
+  domain/          # documents.py, alignment.py, review.py, review_tasks.py, intake.py (rule candidates and the draft they propose), drafting.py (the checks of a draft's content), error_reports.py (ErrorReview and its decision), relations.py, rule_versions.py, publication.py (the planner), events.py, graph.py, search.py, changes.py (the feed), runs.py, ids.py, errors.py, repository.py, seed.py
+  infrastructure/  # models.py (with the Vector column type), knowledge_repository.py (Postgres unit of work and outbox sink), memory.py, erasure.py, seed_repository.py, review_metrics.py (the gauges of both review queues)
   settings.py      # RulebookSettings: CW_RULEBOOK_STORE, CW_RULEBOOK_WRITE_TOKEN, CW_RULEBOOK_REVIEW_TOKEN, CW_RULEBOOK_PUBLISH_ENABLED, CW_RULEBOOK_CANDIDATE_INTAKE_ENABLED, CW_RULEBOOK_SEED_ON_START (local and test, memory store)
-  worker.py        # python -m rulebook.worker: the daily transitions sweep and the consumer of rule.candidate.created
+  worker.py        # python -m rulebook.worker: the daily transitions sweep and the consumers of rule.candidate.created, error_report.submitted and tenant.deletion.requested
   testing.py       # rulebook_settings() for tests and demos: memory store, known tokens (WRITE_TOKEN, REVIEW_TOKEN)
   wiring.py        # what the api layer gets from the composition root
   seed.py          # rulebook-seed command
@@ -576,6 +609,8 @@ migrations/        # alembic; env.py reads CW_DATABASE_URL and CW_DB_SCHEMA and 
   versions/20261006_0009_review_tasks.py   # review_task with its guard; the edited decision
   versions/20261006_0010_rule_candidates.py   # rule_candidate, candidate review tasks, rule_version.candidate_id, processed_event
   versions/20261006_0011_candidate_version_keys.py   # composite keys tying a candidate's draft to its candidate and its task
+  versions/20261008_0012_erased_tenant.py   # the erased marker
+  versions/20261008_0013_error_report_review.py   # error_report_review, no row-level security, masked text only
 tests/
   unit/            # domain, use cases and API on the memory store; test_models_vocabulary.py: model CHECKs against the kernel enums
   integration/     # testcontainers (pgvector image): migrations up, down and up; document tables and triggers; the Postgres unit of work and its reads; the search index; the publish guard, the outbox and the sweep; the changes feed read by a plain role; review tasks with their checks, index and guard; rule candidates, their tasks and the consumer's transaction

@@ -227,7 +227,8 @@ with identity (`GET /v1/identity/erasures/{tenant_id}` at `CW_IDENTITY_URL`, the
 the internal tenant, erases nothing and is refused (a `tenant.erasure_refused` audit row,
 dead-lettered at once); identity unreachable is retried, then dead-lettered. Otherwise, under the
 tenant's setting and `app.erasure` (the only way past the append-only guards of the changes and
-comments), it deletes the tenant's `obligation_change`, `obligation_comment`, `obligation_reminder`,
+comments), it deletes the tenant's `obligation_change`, `obligation_comment`, `error_report`,
+`obligation_reminder`,
 `obligation`, `obligation_decision`, its row of the `obligation_tenant` directory, its idempotency
 keys and its published events, and answers tenant.data.erased (service obligation) with the row
 counts, a `tenant.erased` audit row and its erased marker (`erased_tenant`, migration 0006), in the
@@ -236,6 +237,34 @@ the rule-level cache of rule versions, which names no tenant. From then on every
 tenant 410 `tenant-erased`, and the consumer of applicability.decided marks the tenant's decisions
 processed and writes nothing (outcome `erased_tenant`), under the erasure's lock, so the sweep and
 the window, which visit the directory, never see the tenant again.
+
+## Error reports
+
+A tenant's member can tell the regulatory team that an obligation is wrong (guide section 16,
+G06): `POST /v1/obligation/obligations/{obligation_id}/error-reports`, behind the flag
+`obligation.error_reports` (registry entry owned by core-product, default off, on for the listed
+tenants with `CW_FLAG_OBLIGATION_ERROR_REPORTS__TENANTS`; read through `py_common.flags` at each
+request, so Unleash can turn it on without a restart). The report is kept as written in
+`error_report` (migration 0007: row-level security by tenant, an index on tenant, status and
+submission time, a check that a report is decided exactly once), and error_report.submitted
+leaves for the rulebook with the description masked for personal identifiers (the kernel's
+`mask_pii_in`, the record patterns every log line and audit row is masked with: a lower-case PAN
+or GSTIN, a URL-encoded address and the wider phone shapes too; cut to the 2,000-character limit,
+since a token can be longer than the address it replaces): the rulebook, which every tenant
+shares, never holds a tenant's personal data, and masks the text once more on arrival. The
+worker's consumer of error_report.decided, group `obligation.error-decisions`, records the
+regulatory team's decision on the report (confirmed, with the version that corrects the reported
+one, or rejected, with the analyst's notes) with an `error_report.decided` audit row, in the
+transaction that marks the event processed; a redelivery finds the report decided and changes
+nothing, a decision for a report the tenant has no row of is retried and then dead-lettered to
+`error_report.decided.obligation.error-decisions.dlq`, and one of an erased tenant is only marked
+processed. The correction itself reaches the obligations through the rule events when the
+correcting version is published: the rulebook treats a `corrects` relation as a replacement, so
+the reported version is superseded, `CloseSupersededPeriods` closes the open obligations the
+correction takes over (reason `rule_superseded`, notification's `obligation_closed` message), and
+the correcting version's fan-out makes them again with the right dates (the change card). The
+tenant reads its reports with `GET /v1/obligation/error-reports`, the export lists them in
+`error_reports`, and the erasure deletes them before the obligations.
 
 ## API
 
@@ -246,6 +275,8 @@ the window, which visit the directory, never see the tenant again.
 | `POST /v1/obligation/obligations/{obligation_id}/status` | `{"action": "start" \| "complete" \| "waive", "reason": ""}`: the obligation after the change. A waiver needs a reason of at least ten characters (422 `request-invalid`); 409 `obligation-closed`, 422 `invalid-transition` |
 | `PUT /v1/obligation/obligations/{obligation_id}/assignee` | `{"assignee_id": "<user>" \| null}`: the obligation after the change; the assignee it has already changes nothing. 409 `obligation-closed`; with a verified caller 422 `obligation-assignee-unknown` and 503 `identity-unavailable` |
 | `POST /v1/obligation/obligations/{obligation_id}/comments` | `{"body": "..."}` (1 to 2,000 characters once trimmed): 201 with the comment, its author and their label |
+| `POST /v1/obligation/obligations/{obligation_id}/error-reports` | `{"category": "due_date" \| "applicability" \| "steps" \| "citation" \| "other", "description": "..."}` (1 to 2,000 characters once trimmed): 201 with the report, while the flag `obligation.error_reports` is on for the tenant (see Error reports above); the same `Idempotency-Key` answers the same report. 404 `obligation-error-reports-disabled` while the flag is off, and nothing is stored; 404 `obligation-not-found` for another tenant's obligation |
+| `GET /v1/obligation/error-reports?status=&limit=&cursor=` | The tenant's reports, newest first and then by id, one page at a time (`limit` 1 to 200, 50 by default, with a keyset cursor), each with its `status` (`submitted` until the regulatory team decides it, then `confirmed` with `correcting_rule_version_id`, the version that corrects the reported one, or `rejected`), the analyst's `notes` and `decided_at`; `status` keeps one status. Answers with the flag on or off |
 
 The public API (tag `public`, with `x-roles` naming every tenant member role, in
 `packages/contracts/openapi/public.v1.json`) lists a business's obligations from 0.4.0:
@@ -302,12 +333,12 @@ setting as an empty string between transactions once it has been used in a sessi
 ```
 src/obligation/
   api/             # router.py (the read and tracking routes, and the public API's), schemas.py, deps.py (caller and tenant, wiring)
-  application/     # materialise.py, changes.py, decisions.py, guard.py, rule_events.py, window.py, reminders.py, queries.py, tracking.py
-  domain/          # model.py (Obligation, DueWindow), events.py, errors.py, history.py, comments.py, reminders.py, rule_versions.py, ports.py, repository.py (protocols)
-  infrastructure/  # models.py, repository.py (Postgres unit of work with the outbox and the audit), memory.py, rulebook_client.py, identity_client.py, profile_client.py, metrics.py
+  application/     # materialise.py, changes.py, decisions.py, guard.py, rule_events.py, window.py, reminders.py, queries.py, tracking.py, error_reports.py, export.py
+  domain/          # model.py (Obligation, DueWindow), events.py, errors.py, history.py, comments.py, error_reports.py, flags.py (the flags protocol), reminders.py, rule_versions.py, ports.py, repository.py (protocols)
+  infrastructure/  # models.py, repository.py (Postgres unit of work with the outbox and the audit), memory.py, erasure.py, flags.py (py-common's OpenFeature client), rulebook_client.py, identity_client.py, profile_client.py, metrics.py
   wiring.py        # what the api layer gets from the composition root
   main.py          # composition root: wire(settings), build_app(settings), problem statuses
-  worker.py        # the worker's composition root: components(settings), both handlers, the sweep and window jobs
+  worker.py        # the worker's composition root: components(settings), the handlers of decisions, rule events and error decisions, the sweep and window jobs
   sweep.py         # obligation-sweep --once: the reminder sweep and the rolling window, once
 migrations/        # alembic (env.py reads CW_DATABASE_URL and CW_DB_SCHEMA)
 tests/

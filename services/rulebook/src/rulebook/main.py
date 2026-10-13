@@ -26,6 +26,7 @@ from rulebook.api.router import public_router, router
 from rulebook.application.alignment import AlignMentions
 from rulebook.application.changes import ListChanges
 from rulebook.application.documents import ReadDocument, RegisterDocument
+from rulebook.application.error_reports import DecideErrorReview, ListErrorReviews
 from rulebook.application.graph import (
     ListEntityClauses,
     ListRelations,
@@ -84,6 +85,7 @@ from rulebook.domain.errors import (
     CitationNotVerifiedError,
     CitationsMissingError,
     ClauseNotStoredError,
+    CorrectingVersionRequiredError,
     DeadlineDetailMissingError,
     DocumentConflictError,
     DocumentIdMismatchError,
@@ -91,6 +93,8 @@ from rulebook.domain.errors import (
     DuplicateApproverError,
     EmbeddingDimensionError,
     EntityTypeMismatchError,
+    ErrorReviewClosedError,
+    ErrorReviewNotFoundError,
     MentionSpanMismatchError,
     NonCanonicalNameError,
     OverlappingVersionError,
@@ -190,6 +194,9 @@ PROBLEM_STATUS: dict[type[DomainError], int] = {
     RuleKeyUnknownError: 422,
     RuleKeyTakenError: 409,
     CandidatePayloadInvalidError: 422,
+    ErrorReviewNotFoundError: 404,
+    ErrorReviewClosedError: 409,
+    CorrectingVersionRequiredError: 422,
 }
 
 
@@ -274,6 +281,8 @@ def build_wiring(settings: RulebookSettings) -> Wiring:
         edit_review_draft=EditReviewDraft(unit_of_work, packaged_ontology),
         decide_review_task=DecideReviewTask(unit_of_work),
         read_review_stats=ReadReviewStats(unit_of_work),
+        list_error_reviews=ListErrorReviews(unit_of_work),
+        decide_error_review=DecideErrorReview(unit_of_work),
     )
 
 

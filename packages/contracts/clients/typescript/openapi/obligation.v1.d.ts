@@ -86,6 +86,27 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  "/v1/obligation/error-reports": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * The tenant's error reports, newest first, a page at a time
+     * @description Every report the tenant's members made, newest first and then by id, each with its
+     *     status and, once decided, the decision; ``status`` keeps one status.
+     */
+    get: operations["list_error_reports_v1_obligation_error_reports_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/obligation/obligations": {
     parameters: {
       query?: never;
@@ -171,6 +192,33 @@ export type paths = {
      *     text. 404 when the tenant has no such obligation.
      */
     post: operations["add_comment_v1_obligation_obligations__obligation_id__comments_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/obligation/obligations/{obligation_id}/error-reports": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Report an error in an obligation
+     * @description While the flag obligation.error_reports is on for the tenant: the report is stored as
+     *     written, under the tenant's row-level security, and goes to the rulebook's review queue
+     *     with the description masked for personal identifiers (error_report.submitted). The
+     *     regulatory team's decision comes back to the report (status confirmed, with the version
+     *     that corrects the reported one, or rejected). The audit entry, error_report.submitted, names
+     *     the report, its obligation and category, never the text. 404
+     *     obligation-error-reports-disabled while the flag is off for the tenant, 404
+     *     obligation-not-found when the tenant has no such obligation.
+     */
+    post: operations["report_error_v1_obligation_obligations__obligation_id__error_reports_post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -503,9 +551,10 @@ export type components = {
      * DataExportOut
      * @description The obligation service's part of a tenant's data export. ``sections`` holds every section,
      *     an empty list when the tenant has nothing in it: ``obligations`` (every obligation, in any
-     *     status), ``changes`` (the change log of each) and ``comments``, each oldest first and then by
-     *     id. Rows carry the fields of the records under their own names, ids as strings, instants and
-     *     days in ISO 8601, enums as their values.
+     *     status), ``changes`` (the change log of each), ``comments`` and ``error_reports`` (the errors
+     *     its members reported, with the decisions), each oldest first and then by id. Rows carry the
+     *     fields of the records under their own names, ids as strings, instants and days in ISO 8601,
+     *     enums as their values.
      */
     DataExportOut: {
       /**
@@ -527,6 +576,77 @@ export type components = {
        */
       tenant_id: string;
     };
+    /**
+     * ErrorCategory
+     * @description What the reporter says is wrong; the values are the contract's.
+     * @enum {string}
+     */
+    ErrorCategory: "due_date" | "applicability" | "steps" | "citation" | "other";
+    /**
+     * ErrorReportIn
+     * @description What is wrong with an obligation: ``category`` names the kind of error and
+     *     ``description`` the reporter's account, 1 to 2,000 characters once trimmed. The description
+     *     is kept as written for the tenant and leaves the service masked for personal identifiers.
+     */
+    ErrorReportIn: {
+      category: components["schemas"]["ErrorCategory"];
+      /**
+       * Description
+       * @description What is wrong, 1 to 2000 characters once trimmed
+       */
+      description: string;
+    };
+    /**
+     * ErrorReportOut
+     * @description One error report. ``status`` is ``submitted`` until the regulatory team decides it:
+     *     ``confirmed`` with ``correcting_rule_version_id``, the rule version that corrects the reported
+     *     one (its publication reaches the obligations), or ``rejected``; ``notes`` is what the analyst
+     *     said. ``submitted_by`` is the user a verified token named, null when none did.
+     */
+    ErrorReportOut: {
+      /**
+       * Business Id
+       * Format: uuid
+       */
+      business_id: string;
+      category: components["schemas"]["ErrorCategory"];
+      /** Correcting Rule Version Id */
+      correcting_rule_version_id: string | null;
+      /** Decided At */
+      decided_at: string | null;
+      /** Description */
+      description: string;
+      /** Notes */
+      notes: string;
+      /**
+       * Obligation Id
+       * Format: uuid
+       */
+      obligation_id: string;
+      /**
+       * Report Id
+       * Format: uuid
+       */
+      report_id: string;
+      /**
+       * Rule Version Id
+       * Format: uuid
+       */
+      rule_version_id: string;
+      status: components["schemas"]["ErrorReportStatus"];
+      /**
+       * Submitted At
+       * Format: date-time
+       */
+      submitted_at: string;
+      /** Submitted By */
+      submitted_by: string | null;
+    };
+    /**
+     * ErrorReportStatus
+     * @enum {string}
+     */
+    ErrorReportStatus: "submitted" | "confirmed" | "rejected";
     /** HealthResponse */
     HealthResponse: {
       /** Service */
@@ -653,6 +773,16 @@ export type components = {
     Page_BusinessObligationOut_: {
       /** Items */
       items: components["schemas"]["BusinessObligationOut"][];
+      /**
+       * Next Cursor
+       * @description Send as cursor to read the next page; null on the last page
+       */
+      next_cursor: string | null;
+    };
+    /** Page[ErrorReportOut] */
+    Page_ErrorReportOut_: {
+      /** Items */
+      items: components["schemas"]["ErrorReportOut"][];
       /**
        * Next Cursor
        * @description Send as cursor to read the next page; null on the last page
@@ -960,6 +1090,63 @@ export interface operations {
       };
     };
   };
+  list_error_reports_v1_obligation_error_reports_get: {
+    parameters: {
+      query?: {
+        /** @description The next_cursor of the previous page; absent for the first page */
+        cursor?: string | null;
+        /** @description Items per page, 1 to 200 */
+        limit?: number;
+        /** @description Only reports in this status */
+        status?: components["schemas"]["ErrorReportStatus"] | null;
+      };
+      header?: {
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
+        "x-tenant-id"?: string | null;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Page_ErrorReportOut_"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   list_obligations_v1_obligation_obligations_get: {
     parameters: {
       query: {
@@ -1219,6 +1406,100 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["CommentOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Required */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  report_error_v1_obligation_obligations__obligation_id__error_reports_post: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description A new value for each new request, such as a UUID; a retry sends the same value and gets the first response back for 24 hours */
+        "Idempotency-Key": string;
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
+        "x-tenant-id"?: string | null;
+      };
+      path: {
+        obligation_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ErrorReportIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorReportOut"];
         };
       };
       /** @description Bad Request */

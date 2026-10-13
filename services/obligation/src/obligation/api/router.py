@@ -15,6 +15,10 @@ API (tag ``public``), ``/v1/obligations/{obligation_id}``, with the roles that m
 ``/v1/obligation/data-export`` is the service's part of a tenant's data export, which identity
 assembles: for the tenant's admins and for identity's data:export token bound to the tenant and
 addressed to this service (``deps.ExportTenant``).
+
+``/v1/obligation/obligations/{obligation_id}/error-reports`` lets a member report an error in an
+obligation while the flag ``obligation.error_reports`` is on for the tenant, and
+``/v1/obligation/error-reports`` lists the tenant's reports with the regulatory team's decisions.
 """
 
 from datetime import date
@@ -34,18 +38,23 @@ from obligation.api.schemas import (
     CommentIn,
     CommentOut,
     DataExportOut,
+    ErrorReportCursor,
+    ErrorReportIn,
+    ErrorReportOut,
     ObligationDetailOut,
     ObligationOut,
     StatusIn,
 )
+from obligation.application.error_reports import NewErrorReport
 from obligation.application.queries import (
     BusinessObligationsQuery,
     ListedObligation,
     ObligationQuery,
 )
 from obligation.application.tracking import Assignment, NewComment, StatusChange
+from obligation.domain.error_reports import ErrorReport, ErrorReportId, ErrorReportStatus
 from obligation.domain.model import DueWindow
-from obligation.domain.repository import ListingAfter
+from obligation.domain.repository import ListingAfter, ReportAfter
 from py_common.idempotency.fastapi import IDEMPOTENCY_RESPONSES, IdempotencyKey, run_idempotent
 from py_common.pagination import Page, Pagination, page_of
 from py_common.problems import problem_responses
@@ -63,8 +72,10 @@ ASSIGN_PROBLEMS: Final = {
     **IDEMPOTENCY_RESPONSES,
 }
 COMMENT_PROBLEMS: Final = {**problem_responses(401, 403, 404, 422), **IDEMPOTENCY_RESPONSES}
+REPORT_PROBLEMS: Final = {**problem_responses(401, 403, 404, 422), **IDEMPOTENCY_RESPONSES}
 LIST_PROBLEMS: Final = problem_responses(401, 403, 404, 422, 503)
 LIST_SCOPE: Final = "obligation.business-obligations"
+REPORTS_SCOPE: Final = "obligation.error-reports"
 
 
 @router.get("/ping")
@@ -290,3 +301,66 @@ def add_comment(
     return run_idempotent(
         wired.idempotency, acting.tenant_id, key, status.HTTP_201_CREATED, produce
     )
+
+
+@router.post(
+    f"{ONE}/error-reports",
+    summary="Report an error in an obligation",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ErrorReportOut,
+    responses=REPORT_PROBLEMS,
+)
+def report_error(
+    obligation_id: UUID, body: ErrorReportIn, acting: Writer, key: IdempotencyKey, wired: Wired
+) -> JSONResponse:
+    """While the flag obligation.error_reports is on for the tenant: the report is stored as
+    written, under the tenant's row-level security, and goes to the rulebook's review queue
+    with the description masked for personal identifiers (error_report.submitted). The
+    regulatory team's decision comes back to the report (status confirmed, with the version
+    that corrects the reported one, or rejected). The audit entry, error_report.submitted, names
+    the report, its obligation and category, never the text. 404
+    obligation-error-reports-disabled while the flag is off for the tenant, 404
+    obligation-not-found when the tenant has no such obligation."""
+
+    def produce() -> ErrorReportOut:
+        report = wired.report_error.run(
+            NewErrorReport(acting, ObligationId(obligation_id), body.category, body.description)
+        )
+        return ErrorReportOut.from_report(report)
+
+    return run_idempotent(
+        wired.idempotency, acting.tenant_id, key, status.HTTP_201_CREATED, produce
+    )
+
+
+@router.get(
+    "/error-reports",
+    summary="The tenant's error reports, newest first, a page at a time",
+    responses=problem_responses(401, 403, 422),
+)
+def list_error_reports(
+    tenant: Tenant,
+    wired: Wired,
+    page: Pagination,
+    report_status: Annotated[
+        ErrorReportStatus | None,
+        Query(alias="status", description="Only reports in this status"),
+    ] = None,
+) -> Page[ErrorReportOut]:
+    """Every report the tenant's members made, newest first and then by id, each with its
+    status and, once decided, the decision; ``status`` keeps one status."""
+    after = page.after(REPORTS_SCOPE, ErrorReportCursor)
+    found = wired.list_error_reports.run(
+        tenant,
+        status=report_status,
+        after=None if after is None else ReportAfter(after.submitted_at, ErrorReportId(after.id)),
+        limit=page.limit + 1,
+    )
+    items, next_cursor = page_of(found, page.limit, REPORTS_SCOPE, _report_cursor)
+    return Page[ErrorReportOut](
+        items=[ErrorReportOut.from_report(report) for report in items], next_cursor=next_cursor
+    )
+
+
+def _report_cursor(report: ErrorReport) -> ErrorReportCursor:
+    return ErrorReportCursor(submitted_at=report.submitted_at, id=report.id.value)

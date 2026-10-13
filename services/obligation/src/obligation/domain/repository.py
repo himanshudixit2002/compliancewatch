@@ -13,6 +13,7 @@ from domain_kernel.events import DomainEvent
 from domain_kernel.ids import BusinessId, ObligationId, RuleVersionId, TenantId
 from domain_kernel.status import ObligationStatus
 from obligation.domain.comments import ObligationComment
+from obligation.domain.error_reports import ErrorReport, ErrorReportId, ErrorReportStatus
 from obligation.domain.history import ObligationChange
 from obligation.domain.model import Obligation
 from obligation.domain.reminders import Reminder
@@ -44,6 +45,19 @@ class ExportAfter:
     def __post_init__(self) -> None:
         require_aware(self.at, "at")
         require_instance(self.id, UUID, "id")
+
+
+@dataclass(frozen=True, slots=True)
+class ReportAfter:
+    """Where a page of a tenant's error reports starts: after the report submitted at this time
+    with this id, newest first."""
+
+    submitted_at: datetime
+    report_id: ErrorReportId
+
+    def __post_init__(self) -> None:
+        require_aware(self.submitted_at, "submitted_at")
+        require_instance(self.report_id, ErrorReportId, "report_id")
 
 
 class ObligationRepository(Protocol):
@@ -151,6 +165,35 @@ class CommentLog(Protocol):
         ...
 
 
+class ErrorReportLog(Protocol):
+    """The errors the tenant's members reported in its obligations, each decided once."""
+
+    def add(self, report: ErrorReport) -> None: ...
+
+    def get(self, report_id: ErrorReportId, *, lock: bool = False) -> ErrorReport | None:
+        """The tenant's report; with ``lock`` its row stays locked until the transaction ends,
+        so two deliveries of one decision run one after the other."""
+        ...
+
+    def save(self, report: ErrorReport) -> None: ...
+
+    def page(
+        self,
+        *,
+        status: ErrorReportStatus | None,
+        after: ReportAfter | None,
+        limit: int,
+    ) -> Sequence[ErrorReport]:
+        """The tenant's reports, of ``status`` when given, newest first and then by id, starting
+        after ``after``, at most ``limit``."""
+        ...
+
+    def export_page(self, after: ExportAfter | None, limit: int) -> Sequence[ErrorReport]:
+        """The tenant's reports, by submission and id, starting after ``after``, at most
+        ``limit``: one page of the tenant's data export."""
+        ...
+
+
 class ReminderLog(Protocol):
     """The reminders sent for the tenant's obligations, one per obligation, due date and
     threshold."""
@@ -214,6 +257,9 @@ class UnitOfWork(Protocol):
 
     @property
     def comments(self) -> CommentLog: ...
+
+    @property
+    def error_reports(self) -> ErrorReportLog: ...
 
     @property
     def reminders(self) -> ReminderLog: ...

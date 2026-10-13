@@ -29,6 +29,7 @@ from domain_kernel.ids import (
     DocumentId,
     RuleId,
     RuleVersionId,
+    TenantId,
     UserId,
 )
 from domain_kernel.knowledge import EntityRef, EntityType, RelationKind, RuleRelation
@@ -46,6 +47,13 @@ from rulebook.domain.changes import (
     newest_first,
 )
 from rulebook.domain.documents import StoredClause, StoredDocument
+from rulebook.domain.error_reports import (
+    ErrorReview,
+    ErrorReviewGroup,
+    ErrorReviewQuery,
+    ErrorReviewStatus,
+)
+from rulebook.domain.error_reports import queue_position as review_position
 from rulebook.domain.errors import (
     ReviewTaskClosedError,
     ReviewTaskNotFoundError,
@@ -195,6 +203,7 @@ class _Tables:
     outbox: list[RulebookEvent] = field(default_factory=list)
     review_tasks: dict[UUID, ReviewTask] = field(default_factory=dict)
     rule_candidates: dict[UUID, RuleCandidate] = field(default_factory=dict)
+    error_reviews: dict[UUID, ErrorReview] = field(default_factory=dict)
 
     def copy(self) -> "_Tables":
         return copy.deepcopy(self)
@@ -1350,6 +1359,78 @@ class MemoryReviewTaskRepository:
         )
 
 
+class MemoryErrorReviewRepository:
+    """The reviews of tenants' error reports under the table's rules: one review per report
+    (the unique report id), the rule version it names stored."""
+
+    def __init__(self, tables: _Tables) -> None:
+        self._tables = tables
+
+    def add(self, review: ErrorReview) -> bool:
+        if review.rule_version_id not in self._tables.versions:
+            raise UnknownRuleVersionError(str(review.rule_version_id))
+        if review.review_id in self._tables.error_reviews or any(
+            stored.report_id == review.report_id for stored in self._tables.error_reviews.values()
+        ):
+            return False
+        self._tables.error_reviews[review.review_id] = review
+        return True
+
+    def by_report(self, report_id: UUID) -> ErrorReview | None:
+        return next(
+            (r for r in self._tables.error_reviews.values() if r.report_id == report_id), None
+        )
+
+    def lock_by_report(self, report_id: UUID) -> ErrorReview | None:
+        """Units of work already run one at a time here."""
+        return self.by_report(report_id)
+
+    def save(self, review: ErrorReview) -> None:
+        if review.review_id not in self._tables.error_reviews:
+            raise InvariantViolationError(f"error report review {review.review_id} is not stored")
+        if (
+            review.correcting_rule_version_id is not None
+            and review.correcting_rule_version_id not in self._tables.versions
+        ):
+            raise UnknownRuleVersionError(str(review.correcting_rule_version_id))
+        self._tables.error_reviews[review.review_id] = review
+
+    def page(self, query: ErrorReviewQuery) -> Sequence[ErrorReview]:
+        found = sorted(
+            (r for r in self._tables.error_reviews.values() if query.admits(r)),
+            key=review_position,
+        )
+        return found[: query.limit]
+
+    def open_groups(self) -> Sequence[ErrorReviewGroup]:
+        groups: dict[RuleVersionId, list[ErrorReview]] = {}
+        for review in self._tables.error_reviews.values():
+            if review.status is ErrorReviewStatus.OPEN:
+                groups.setdefault(review.rule_version_id, []).append(review)
+        found = []
+        for rule_version_id, reviews in sorted(groups.items(), key=lambda item: str(item[0])):
+            version = self._tables.versions.get(rule_version_id)
+            found.append(
+                ErrorReviewGroup(
+                    rule_version_id=rule_version_id,
+                    open_count=len(reviews),
+                    oldest_received_at=min(r.received_at for r in reviews),
+                    rule_key=None if version is None else version.rule_key,
+                    version=None if version is None else version.version,
+                    title="" if version is None else version.title,
+                )
+            )
+        return found
+
+    def erase_tenant(self, tenant_id: TenantId) -> int:
+        erased = 0
+        for review_id, review in list(self._tables.error_reviews.items()):
+            if review.tenant_id == tenant_id:
+                self._tables.error_reviews[review_id] = review.erased()
+                erased += 1
+        return erased
+
+
 class MemoryEventSink:
     def __init__(self, tables: _Tables) -> None:
         self._tables = tables
@@ -1387,6 +1468,7 @@ class MemoryUnitOfWork:
         self._citations = MemoryCitationRepository(tables)
         self._review_tasks = MemoryReviewTaskRepository(tables)
         self._rule_candidates = MemoryRuleCandidateRepository(tables)
+        self._error_reviews = MemoryErrorReviewRepository(tables)
         self._index = MemoryClauseIndex(tables)
         self._runs = MemoryRunRepository(tables)
         self._events = MemoryEventSink(tables)
@@ -1435,6 +1517,10 @@ class MemoryUnitOfWork:
     @property
     def rule_candidates(self) -> MemoryRuleCandidateRepository:
         return self._rule_candidates
+
+    @property
+    def error_reviews(self) -> MemoryErrorReviewRepository:
+        return self._error_reviews
 
     @property
     def index(self) -> MemoryClauseIndex:
@@ -1726,3 +1812,15 @@ class MemoryKnowledgeStore:
         with self._lock:
             found = list(self._tables.rule_candidates.values())
         return sorted(found, key=lambda candidate: (candidate.created_at, candidate.candidate_id))
+
+    def error_reviews(self) -> list[ErrorReview]:
+        """The committed reviews of tenants' error reports, in queue order."""
+        with self._lock:
+            found = list(self._tables.error_reviews.values())
+        return sorted(found, key=review_position)
+
+    def erase_error_reviews(self, tenant_id: TenantId) -> int:
+        """A tenant's erasure outside a unit of work: its reviews lose their tenant and text;
+        how many did."""
+        with self._lock:
+            return MemoryErrorReviewRepository(self._tables).erase_tenant(tenant_id)
