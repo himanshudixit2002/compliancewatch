@@ -146,6 +146,14 @@ function logLine(event: string, fields: Record<string, unknown>): void {
   console.info(JSON.stringify({ level: "info", event, ...fields }));
 }
 
+/**
+ * A redirect the browser follows with a GET: 303 for anything posted (a server action, the
+ * sign-out form), since a 307 would replay the body at the sign-in page; 307 for a page request.
+ */
+export function redirectStatus(method: string): 303 | 307 {
+  return method === "GET" || method === "HEAD" ? 307 : 303;
+}
+
 export async function proxy(request: NextRequest): Promise<NextResponse> {
   const env = getEnv();
   const { pathname, search } = request.nextUrl;
@@ -183,7 +191,12 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   const hasPending = pendingCookie !== undefined && pendingCookie !== "";
   const decision = decide(pathname, search, hasCookie, hasPending);
   if (decision.kind === "sign-in") {
-    return secured(NextResponse.redirect(new URL(signInHref(decision.next), request.url)));
+    return secured(
+      NextResponse.redirect(
+        new URL(signInHref(decision.next), request.url),
+        redirectStatus(request.method),
+      ),
+    );
   }
 
   if (isAdminPath(pathname)) {
@@ -208,7 +221,10 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
         const outcome = await keepSessionCurrent(provider.value, claims, { env });
         if (outcome.kind === "revoked") {
           logLine("session_revoked", { user_id: claims.userId, path: pathname });
-          const response = NextResponse.redirect(new URL(signedOutHref(), request.url));
+          const response = NextResponse.redirect(
+            new URL(signedOutHref(), request.url),
+            redirectStatus(request.method),
+          );
           response.cookies.set(SESSION_COOKIE_NAME, "", expired);
           return secured(response);
         }

@@ -7,6 +7,7 @@ import { sessionWindow } from "@/entities/session/mappers";
 import type { SessionClaims } from "@/entities/session/types";
 import { encryptSession } from "@/server/session";
 import { resetEnvCache } from "@/server/env";
+import { fakeIdentity } from "@/test/identity-fixture";
 import { SCREENS, hrefFor, isCatchAll, routeParams } from "./shared/config/screens";
 import {
   ADMIN_NOT_FOUND_PATH,
@@ -20,6 +21,7 @@ import {
   decide,
   makeNonce,
   proxy,
+  redirectStatus,
 } from "./proxy";
 
 const {
@@ -33,8 +35,12 @@ const ORIGIN = "http://localhost:3000";
 const KEY = new Uint8Array(randomBytes(32));
 const SECRET = Buffer.from(KEY).toString("base64");
 
-function request(path: string, headers: Record<string, string> = {}): NextRequest {
-  return new NextRequest(`${ORIGIN}${path}`, { headers });
+function request(
+  path: string,
+  headers: Record<string, string> = {},
+  method: "GET" | "POST" = "GET",
+): NextRequest {
+  return new NextRequest(`${ORIGIN}${path}`, { headers, method });
 }
 
 function exampleHref(screen: (typeof SCREENS)[number]): string {
@@ -67,6 +73,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   resetEnvCache();
 });
 
@@ -208,6 +215,48 @@ describe("proxy", () => {
     expect(response.status).toBe(307);
     expect(getRedirectUrl(response)).toBe(`${ORIGIN}/sign-in?next=%2Fb%2F1%2Fchanges%3Ftab%3D2`);
     expect(response.headers.get(CSP_HEADER)).toContain("nonce-");
+  });
+
+  it("answers a posted request with a 303, so the browser does not replay the body", async () => {
+    expect(redirectStatus("GET")).toBe(307);
+    expect(redirectStatus("HEAD")).toBe(307);
+    expect(redirectStatus("POST")).toBe(303);
+    const posted = await proxy(request("/settings/team", {}, "POST"));
+    expect(posted.status).toBe(303);
+    expect(getRedirectUrl(posted)).toBe(`${ORIGIN}/sign-in?next=%2Fsettings%2Fteam`);
+  });
+
+  it("signs a revoked session out: 303 for an action's POST, the cookie cleared", async () => {
+    const identity = fakeIdentity();
+    vi.stubGlobal("fetch", identity.fetchImpl);
+    const user = identity.provision({
+      contact: { phone: "+919876543210" },
+      kind: "business",
+      roles: ["owner"],
+    });
+    const claims: SessionClaims = {
+      userId: user.id,
+      tenantId: user.tenantId,
+      tenantKind: "business",
+      roles: ["owner"],
+      displayName: "Example owner",
+      mfa: false,
+      sv: 0,
+      provider: "fake",
+      ...sessionWindow(new Date(), 3600),
+      cwToken: identity.accessToken(user),
+      cwTokenExpiresAt: Math.floor(Date.now() / 1000) + 500,
+      checkedAt: 0,
+    };
+    identity.bump(user.id, { disabled: true });
+    const cookie = `cw_session=${await encryptSession(claims, KEY)}`;
+    const posted = await proxy(request("/settings/team", { cookie }, "POST"));
+    expect(posted.status).toBe(303);
+    expect(getRedirectUrl(posted)).toBe(`${ORIGIN}/sign-in?reason=signed-out`);
+    expect(posted.headers.get("set-cookie")).toMatch(/^cw_session=;.*Max-Age=0/i);
+    const page = await proxy(request("/settings/team", { cookie }));
+    expect(page.status).toBe(307);
+    expect(getRedirectUrl(page)).toBe(`${ORIGIN}/sign-in?reason=signed-out`);
   });
 
   it("drops a next that is only the root and continues when a cookie exists", async () => {
