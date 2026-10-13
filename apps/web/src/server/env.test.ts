@@ -75,21 +75,46 @@ describe("loadEnv", () => {
     expect(() => loadEnv({ CW_WEB_IDENTITY_URL: "not a url" })).toThrow(/CW_WEB_IDENTITY_URL/);
   });
 
-  it("allows the fake provider in local and test only, and reserves supabase everywhere", () => {
-    expect(loadEnv({ CW_WEB_AUTH_PROVIDER: "fake" }).CW_WEB_AUTH_PROVIDER).toBe("fake");
-    expect(loadEnv({ CW_WEB_ENV: "test", CW_WEB_AUTH_PROVIDER: "fake" }).CW_WEB_AUTH_PROVIDER).toBe(
-      "fake",
-    );
-    for (const name of ["staging", "prod"] as const) {
+  it("allows the fake provider in local and test only, and supabase with its URL and key", () => {
+    expect(AUTH_PROVIDER_NAMES).toEqual(["fake", "supabase"]);
+    for (const name of ["local", "test"]) {
+      expect(loadEnv({ CW_WEB_ENV: name, CW_WEB_AUTH_PROVIDER: "fake" }).CW_WEB_AUTH_PROVIDER).toBe(
+        "fake",
+      );
+    }
+    for (const name of ["staging", "prod"]) {
       expect(() => loadEnv({ CW_WEB_ENV: name, CW_WEB_AUTH_PROVIDER: "fake" })).toThrow(
         /CW_WEB_AUTH_PROVIDER: fake is allowed only when CW_WEB_ENV is local or test/,
       );
-      expect(
-        loadEnv({ CW_WEB_ENV: name, CW_WEB_AUTH_PROVIDER: "supabase" }).CW_WEB_AUTH_PROVIDER,
-      ).toBe("supabase");
     }
-    expect(() => loadEnv({ CW_WEB_AUTH_PROVIDER: "keycloak" })).toThrow(/CW_WEB_AUTH_PROVIDER/);
-    expect(AUTH_PROVIDER_NAMES).toEqual(["fake", "supabase"]);
+    expect(() => loadEnv({ CW_WEB_ENV: "prod", CW_WEB_AUTH_PROVIDER: "supabase" })).toThrow(
+      /CW_WEB_SUPABASE_URL: required when CW_WEB_AUTH_PROVIDER is supabase; CW_WEB_SUPABASE_ANON_KEY: required/,
+    );
+    const supabase = loadEnv({
+      CW_WEB_ENV: "prod",
+      CW_WEB_AUTH_PROVIDER: "supabase",
+      CW_WEB_SUPABASE_URL: "https://project.supabase.test/",
+      CW_WEB_SUPABASE_ANON_KEY: "anon-test-value",
+    });
+    expect(supabase.CW_WEB_SUPABASE_URL).toBe("https://project.supabase.test");
+    expect(supabase.CW_WEB_SUPABASE_ANON_KEY).toBe("anon-test-value");
+    expect(() => loadEnv({ CW_WEB_AUTH_PROVIDER: "nope" })).toThrow(/CW_WEB_AUTH_PROVIDER/);
+  });
+
+  it("bounds the session upkeep margins, with a re-read on every request allowed", () => {
+    const env = loadEnv({});
+    expect(env.CW_WEB_TOKEN_REFRESH_SECONDS).toBe(120);
+    expect(env.CW_WEB_SESSION_RECHECK_SECONDS).toBe(300);
+    expect(loadEnv({ CW_WEB_SESSION_RECHECK_SECONDS: "0" }).CW_WEB_SESSION_RECHECK_SECONDS).toBe(0);
+    expect(() => loadEnv({ CW_WEB_SESSION_RECHECK_SECONDS: "-1" })).toThrow(
+      /CW_WEB_SESSION_RECHECK_SECONDS/,
+    );
+    expect(() => loadEnv({ CW_WEB_TOKEN_REFRESH_SECONDS: "0" })).toThrow(
+      /CW_WEB_TOKEN_REFRESH_SECONDS/,
+    );
+    expect(() => loadEnv({ CW_WEB_TOKEN_REFRESH_SECONDS: "3601" })).toThrow(
+      /CW_WEB_TOKEN_REFRESH_SECONDS/,
+    );
   });
 
   it("requires the session secret to be 32 base64 bytes when set", () => {

@@ -1,6 +1,12 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { cleanup, configure } from "@testing-library/react";
 import { axeMatchers } from "@compliancewatch/ui/test/axe";
 import { afterEach, expect, vi } from "vitest";
+
+// Next's server puts AsyncLocalStorage on the global before its modules load; a proxy response
+// that sets a cookie reaches for it, so the tests provide it the same way, before any import.
+(globalThis as { AsyncLocalStorage?: typeof AsyncLocalStorage }).AsyncLocalStorage ??=
+  AsyncLocalStorage;
 
 // The same toHaveNoViolations matcher the ui package uses (written over axe-core).
 expect.extend(axeMatchers);
