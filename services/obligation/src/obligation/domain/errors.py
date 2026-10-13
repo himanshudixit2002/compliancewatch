@@ -87,3 +87,35 @@ class ProfileUnavailableError(DomainError, ConnectionError):
 
     type_slug = "profile-unavailable"
     title = "Profile service unavailable"
+
+
+class ErrorReportsDisabledError(DomainError, LookupError):
+    """The flag ``obligation.error_reports`` is off for the tenant: the report route does not
+    exist for it (404) and nothing is stored."""
+
+    type_slug = "obligation-error-reports-disabled"
+    title = "Error reports are not available"
+
+    def __init__(self) -> None:
+        super().__init__("reporting an error in an obligation is not available for this tenant")
+
+
+class ErrorReportNotFoundError(DomainError, LookupError):
+    type_slug = "obligation-error-report-not-found"
+    title = "Error report not found"
+
+    def __init__(self, report_id: str) -> None:
+        super().__init__(f"error report {report_id} does not exist for this tenant")
+        self.report_id = report_id
+
+
+class ErrorReportDecidedError(DomainError, ValueError):
+    """The report was decided already: a decision is final."""
+
+    type_slug = "obligation-error-report-decided"
+    title = "Error report already decided"
+
+    def __init__(self, report_id: str, status: str) -> None:
+        super().__init__(f"error report {report_id} is {status} and cannot be decided again")
+        self.report_id = report_id
+        self.status = status

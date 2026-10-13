@@ -1,8 +1,8 @@
 """Obligation's erasure consumer on the memory store: with the flag on it deletes the tenant's
-obligations with their changes, comments and reminders and its applied decisions, keeps the
-rule-level cache, and answers tenant.data.erased; off, it only logs. The handler runs through a
-consumer on a SQLite inbox, as the worker runs it; tests/integration/test_erasure_postgres.py
-runs the Postgres eraser."""
+obligations with their changes, comments, error reports and reminders and its applied
+decisions, keeps the rule-level cache, and answers tenant.data.erased; off, it only logs. The
+handler runs through a consumer on a SQLite inbox, as the worker runs it;
+tests/integration/test_erasure_postgres.py runs the Postgres eraser."""
 
 import asyncio
 from datetime import UTC, datetime, timedelta
@@ -14,6 +14,12 @@ from sqlalchemy.pool import NullPool
 
 from domain_kernel.erasure import TenantDataErased
 from domain_kernel.ids import EventId, TenantId
+from obligation.domain.error_reports import (
+    ErrorCategory,
+    ErrorReport,
+    ErrorReportId,
+    ErrorReportStatus,
+)
 from obligation.infrastructure.erasure import MemoryObligationEraser
 from obligation.infrastructure.memory import MemoryStore
 from obligation.testing import tenant_records
@@ -42,6 +48,20 @@ def keep(store: MemoryStore, tenant: TenantId, count: int) -> None:
             for change in records.changes:
                 uow.history.append(change)
             uow.comments.add(records.comment)
+            uow.error_reports.add(
+                ErrorReport(
+                    id=ErrorReportId.new(),
+                    tenant_id=tenant,
+                    obligation_id=records.obligation.id,
+                    business_id=records.obligation.business_id,
+                    rule_version_id=records.obligation.rule_version_id,
+                    category=ErrorCategory.DUE_DATE,
+                    description="Example: the due date reads the 20th (synthetic).",
+                    status=ErrorReportStatus.SUBMITTED,
+                    submitted_by=None,
+                    submitted_at=NOW,
+                )
+            )
 
 
 def deletion(tenant: TenantId) -> InboundRecord:
@@ -101,6 +121,7 @@ def rows_of(store: MemoryStore, tenant: TenantId) -> int:
         + sum(comment.tenant_id == tenant for comment in store.comments)
         + sum(reminder.tenant_id == tenant for reminder in store.reminders)
         + sum(decision.tenant_id == tenant for decision in store.decisions.values())
+        + sum(report.tenant_id == tenant for report in store.error_reports.values())
     )
 
 
@@ -118,6 +139,7 @@ def test_with_the_flag_on_the_tenant_s_obligations_go(tmp_path: Path) -> None:
     assert (answer.service, answer.tenant_id) == ("obligation", tenant)
     assert (answer.tables["obligation"], answer.tables["obligation_comment"]) == (3, 3)
     assert answer.tables["obligation_change"] == 3
+    assert answer.tables["error_report"] == 3
     assert [item.table for item in answer.retained] == [
         "rule_version_ref",
         "erased_tenant",

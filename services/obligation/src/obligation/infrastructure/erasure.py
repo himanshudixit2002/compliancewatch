@@ -3,13 +3,14 @@
 ``PostgresObligationEraser.erase`` runs in the consumer's transaction with ``app.tenant_id`` and
 ``app.erasure`` set: row-level security admits the tenant's rows only, and the append-only guards
 of ``obligation_change`` and ``obligation_comment`` let their DELETEs through. In the order of the
-foreign keys it deletes the changes and the comments (both RESTRICT on their obligation), the
-reminders, the obligations, the applied decisions, the tenant's entry in the ``obligation_tenant``
-directory (a routing directory: any session reads the ids, a write needs the tenant's own
-setting, so this is the tenant's one row), its idempotency keys and its published or dead
-events in ``outbox_event``, and writes the erased marker with its answer (``erased_tenant``):
-from then on its routes answer the tenant 410 and its consumer of applicability.decided writes
-nothing for it, so the sweep and the window, which visit the directory, never see it again.
+foreign keys it deletes the changes, the comments and the error reports (all RESTRICT on their
+obligation), the reminders, the obligations, the applied decisions, the tenant's entry in the
+``obligation_tenant`` directory (a routing directory: any session reads the ids, a write needs
+the tenant's own setting, so this is the tenant's one row), its idempotency keys and its
+published or dead events in ``outbox_event``, and writes the erased marker with its answer
+(``erased_tenant``): from then on its routes answer the tenant 410 and its consumer of
+applicability.decided writes nothing for it, so the sweep and the window, which visit the
+directory, never see it again.
 
 It keeps ``rule_version_ref``, the cache of the rule versions obligations come from: rule-level
 data, the same for every tenant and holding no tenant reference.
@@ -38,6 +39,7 @@ from py_common.idempotency import MemoryIdempotencyStore
 TABLES: Final = (
     "obligation_change",
     "obligation_comment",
+    "error_report",
     "obligation_reminder",
     "obligation",
     "obligation_decision",
@@ -82,14 +84,18 @@ class MemoryObligationEraser:
             changes = [c for c in store.changes if c.tenant_id != tenant_id]
             comments = [c for c in store.comments if c.tenant_id != tenant_id]
             reminders = [r for r in store.reminders if r.tenant_id != tenant_id]
+            reports = [key for key, r in store.error_reports.items() if r.tenant_id == tenant_id]
             counted = {
                 "obligation_change": len(store.changes) - len(changes),
                 "obligation_comment": len(store.comments) - len(comments),
+                "error_report": len(reports),
                 "obligation_reminder": len(store.reminders) - len(reminders),
             }
             store.changes[:] = changes
             store.comments[:] = comments
             store.reminders[:] = reminders
+            for report_id in reports:
+                del store.error_reports[report_id]
             mine = [key for key, o in store.obligations.items() if o.tenant_id == tenant_id]
             for obligation_id in mine:
                 del store.obligations[obligation_id]

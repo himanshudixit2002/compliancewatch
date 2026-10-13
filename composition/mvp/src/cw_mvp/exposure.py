@@ -161,6 +161,9 @@ EXPOSURE: Final[Mapping[str, Mapping[str, Exposure]]] = {
         "PATCH /v1/rulebook/review/tasks/{task_id}/draft": ADMIN,
         "POST /v1/rulebook/review/tasks/{task_id}/decide": ADMIN,
         "GET /v1/rulebook/review/stats": ADMIN,
+        # The error reports tenants' members made, masked, for the regulatory team to decide.
+        "GET /v1/rulebook/error-reports": ADMIN,
+        "POST /v1/rulebook/error-reports/{report_id}/decision": ADMIN,
         # What the pipeline writes and reads back.
         "PUT /v1/rulebook/documents/{document_id}": INTERNAL,
         "PUT /v1/rulebook/documents/{document_id}/mentions": INTERNAL,
@@ -218,6 +221,10 @@ EXPOSURE: Final[Mapping[str, Mapping[str, Exposure]]] = {
         "POST /v1/obligations/{obligation_id}/comments": PUBLIC,
         # The public API's list of a business's obligations, beside profile's business routes.
         "GET /v1/businesses/{business_id}/obligations": PUBLIC,
+        # A member reports an error in an obligation (behind the flag obligation.error_reports)
+        # and the tenant reads its reports with the regulatory team's decisions.
+        "POST /v1/obligation/obligations/{obligation_id}/error-reports": PUBLIC,
+        "GET /v1/obligation/error-reports": PUBLIC,
     },
     "notification": {
         # One service's part of a tenant's export, which identity assembles (data:export).

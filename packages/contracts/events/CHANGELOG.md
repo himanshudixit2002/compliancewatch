@@ -4,6 +4,15 @@ Versions follow semver per topic. Adding an optional field is a minor bump, chan
 a field or making one required is a major bump and a new `v<major>` schema file, wording is a
 patch. Every line names the topic and its version.
 
+## 2026-10-08
+
+- error_report.submitted 1.0.0: first version; the obligation service emits it when a tenant's
+  member reports an error in an obligation, the description masked for personal identifiers,
+  and the rulebook's group rulebook.error-reports turns it into a review item
+- error_report.decided 1.0.0: first version; the rulebook emits it when the regulatory team
+  confirms a report with the version that corrects the reported one, or rejects it, and the
+  obligation service's group obligation.error-decisions records the decision on the report
+
 ## 2026-10-07
 
 - tenant.data.erased 1.0.0: first version; identity, profile, obligation, notification, the

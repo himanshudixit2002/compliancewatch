@@ -165,6 +165,8 @@ TENANT_ROUTES: dict[str, frozenset[str]] = {
         {
             "GET /v1/obligation/obligations",
             "GET /v1/obligation/data-export",
+            "GET /v1/obligation/error-reports",
+            "POST /v1/obligation/obligations/{obligation_id}/error-reports",
             "GET /v1/businesses/{business_id}/obligations",
             *(
                 f"{method} {base}/{{obligation_id}}{suffix}"

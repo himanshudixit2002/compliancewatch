@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:compliancewatch:event:error_report.decided:v1",
+  "title": "error_report.decided",
+  "description": "The regulatory team decided an error report (error_report.submitted): confirmed, naming the rule version that corrects the reported one (a published or draft version with a corrects relation to it; its publication replaces the reported version and reaches the affected businesses through the rule events), or rejected with the analyst's notes. The obligation service's group obligation.error-decisions records the decision on the tenant's report. Producer: rulebook. Consumers: obligation.",
+  "type": "object",
+  "x-version": "1.0.0",
+  "x-producer": "rulebook",
+  "x-tenant-scoped": true,
+  "properties": {
+    "report_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The report decided, as error_report.submitted named it."
+    },
+    "rule_version_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The rule version the report was about."
+    },
+    "outcome": {
+      "type": "string",
+      "enum": ["confirmed", "rejected"],
+      "description": "confirmed: the error is real and a correcting version fixes it; rejected: the rule version stands."
+    },
+    "notes": {
+      "type": "string",
+      "maxLength": 2000,
+      "description": "What the analyst said about the decision; empty when they said nothing."
+    },
+    "correcting_rule_version_id": {
+      "type": ["string", "null"],
+      "format": "uuid",
+      "description": "For a confirmed report, the rule version with a corrects relation to the reported one; null for a rejection."
+    },
+    "decided_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the decision was made."
+    }
+  },
+  "required": [
+    "report_id",
+    "rule_version_id",
+    "outcome",
+    "notes",
+    "correcting_rule_version_id",
+    "decided_at"
+  ]
+}

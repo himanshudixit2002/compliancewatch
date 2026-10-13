@@ -16,7 +16,10 @@ from sqlalchemy import Engine, create_engine
 from sqlalchemy.pool import NullPool
 
 from domain_kernel.documents import Clause, DocumentType, document_id_for
-from domain_kernel.ids import SourceId
+from domain_kernel.erasure import TenantDataErased
+from domain_kernel.ids import EventId, SourceId, TenantId
+from domain_kernel.status import RuleVersionStatus
+from py_common.erasure import MemoryErasedTenants
 from py_common.outbox import (
     ConsumerConfig,
     IdempotentConsumer,
@@ -41,9 +44,13 @@ def _settings(**overrides: Any) -> RulebookSettings:
     return rulebook_settings(rulebook_store="postgres", **overrides)
 
 
-def test_with_publishing_and_intake_off_only_the_erasure_consumer_runs() -> None:
+def test_with_publishing_and_intake_off_the_erasure_and_error_report_consumers_run() -> None:
     components = worker.components(_settings())
-    (erasure,) = components.consumers
+    error_reports, erasure = components.consumers
+    assert (error_reports.group_id, error_reports.topics) == (
+        "rulebook.error-reports",
+        ("error_report.submitted",),
+    )
     assert (erasure.group_id, erasure.topics) == (
         "rulebook.erasure",
         ("tenant.deletion.requested",),
@@ -177,15 +184,19 @@ def record(
 
 def test_with_its_flag_on_the_worker_consumes_rule_candidates() -> None:
     components = worker.components(_settings(rulebook_candidate_intake_enabled=True))
-    consumer, erasure = components.consumers
+    consumer, error_reports, erasure = components.consumers
     assert erasure.group_id == "rulebook.erasure"
+    assert error_reports.group_id == "rulebook.error-reports"
     assert (consumer.group_id, consumer.topics) == (
         "rulebook.rule-candidates",
         ("rule.candidate.created",),
     )
     assert consumer.dead_letter_topics() == (DLQ,)
     assert components.periodic == (), "publishing stays off"
-    assert [c.group_id for c in worker.components(_settings()).consumers] == ["rulebook.erasure"]
+    assert [c.group_id for c in worker.components(_settings()).consumers] == [
+        "rulebook.error-reports",
+        "rulebook.erasure",
+    ]
 
 
 async def test_a_candidate_event_becomes_a_candidate_and_its_task_once(inbox: Engine) -> None:
@@ -224,3 +235,105 @@ async def test_an_unknown_document_or_a_refused_payload_is_dead_lettered(inbox: 
     assert await intake.consumer.process(unknown) is Outcome.PROCESSED, (
         "a replay takes it in once the document is registered"
     )
+
+
+# ---------------------------------------------------------------- the error report intake
+
+REPORT_EXAMPLE = EXAMPLES / "error_report.submitted" / "wrong-due-date.json"
+REPORT_DLQ = "error_report.submitted.rulebook.error-reports.dlq"
+REPORT_TENANT = TenantId(UUID("5b1f3d2e-7c4a-4e0b-9a6d-1f2e3d4c5b6a"))
+
+
+class Reports:
+    """The worker's consumer of error_report.submitted on a SQLite inbox and the memory store,
+    with a published version for the reports to be about."""
+
+    def __init__(self, inbox: Engine) -> None:
+        self.store = MemoryKnowledgeStore()
+        _, self.version = self.store.add_rule(
+            "gstr3b_monthly", title="Monthly return (synthetic)", status=RuleVersionStatus.PUBLISHED
+        )
+        self.erased = MemoryErasedTenants()
+        self.producer = FakeProducer()
+        self.consumer = IdempotentConsumer(
+            group_id=worker.ERROR_REPORTS_GROUP_ID,
+            store=SyncProcessedStore(inbox, group_id=worker.ERROR_REPORTS_GROUP_ID),
+            handler=worker.error_report_handler(
+                units_on=lambda connection: self.store,
+                erased_on=lambda connection: self.erased,
+                clock=lambda: datetime(2000, 2, 3, 6, 0, tzinfo=UTC),
+            ),
+            producer=self.producer,
+            config=ConsumerConfig(max_handler_attempts=2, retry_backoff_seconds=0),
+        )
+
+    def record(
+        self,
+        offset: int = 0,
+        *,
+        event_id: UUID | None = None,
+        tenant: str | None = str(REPORT_TENANT),
+        topic: str = worker.ERROR_REPORT_TOPIC,
+        **payload: Any,
+    ) -> InboundRecord:
+        message = json.loads(REPORT_EXAMPLE.read_text(encoding="utf-8"))
+        message["topic"] = topic
+        message["event_id"] = str(event_id or uuid4())
+        message["tenant_id"] = tenant
+        message["payload"] = {
+            **message["payload"],
+            "rule_version_id": str(self.version),
+            **payload,
+        }
+        value = json.dumps(message).encode("utf-8")
+        return InboundRecord(topic=topic, partition=0, offset=offset, key=b"k", value=value)
+
+
+async def test_a_report_becomes_one_review_however_often_it_arrives(inbox: Engine) -> None:
+    reports = Reports(inbox)
+    first = reports.record()
+    assert await reports.consumer.process(first) is Outcome.PROCESSED
+    (review,) = reports.store.error_reviews()
+    assert (review.tenant_id, review.rule_version_id, review.category.value) == (
+        REPORT_TENANT,
+        reports.version,
+        "due_date",
+    )
+    assert "[PHONE]" in review.description_masked, "kept as the obligation service masked it"
+    assert review.received_at == datetime(2000, 2, 3, 6, 0, tzinfo=UTC)
+    assert await reports.consumer.process(first) is Outcome.SKIPPED, "the inbox has the event"
+    replayed = reports.record(offset=1, description="Example: the same report, sent again.")
+    assert await reports.consumer.process(replayed) is Outcome.PROCESSED
+    assert reports.store.error_reviews() == [review], "one review per report"
+    ignored = reports.record(offset=2, topic="rule.published")
+    assert await reports.consumer.process(ignored) is Outcome.PROCESSED
+    assert reports.producer.sent == []
+
+
+async def test_a_report_the_rulebook_cannot_place_is_dead_lettered(inbox: Engine) -> None:
+    reports = Reports(inbox)
+    unknown = reports.record(rule_version_id=str(uuid4()))
+    assert await reports.consumer.process(unknown) is Outcome.DEAD
+    refused = reports.record(offset=1, category="typo")
+    assert await reports.consumer.process(refused) is Outcome.DEAD
+    nobody = reports.record(offset=2, tenant=None)
+    assert await reports.consumer.process(nobody) is Outcome.DEAD
+    assert reports.producer.topics() == [REPORT_DLQ] * 3
+    assert reports.store.error_reviews() == []
+
+
+async def test_a_report_of_an_erased_tenant_is_only_marked_processed(inbox: Engine) -> None:
+    reports = Reports(inbox)
+    reports.erased.mark(
+        TenantDataErased(
+            tenant_id=REPORT_TENANT,
+            service="rulebook",
+            deletion_event_id=EventId.new(),
+            erased_at=datetime(2000, 2, 1, tzinfo=UTC),
+        )
+    )
+    late = reports.record()
+    assert await reports.consumer.process(late) is Outcome.PROCESSED
+    assert await reports.consumer.process(late) is Outcome.SKIPPED
+    assert reports.store.error_reviews() == []
+    assert reports.producer.sent == []

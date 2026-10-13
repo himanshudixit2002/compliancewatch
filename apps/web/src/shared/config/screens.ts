@@ -849,7 +849,10 @@ const SCREEN_LIST = [
     section: "owner",
     roles: MEMBERS,
     tenantKinds: BUSINESS_TENANTS,
-    uses: [],
+    uses: [
+      uses("obligation", "POST", "/v1/obligation/obligations/{obligation_id}/error-reports"),
+      uses("obligation", "GET", "/v1/obligation/error-reports"),
+    ],
     awaits: [
       servicesTrack(
         "WP24",
@@ -859,7 +862,7 @@ const SCREEN_LIST = [
       ),
       servicesTrack("WP24", "obligation", "GET", "/v1/obligation/error-reports"),
     ],
-    status: "waiting",
+    status: "ready",
     e2e: [],
     guideRef: "16; G06",
     parent: "owner.obligation",
@@ -1551,12 +1554,16 @@ const SCREEN_LIST = [
     section: "admin",
     roles: REGULATORY,
     tenantKinds: ["internal"],
-    uses: [RELATIONS],
+    uses: [
+      uses("rulebook", "GET", "/v1/rulebook/error-reports"),
+      uses("rulebook", "POST", "/v1/rulebook/error-reports/{report_id}/decision"),
+      RELATIONS,
+    ],
     awaits: [
       servicesTrack("WP24", "rulebook", "GET", "/v1/rulebook/error-reports"),
       servicesTrack("WP24", "rulebook", "POST", "/v1/rulebook/error-reports/{report_id}/decision"),
     ],
-    status: "waiting",
+    status: "ready",
     e2e: [],
     guideRef: "16; G06",
     nav: { group: "review", order: 3 },

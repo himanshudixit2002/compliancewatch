@@ -13,10 +13,10 @@ Two business owners sign up, and the first has data in every service: its consen
 reminders, its billing customer and a subscription with a checkout link, an idempotency key at
 every service that keeps them, its GSTIN registration at profile, a recipient and an opt-in
 preference at notification for a number the second tenant registered too, plus a number of its
-own, its notifications, obligations with their history, comments and a reminder, and the
-engine's decisions, review item and directory entries (the last ones stored as the worker's
-consumers would have stored them). The first owner asks for its deletion. From then on the
-tenant signs nobody in.
+own, its notifications, obligations with their history, comments, an error report and a
+reminder, the report's review at the rulebook, and the engine's decisions, review item and
+directory entries (the last ones stored as the worker's consumers would have stored them). The
+first owner asks for its deletion. From then on the tenant signs nobody in.
 
 With the flag ``identity.tenant_erasure`` on, every service answers the first pass; identity
 then holds the second pass back (``CW_IDENTITY_ERASURE_SECOND_PASS_SECONDS``), and once it is
@@ -24,7 +24,8 @@ due every service answers it too and the request completes. Every collection of 
 store is then walked, whatever it is called: none holds a row of the tenant but those of a table
 its service says it retained (the pseudonymised consents and billing customer, the erased tenant
 and its markers, the data request, the outbox, the rule-level caches, the rulebook's regulatory
-data) and the audit log, kept seven years. The audit trail shows the request, both passes and
+data, among it the report's review with its tenant nulled and its text emptied) and the audit
+log, kept seven years. The audit trail shows the request, both passes and
 each service's answers; the second tenant's data is untouched; the owner cannot sign in, every
 service's routes answer the tenant 410, and a late obligation event queues nothing. A forged
 deletion event for the second tenant erases nothing anywhere: every service refuses it and says
@@ -92,6 +93,12 @@ from notification.infrastructure.erasure import MemoryNotificationEraser
 from notification.infrastructure.memory import MemoryStore as NotificationStore
 from notification.worker import GROUP_ID as NOTIFICATIONS_GROUP
 from notification.worker import obligation_handler
+from obligation.domain.error_reports import (
+    ErrorCategory,
+    ErrorReport,
+    ErrorReportId,
+    ErrorReportStatus,
+)
 from obligation.domain.reminders import Reminder
 from obligation.infrastructure.erasure import MemoryObligationEraser
 from obligation.infrastructure.memory import MemoryStore as ObligationStore
@@ -120,6 +127,8 @@ from py_common.outbox import (
 from py_common.outbox.consumer import Handler
 from py_common.outbox.store import ProcessedStore
 from py_common.outbox.testing import FakeProducer
+from rulebook.domain.error_reports import ErrorCategory as ReviewCategory
+from rulebook.domain.error_reports import ErrorReview, review_id_for
 from rulebook.infrastructure.erasure import MemoryRulebookEraser
 from rulebook.infrastructure.memory import MemoryKnowledgeStore
 
@@ -172,6 +181,7 @@ TABLES: Final[Mapping[str, Mapping[str, str]]] = {
         "events": "outbox_event",
         "changes": "obligation_change",
         "comments": "obligation_comment",
+        "error_reports": "error_report",
         "reminders": "obligation_reminder",
         "rule_versions": "rule_version_ref",
         "decisions": "obligation_decision",
@@ -204,6 +214,7 @@ TABLES: Final[Mapping[str, Mapping[str, str]]] = {
         "idempotency": "idempotency_key",
     },
     "rulebook": {
+        "_tables.error_reviews": "error_report_review",
         "answers": "outbox_event",
         "erased": "erased_tenant",
         "_audit": AUDIT,
@@ -516,17 +527,46 @@ def recipient(client: httpx2.Client, tenant: dict[str, str], *phones: str) -> No
 
 def stock_the_stores(services: Services, tenant: TenantId) -> None:
     """What the worker's consumers and the other routes store for a tenant: obligations with
-    their history, comments and a reminder, the engine's decisions with a review item and
-    directory entries, notifications queued for its number, its billing customer with a
-    subscription and its checkout link, and an idempotency key at every service that keeps
-    them."""
+    their history, comments, an error report and a reminder, the report's review at the
+    rulebook, the engine's decisions with a review item and directory entries, notifications
+    queued for its number, its billing customer with a subscription and its checkout link, and an
+    idempotency key at every service that keeps them."""
+    _, reported_version = services.rulebook.add_rule(
+        f"example_rule_{tenant.value.hex[:8]}", title="Example rule (synthetic)"
+    )
     for index in range(2):
         records = tenant_records(tenant, WHEN + timedelta(minutes=index))
+        report = ErrorReport(
+            id=ErrorReportId.new(),
+            tenant_id=tenant,
+            obligation_id=records.obligation.id,
+            business_id=records.obligation.business_id,
+            rule_version_id=reported_version,
+            category=ErrorCategory.DUE_DATE,
+            description="Example: the due date reads the 20th; call [PHONE] (synthetic).",
+            status=ErrorReportStatus.SUBMITTED,
+            submitted_by=None,
+            submitted_at=WHEN,
+        )
         with services.obligation(tenant) as uow:
             uow.obligations.add(records.obligation)
             for change in records.changes:
                 uow.history.append(change)
             uow.comments.add(records.comment)
+            uow.error_reports.add(report)
+        with services.rulebook() as knowledge:
+            knowledge.error_reviews.add(
+                ErrorReview(
+                    review_id=review_id_for(report.id.value),
+                    report_id=report.id.value,
+                    tenant_id=tenant,
+                    obligation_id=report.obligation_id,
+                    rule_version_id=reported_version,
+                    category=ReviewCategory.DUE_DATE,
+                    description_masked=report.description,
+                    received_at=WHEN,
+                )
+            )
         due_at = records.obligation.due_at
         assert due_at is not None
         with services.obligation.lock:
@@ -710,6 +750,7 @@ def test_with_the_flag_on_the_deletion_leaves_no_row_of_the_tenant(tmp_path: Pat
                 "obligation": {"obligation", "obligation_reminder", "idempotency_key"},
                 "notification": {"notification", "work_index", "channel_preference"},
                 "applicability-engine": {"applicability_decision", "review_item"},
+                "rulebook": {"error_report_review"},
             }.items():
                 assert tables <= set(stocked[service]), (service, stocked[service])
             theirs = services.walk(other)
@@ -787,6 +828,16 @@ def test_with_the_flag_on_the_deletion_leaves_no_row_of_the_tenant(tmp_path: Pat
             assert "rule_version_ref" in retained["obligation"]
             assert "fanout_run" in retained["applicability-engine"]
             assert "rule_candidate" in retained["rulebook"]
+            reviews = [r for r in services.rulebook.error_reviews() if r.tenant_id is None]
+            assert len(reviews) == 2, "the tenant's reviews lost their tenant"
+            assert {r.description_masked for r in reviews} == {""}, "and their text"
+            assert all(
+                r.tenant_id == other or r.tenant_id is None
+                for r in services.rulebook.error_reviews()
+            )
+            assert services.obligation.error_reports == {
+                k: v for k, v in services.obligation.error_reports.items() if v.tenant_id == other
+            }
 
             erased = services.identity.tenants[tenant]
             assert (erased.status, erased.name) == (TenantStatus.ERASED, "")
