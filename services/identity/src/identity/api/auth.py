@@ -7,13 +7,17 @@
 - ``GET /me`` answers the signed-in user, their tenant, roles, session version and whether they
   signed in with a second factor, after checking the session version against the store.
 - ``POST /dev/provider-tokens`` signs a fake provider token for a phone number or an email
-  address. It answers only with ``CW_AUTH_PROVIDER=fake`` in local and test, and 404 otherwise.
+  address. With ``tenant_kind`` and ``roles`` it first makes the person a user holding those
+  roles in a tenant of that kind (a development persona, ``application.dev_personas``), so the
+  token exchanges for a session at once. It answers only with ``CW_AUTH_PROVIDER=fake`` in local
+  and test, and 404 otherwise.
 
 None of these but ``/me`` reads a bearer token: they are how a caller gets one.
 """
 
 from fastapi import APIRouter, Response
 
+from domain_kernel.ids import TenantId
 from identity.api.deps import SignedInUser, Tenant, Wired
 from identity.api.schemas import (
     DevProviderTokenIn,
@@ -26,7 +30,9 @@ from identity.api.schemas import (
     SessionIn,
     SessionOut,
 )
+from identity.application.dev_personas import DevPersona
 from identity.domain.errors import DevSignInUnavailableError
+from identity.domain.tenancy import Contact, TenantKind
 from py_common.problems import problem_responses
 
 JWKS_CACHE_CONTROL = "public, max-age=300"
@@ -74,12 +80,36 @@ def me(tenant: Tenant, principal: SignedInUser, wired: Wired) -> MeOut:
 
 @router.post(
     "/dev/provider-tokens",
-    summary="Sign a fake provider token (fake provider, local and test only)",
-    responses=problem_responses(404, 422),
+    summary="Sign a fake provider token, for a development persona made on the spot or not "
+    "(fake provider, local and test only)",
+    # 403: the persona's tenant is not active; 409: the contact signs in to another tenant
+    # already, or the roles asked for would leave the tenant without an admin; 422: roles the
+    # kind lacks, or a tenant of another kind
+    responses=problem_responses(403, 404, 409, 422),
 )
 def dev_provider_token(body: DevProviderTokenIn, wired: Wired) -> DevProviderTokenOut:
     fake = wired.dev_provider
-    if fake is None:
+    personas = wired.provision_dev_persona
+    if fake is None or personas is None:
         raise DevSignInUnavailableError()
-    token = fake.issue(email=body.email or "", phone=body.phone or "", aal=body.aal)
-    return DevProviderTokenOut(provider_token=token, subject=fake.verify(token).subject)
+    contact = Contact.of(email=body.email, phone=body.phone)
+    tenant_id = user_id = None
+    if body.tenant_kind is not None and body.roles is not None:
+        made = personas.run(
+            DevPersona(
+                contact=contact,
+                kind=TenantKind(body.tenant_kind),
+                roles=frozenset(body.roles),
+                display_name=body.display_name,
+                tenant_id=None if body.tenant_id is None else TenantId(body.tenant_id),
+                tenant_name=body.tenant_name,
+            )
+        )
+        tenant_id, user_id = made.tenant.id.value, made.user.id.value
+    token = fake.issue(email=contact.email, phone=contact.phone, aal=body.aal)
+    return DevProviderTokenOut(
+        provider_token=token,
+        subject=fake.verify(token).subject,
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )

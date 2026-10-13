@@ -15,6 +15,7 @@ from identity.application.data_requests import (
     RequestDeletion,
     RequestExport,
 )
+from identity.application.dev_personas import ProvisionDevPersona
 from identity.application.entitlements import ReadEntitlements
 from identity.application.erasure import CheckErasure
 from identity.application.sessions import ExchangeSession, IssueServiceToken
@@ -53,6 +54,8 @@ class Wiring:
     provider: IdentityProvider
     dev_provider: DevIdentityProvider | None
     """The fake provider, for the dev sign-in route: set only with it in local and test."""
+    provision_dev_persona: ProvisionDevPersona | None
+    """What the dev sign-in route makes a persona with; set with ``dev_provider``."""
     exchange_session: ExchangeSession
     issue_service_token: IssueServiceToken
     create_tenant: CreateTenant

@@ -739,6 +739,12 @@
             "title": "Aal",
             "type": "string"
           },
+          "display_name": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Display Name",
+            "type": "string"
+          },
           "email": {
             "anyOf": [
               {
@@ -764,6 +770,58 @@
             ],
             "description": "E.164 number",
             "title": "Phone"
+          },
+          "roles": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/Role"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The persona's roles, which the tenant's kind must allow; with tenant_kind",
+            "title": "Roles"
+          },
+          "tenant_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The persona's tenant: an existing one, or the id the new one gets. Absent, a new tenant for a business or CA firm, and the one development internal tenant for the regulatory roles",
+            "title": "Tenant Id"
+          },
+          "tenant_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "business",
+                  "ca_firm",
+                  "internal"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A development persona: with roles, the person is made a user of a tenant of this kind before the token is signed, so the token exchanges for a session at once",
+            "title": "Tenant Kind"
+          },
+          "tenant_name": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Tenant Name",
+            "type": "string"
           }
         },
         "title": "DevProviderTokenIn",
@@ -779,6 +837,32 @@
           "subject": {
             "title": "Subject",
             "type": "string"
+          },
+          "tenant_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The persona's tenant, when the request made or found one",
+            "title": "Tenant Id"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The persona's user, likewise",
+            "title": "User Id"
           }
         },
         "required": [
@@ -1501,6 +1585,10 @@
             "title": "Access Token",
             "type": "string"
           },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
           "expires_in": {
             "description": "Seconds until the token expires",
             "title": "Expires In",
@@ -1518,10 +1606,18 @@
             "title": "Roles",
             "type": "array"
           },
+          "session_version": {
+            "description": "The user's session version the token carries; a bump revokes older tokens",
+            "title": "Session Version",
+            "type": "integer"
+          },
           "tenant_id": {
             "format": "uuid",
             "title": "Tenant Id",
             "type": "string"
+          },
+          "tenant_kind": {
+            "$ref": "#/components/schemas/TenantKind"
           },
           "token_type": {
             "const": "Bearer",
@@ -1539,9 +1635,12 @@
           "access_token",
           "expires_in",
           "tenant_id",
+          "tenant_kind",
           "user_id",
+          "display_name",
           "roles",
-          "mfa"
+          "mfa",
+          "session_version"
         ],
         "title": "SessionOut",
         "type": "object"
@@ -3302,6 +3401,16 @@
             },
             "description": "Bad Request"
           },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "404": {
             "content": {
               "application/problem+json": {
@@ -3311,6 +3420,16 @@
               }
             },
             "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "content": {
@@ -3323,7 +3442,7 @@
             "description": "Unprocessable Entity"
           }
         },
-        "summary": "Sign a fake provider token (fake provider, local and test only)",
+        "summary": "Sign a fake provider token, for a development persona made on the spot or not (fake provider, local and test only)",
         "tags": [
           "identity"
         ]

@@ -23,7 +23,7 @@ Design reference: Project Foundation guide, sections 7, 14 and 16.
 | `GET /v1/identity/users/{user_id}/membership` | Whether a user belongs to the tenant, with their roles and status and no contact details, for a service acting for it with tenant:act (the obligation service checks an assignee); a person's token is refused, and 404 names no such user or tenant |
 | `POST /v1/identity/service-tokens` | Exchange a service client's id and secret for a service token with the client's scopes |
 | `GET /v1/identity/.well-known/jwks.json` | The public keys every service verifies access tokens with |
-| `POST /v1/identity/dev/provider-tokens` | Development sign-in: a fake provider token for a phone number or an email address; only with `CW_AUTH_PROVIDER=fake` in local and test, 404 elsewhere |
+| `POST /v1/identity/dev/provider-tokens` | Development sign-in: a fake provider token for a phone number or an email address; with `tenant_kind` and `roles` the person is first made a user with those roles in a tenant of that kind (a development persona: `tenant_id` names the tenant or the id a new one gets, the regulatory roles share the one development internal tenant), so the token exchanges for a session at once; only with `CW_AUTH_PROVIDER=fake` in local and test, 404 elsewhere |
 | `POST /v1/identity/consents` | Record a consent (`granted: true` needs `notice_version`) or a withdrawal; append-only |
 | `GET /v1/identity/consents?subject=` | Current state per purpose and the full history for a subject (a user id or an E.164 number) |
 | `POST /v1/identity/channel-consents` | Record a keyword opt-in or opt-out for a number (service token); 201, or 200 with the stored record when the message was recorded already |

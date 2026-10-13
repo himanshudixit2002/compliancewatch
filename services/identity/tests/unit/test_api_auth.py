@@ -33,6 +33,7 @@ SERVICE_TOKENS = "/v1/identity/service-tokens"
 JWKS = "/v1/identity/.well-known/jwks.json"
 ME = "/v1/identity/me"
 DEV_TOKENS = "/v1/identity/dev/provider-tokens"
+USERS = "/v1/identity/users"
 CHANNEL_CONSENTS = "/v1/identity/channel-consents"
 
 
@@ -96,6 +97,12 @@ def test_sign_up_then_sign_in_in_token_mode(token_mode: TestClient) -> None:
     assert (user["roles"], user["phone"], user["display_name"]) == (["owner"], PHONE, "Asha")
     assert session["tenant_id"] == tenant["id"] == user["tenant_id"]
     assert (session["token_type"], session["expires_in"], session["mfa"]) == ("Bearer", 600, False)
+    # What the web's cookie needs without a second call: the kind, the name and the version.
+    assert (session["tenant_kind"], session["display_name"], session["session_version"]) == (
+        "business",
+        "Asha",
+        0,
+    )
     exchanged = token_mode.post(SESSIONS, json={"provider_token": provider_token(token_mode)})
     assert exchanged.status_code == 200, exchanged.text
     assert exchanged.json()["user_id"] == user["id"]
@@ -328,6 +335,148 @@ def test_the_dev_sign_in_answers_with_the_fake_provider_locally(token_mode: Test
     )
     assert token_mode.post(DEV_TOKENS, json={}).status_code == 422
     assert token_mode.post(DEV_TOKENS, json={"phone": "12345"}).status_code == 422
+
+
+# ---------------------------------------------------------------- development personas
+
+
+def persona(client: TestClient, **fields: Any) -> dict[str, Any]:
+    body = {"phone": PHONE, "tenant_kind": "business", "roles": ["owner"], **fields}
+    response = client.post(DEV_TOKENS, json=body)
+    assert response.status_code == 200, response.text
+    answer: dict[str, Any] = response.json()
+    return answer
+
+
+def exchange(client: TestClient, token: str) -> dict[str, Any]:
+    response = client.post(SESSIONS, json={"provider_token": token})
+    assert response.status_code == 200, response.text
+    session: dict[str, Any] = response.json()
+    return session
+
+
+def test_a_development_persona_is_made_and_signs_in_at_once(dual_mode: TestClient) -> None:
+    made = persona(dual_mode, display_name="Example owner")
+    session = exchange(dual_mode, made["provider_token"])
+    assert (session["tenant_id"], session["user_id"]) == (made["tenant_id"], made["user_id"])
+    assert (session["tenant_kind"], session["roles"], session["display_name"]) == (
+        "business",
+        ["owner"],
+        "Example owner",
+    )
+    me = dual_mode.get(ME, headers=bearer(session["access_token"])).json()
+    assert (me["tenant"]["kind"], me["tenant"]["name"], me["phone"]) == (
+        "business",
+        "Development business (synthetic)",
+        PHONE,
+    )
+    # The same person again is the same user in the same tenant, and nothing is revoked.
+    again = persona(dual_mode, display_name="Example owner")
+    assert (again["tenant_id"], again["user_id"]) == (made["tenant_id"], made["user_id"])
+    assert dual_mode.get(ME, headers=bearer(session["access_token"])).status_code == 200
+    # Other roles change the user's roles and bump the version: the older session is revoked.
+    promoted = persona(dual_mode, roles=["owner", "compliance_lead"])
+    assert promoted["user_id"] == made["user_id"]
+    revoked = dual_mode.get(ME, headers=bearer(session["access_token"]))
+    assert problem(revoked) == "identity-session-revoked"
+    fresh = exchange(dual_mode, promoted["provider_token"])
+    assert (fresh["roles"], fresh["session_version"]) == (["compliance_lead", "owner"], 1)
+
+
+def test_development_personas_of_the_regulatory_team_share_one_tenant(
+    dual_mode: TestClient,
+) -> None:
+    admin = persona(dual_mode, phone=PHONE, tenant_kind="internal", roles=["admin"], aal="aal2")
+    analyst = persona(dual_mode, phone=OTHER_PHONE, tenant_kind="internal", roles=["analyst"])
+    assert admin["tenant_id"] == analyst["tenant_id"]
+    admin_session = exchange(dual_mode, admin["provider_token"])
+    assert (admin_session["tenant_kind"], admin_session["mfa"]) == ("internal", True)
+    users = dual_mode.get(USERS, headers=bearer(admin_session["access_token"]))
+    assert users.status_code == 200, users.text
+    assert sorted(user["roles"][0] for user in users.json()["items"]) == ["admin", "analyst"]
+    # The admin's roles need a second factor: a one-factor token does not exchange.
+    one_factor = dual_mode.post(
+        SESSIONS,
+        json={
+            "provider_token": persona(dual_mode, tenant_kind="internal", roles=["admin"])[
+                "provider_token"
+            ]
+        },
+    )
+    assert problem(one_factor) == "identity-mfa-required"
+
+
+def test_a_development_persona_joins_the_tenant_the_caller_names(dual_mode: TestClient) -> None:
+    tenant_id = str(uuid4())
+    owner = persona(dual_mode, tenant_id=tenant_id, tenant_name="Example Traders")
+    assert owner["tenant_id"] == tenant_id
+    staff = persona(dual_mode, phone=OTHER_PHONE, tenant_id=tenant_id, roles=["staff"])
+    assert staff["tenant_id"] == tenant_id
+    session = exchange(dual_mode, staff["provider_token"])
+    assert (session["tenant_id"], session["roles"]) == (tenant_id, ["staff"])
+    me = dual_mode.get(ME, headers=bearer(session["access_token"])).json()
+    assert me["tenant"]["name"] == "Example Traders"
+    # A persona never moves: the same contact in another tenant is refused.
+    moved = dual_mode.post(
+        DEV_TOKENS,
+        json={
+            "phone": OTHER_PHONE,
+            "tenant_kind": "business",
+            "roles": ["staff"],
+            "tenant_id": str(uuid4()),
+        },
+    )
+    assert moved.status_code == 409
+    assert problem(moved) == "identity-subject-registered"
+    # Nor does a tenant change its kind.
+    wrong_kind = dual_mode.post(
+        DEV_TOKENS,
+        json={
+            "phone": "+919800000001",
+            "tenant_kind": "ca_firm",
+            "roles": ["ca_staff"],
+            "tenant_id": tenant_id,
+        },
+    )
+    assert wrong_kind.status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("body", "status", "slug"),
+    [
+        ({"phone": PHONE, "roles": ["owner"]}, 422, None),
+        ({"phone": PHONE, "tenant_kind": "business"}, 422, None),
+        ({"phone": PHONE, "tenant_id": str(uuid4())}, 422, None),
+        ({"phone": PHONE, "tenant_kind": "business", "roles": []}, 422, None),
+        (
+            {"phone": PHONE, "tenant_kind": "business", "roles": ["analyst"]},
+            422,
+            "identity-role-not-allowed",
+        ),
+    ],
+)
+def test_a_development_persona_is_refused_when_its_fields_disagree(
+    dual_mode: TestClient, body: dict[str, Any], status: int, slug: str | None
+) -> None:
+    response = dual_mode.post(DEV_TOKENS, json=body)
+    assert response.status_code == status, response.text
+    if slug is not None:
+        assert problem(response) == slug
+
+
+def test_a_development_persona_keeps_its_last_admin(dual_mode: TestClient) -> None:
+    owner = persona(dual_mode)
+    demoted = dual_mode.post(
+        DEV_TOKENS,
+        json={
+            "phone": PHONE,
+            "tenant_kind": "business",
+            "roles": ["staff"],
+            "tenant_id": owner["tenant_id"],
+        },
+    )
+    assert demoted.status_code == 409
+    assert problem(demoted) == "identity-last-admin"
 
 
 @pytest.mark.parametrize(
