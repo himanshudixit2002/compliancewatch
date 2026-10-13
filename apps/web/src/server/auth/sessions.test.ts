@@ -8,11 +8,14 @@ import { loadEnv } from "../env";
 import { isProblem } from "../result";
 import type { ProviderSession } from "./provider";
 import {
+  PROVIDER_TOKEN_MARGIN_SECONDS,
   claimsFromMe,
   claimsFromSessionOut,
   exchangeSession,
+  providerSessionOf,
   readMe,
   signUpTenant,
+  withProviderSession,
   type SessionOut,
 } from "./sessions";
 
@@ -69,8 +72,46 @@ describe("claimsFromSessionOut", () => {
       cwToken: "cw.user.0",
       cwTokenExpiresAt: 1_790_676_000 + 600,
       providerRefreshToken: "r",
+      providerAccessToken: "p",
+      providerAccessExpiresAt: 1,
       checkedAt: 1_790_676_000,
     });
+  });
+
+  it("hands the provider session back from the claims while its token has the margin left", () => {
+    const claims = claimsFromSessionOut(
+      out,
+      { ...provider, expiresAt: 1_790_676_000 + 300 },
+      "supabase",
+      NOW,
+      28_800,
+    );
+    if (claims === null) throw new Error("no claims");
+    expect(providerSessionOf(claims, 1_790_676_000)).toEqual({
+      accessToken: "p",
+      refreshToken: "r",
+      expiresAt: 1_790_676_000 + 300,
+      aal: "aal2",
+      subject: "",
+    });
+    expect(providerSessionOf({ ...claims, mfa: false }, 1_790_676_000)?.aal).toBe("aal1");
+    const edge = 1_790_676_000 + 300 - PROVIDER_TOKEN_MARGIN_SECONDS;
+    expect(providerSessionOf(claims, edge)).not.toBeNull();
+    expect(providerSessionOf(claims, edge + 1)).toBeNull();
+    expect(providerSessionOf(claims, 1_790_676_000, 301)).toBeNull();
+    expect(providerSessionOf({ ...claims, providerAccessToken: undefined }, 0)).toBeNull();
+    expect(providerSessionOf({ ...claims, providerRefreshToken: undefined }, 0)).toBeNull();
+    const rotated = withProviderSession(
+      { ...claims, refreshNotBefore: 5 },
+      { accessToken: "p2", refreshToken: "r2", expiresAt: 9, aal: "aal2", subject: "s" },
+    );
+    expect(rotated).toMatchObject({
+      providerAccessToken: "p2",
+      providerRefreshToken: "r2",
+      providerAccessExpiresAt: 9,
+      cwToken: "cw.user.0",
+    });
+    expect(rotated).not.toHaveProperty("refreshNotBefore");
   });
 
   it("names a person without a name by their id and refuses an unreadable answer", () => {
@@ -93,7 +134,9 @@ describe("exchangeSession", () => {
       roles: ["owner"],
       displayName: "Example owner",
     });
-    const outcome = await exchangeSession(providerSession(identity), "fake", {
+    // One session for the call and the assertion: a token minted a second later differs.
+    const session = providerSession(identity);
+    const outcome = await exchangeSession(session, "fake", {
       env,
       fetchImpl: identity.fetchImpl,
       now: NOW,
@@ -111,12 +154,12 @@ describe("exchangeSession", () => {
       provider: "fake",
       cwToken: identity.accessToken(user),
       providerRefreshToken: "fake.v1.refresh",
+      providerAccessToken: session.accessToken,
+      providerAccessExpiresAt: session.expiresAt,
     });
     expect(outcome.claims.expiresAt - outcome.claims.issuedAt).toBe(28_800);
     expect(identity.requests[0]?.headers.authorization).toBeUndefined();
-    expect(identity.requests[0]?.body).toEqual({
-      provider_token: providerSession(identity).accessToken,
-    });
+    expect(identity.requests[0]?.body).toEqual({ provider_token: session.accessToken });
   });
 
   it("maps identity's answers to the steps of the flow", async () => {

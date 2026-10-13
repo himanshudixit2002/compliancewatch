@@ -3645,6 +3645,7 @@
   "mfa.error.noSession": "Sign in before verifying a second factor.",
   "mfa.error.noFactor": "No authenticator app is set up for this account yet.",
   "mfa.error.signInFirst": "Finish signing in before removing an authenticator app.",
+  "mfa.error.providerSessionStale": "The sign-in provider's session is no longer current. Sign in again to manage two-step verification.",
   "account.email": "Email",
   "account.phone": "Mobile number",
   "account.tenantName": "Account name",

@@ -1,14 +1,18 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { epochSeconds } from "@/entities/session/mappers";
+import type { SessionClaims } from "@/entities/session/types";
 import { readPending } from "@/server/auth/pending";
 import type { PendingSignIn } from "@/server/auth/pending";
 import { providerFor } from "@/server/auth/provider";
 import type { AuthProvider, ProviderSession, TotpEnrolment } from "@/server/auth/provider";
+import { providerSessionOf, withProviderSession } from "@/server/auth/sessions";
 import { completeMfa, signInWithProviderSession, type SignInContext } from "@/server/auth/usecases";
 import { verifySession } from "@/server/dal";
 import { getEnv } from "@/server/env";
 import { err, toActionState, webError } from "@/server/result";
+import { setSessionCookie } from "@/server/session";
 import { hrefFor, screenById } from "@/shared/config/screens";
 import { t } from "@/shared/i18n";
 import { actionFailure, fieldFailure, type ActionState } from "@/shared/lib/action-state";
@@ -21,8 +25,11 @@ import { parseMfaForm } from "./model/sign-in";
  * enrols or removes a factor) or with a pending sign-in (whose roles need the second factor
  * before identity issues a session). After a verification identity is asked again, so the
  * session carries `mfa: true`: a pending sign-in completes (the exchange, or the sign-up the
- * pending cookie kept) and a signed-in person gets a fresh cookie. The provider session a
- * signed-in person acts with comes from the refresh token the cookie carries.
+ * pending cookie kept) and a signed-in person gets a fresh cookie. A signed-in person acts with
+ * the provider session the cookie carries; when its access token is about to expire the action
+ * refreshes it and writes the rotated pair back at once, and a factor verify, which rotates
+ * the pair too, is written back before anything else runs: GoTrue spends a refresh token on
+ * use, so a pair that misses the cookie ends the session at the next refresh.
  */
 export interface MfaView {
   enrolment?: TotpEnrolment;
@@ -34,6 +41,8 @@ interface MfaContext {
   provider: AuthProvider;
   session: ProviderSession;
   pending: PendingSignIn | null;
+  /** The signed-in person's claims, which take the provider pair whenever it rotates. */
+  claims: SessionClaims | null;
   next?: string;
 }
 
@@ -45,7 +54,12 @@ async function resolve(next: string | undefined): Promise<Resolved> {
   if (!provider.ok) return { ok: false, state: toActionState<MfaView>(err(provider.error)) };
   const pending = await readPending();
   if (pending !== null) {
-    const ctx: MfaContext = { provider: provider.value, session: pending.session, pending };
+    const ctx: MfaContext = {
+      provider: provider.value,
+      session: pending.session,
+      pending,
+      claims: null,
+    };
     const wanted = next ?? pending.next;
     if (wanted !== undefined) ctx.next = wanted;
     return { ok: true, ctx };
@@ -59,11 +73,26 @@ async function resolve(next: string | undefined): Promise<Resolved> {
       ),
     };
   }
+  const current = providerSessionOf(claims, epochSeconds(new Date()));
+  if (current !== null) {
+    const ready: MfaContext = { provider: provider.value, session: current, pending: null, claims };
+    if (next !== undefined) ready.next = next;
+    return { ok: true, ctx: ready };
+  }
+  // The cookie's provider token is stale (the proxy's upkeep was deferred, or the cookie is
+  // older than this field): refresh, and write the rotated pair back whatever the action answers.
   const refreshed = await provider.value.refresh(claims.providerRefreshToken);
   if (!refreshed.ok) return { ok: false, state: toActionState<MfaView>(err(refreshed.error)) };
-  const ctx: MfaContext = { provider: provider.value, session: refreshed.value, pending: null };
-  if (next !== undefined) ctx.next = next;
-  return { ok: true, ctx };
+  const rotated = withProviderSession(claims, refreshed.value);
+  await setSessionCookie(rotated);
+  const fresh: MfaContext = {
+    provider: provider.value,
+    session: refreshed.value,
+    pending: null,
+    claims: rotated,
+  };
+  if (next !== undefined) fresh.next = next;
+  return { ok: true, ctx: fresh };
 }
 
 function signInContext(ctx: MfaContext): SignInContext {
@@ -77,6 +106,9 @@ function signInContext(ctx: MfaContext): SignInContext {
 
 /** The verified (aal2) provider session becomes the session: pending completes, signed-in refreshes. */
 async function settle(ctx: MfaContext, verified: ProviderSession): Promise<ActionState<MfaView>> {
+  // The verify rotated the pair: a signed-in person's cookie takes it before the exchange, so
+  // an identity that does not answer leaves a session that still refreshes.
+  if (ctx.claims !== null) await setSessionCookie(withProviderSession(ctx.claims, verified));
   const context = signInContext(ctx);
   const step =
     ctx.pending === null
@@ -171,6 +203,7 @@ export async function removeAuthenticator(
     parsed.value.code,
   );
   if (!verified.ok) return toActionState<MfaView>(err(verified.error));
+  if (ctx.claims !== null) await setSessionCookie(withProviderSession(ctx.claims, verified.value));
   const removed = await ctx.provider.mfa.remove(verified.value, parsed.value.factorId);
   if (!removed.ok) return toActionState<MfaView>(err(removed.error));
   redirect(hrefFor(screenById("account.mfa")));

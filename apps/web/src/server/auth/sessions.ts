@@ -79,8 +79,59 @@ export function claimsFromSessionOut(
     cwToken: session.access_token,
     cwTokenExpiresAt: epochSeconds(now) + session.expires_in,
     providerRefreshToken: provider.refreshToken,
+    providerAccessToken: provider.accessToken,
+    providerAccessExpiresAt: provider.expiresAt,
     checkedAt: epochSeconds(now),
   };
+}
+
+/** How long a provider access token must still have for a factor call made with it. */
+export const PROVIDER_TOKEN_MARGIN_SECONDS = 30;
+
+/**
+ * The provider session the cookie carries: null without one, or once its access token has
+ * under `marginSeconds` left, when a refresh at the provider is due (an action or the proxy
+ * does it and writes the rotated pair back; a render never refreshes, since it cannot write).
+ * The level is the session's `mfa`; the subject is not kept in the cookie.
+ */
+export function providerSessionOf(
+  claims: SessionClaims,
+  now: number,
+  marginSeconds: number = PROVIDER_TOKEN_MARGIN_SECONDS,
+): ProviderSession | null {
+  if (
+    claims.providerAccessToken === undefined ||
+    claims.providerAccessExpiresAt === undefined ||
+    claims.providerRefreshToken === undefined
+  ) {
+    return null;
+  }
+  if (claims.providerAccessExpiresAt - now < marginSeconds) return null;
+  return {
+    accessToken: claims.providerAccessToken,
+    refreshToken: claims.providerRefreshToken,
+    expiresAt: claims.providerAccessExpiresAt,
+    aal: claims.mfa ? "aal2" : "aal1",
+    subject: "",
+  };
+}
+
+/**
+ * The claims with a provider session that rotated (a refresh, a factor verify): GoTrue spends
+ * the old refresh token, so the new pair must reach the cookie before anything else uses it.
+ */
+export function withProviderSession(
+  claims: SessionClaims,
+  session: ProviderSession,
+): SessionClaims {
+  const next: SessionClaims = {
+    ...claims,
+    providerAccessToken: session.accessToken,
+    providerAccessExpiresAt: session.expiresAt,
+    providerRefreshToken: session.refreshToken,
+  };
+  delete next.refreshNotBefore;
+  return next;
 }
 
 /** A person who gave no name is shown by the first eight characters of their user id. */

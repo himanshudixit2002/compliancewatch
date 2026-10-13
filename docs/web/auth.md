@@ -108,8 +108,11 @@ sequenceDiagram
 (`MFA_REQUIRED_ROLES`: analyst, reviewer, admin, ca_admin) and lacks it to `/account/mfa?next=`;
 the admin layout and the two team pages call it. A person whose roles need none may enrol all
 the same. The proxy lets `cw_pending` alone through to `/account/mfa`, since a pending sign-in
-has no session yet. With Supabase, removing a factor needs a fresh code; with the fake, the
-page has nothing to enrol or remove.
+has no session yet. With Supabase, the page lists the factors from `GET /auth/v1/user` with the
+provider session the cookie carries (or the pending one), never refreshing in the render; an
+action whose provider token is stale refreshes it and writes the rotated pair back before
+anything else, and a verify, which rotates the pair too, writes it back before the exchange.
+Removing a factor needs a fresh code; with the fake, the page has nothing to enrol or remove.
 
 ### Refresh, re-read and revocation
 
@@ -120,10 +123,12 @@ sequenceDiagram
     participant P as Provider
     participant I as Identity
     B->>X: any page request with cw_session
-    alt the identity token has under 120 s left
-        X->>P: refresh (the cookie's refresh token)
-        P-->>X: provider session
-        X->>I: POST /v1/identity/sessions
+    alt the identity token, or the provider's, has under 120 s left
+        opt the provider's access token has under 120 s left
+            X->>P: refresh (the cookie's refresh token)
+            P-->>X: provider session (a rotated pair)
+        end
+        X->>I: POST /v1/identity/sessions (the cookie's provider token)
         I-->>X: a fresh token (or a refusal: revoked)
     end
     alt /me was last read over 300 s ago
@@ -137,8 +142,17 @@ sequenceDiagram
 cannot write a cookie). The margins are `CW_WEB_TOKEN_REFRESH_SECONDS` (120) and
 `CW_WEB_SESSION_RECHECK_SECONDS` (300; 0 re-reads on every request, which the e2e run sets to 2
 seconds). A refresh keeps the session's own window: a cookie still ends eight hours after
-sign-in. An identity that does not answer, or that reads no token (header mode), defers: the
-claims stand and `checkedAt` is bumped so the next request does not ask again at once.
+sign-in. The cookie carries the provider's access token with its refresh token, so a new
+identity token is usually one exchange of the token already held; the provider is asked for a
+new pair only when that token nears its expiry (GoTrue's last an hour), and GoTrue spends the
+refresh token it was given, so the rotated pair is written back on every path that gets one
+(the proxy, the MFA actions), and a refresh is never made where no cookie can be written. An
+identity that does not answer, or that reads no token (header mode), defers: the claims stand,
+with the pair the provider rotated if it did, and `checkedAt` is bumped so the next request does
+not ask again at once; a provider that rate-limits the server (429) defers too, with
+`refreshNotBefore` set from its Retry-After (30 seconds without one) so the next requests do not
+retry at once. Only a refusal (an expired or revoked refresh token, a disabled user) is a
+revocation (D-073).
 
 A render that meets a 401 `auth-token-invalid` from any service, or `identity-session-revoked`
 from identity, on a call that carried the bearer ends on `/sign-in?reason=signed-out`
@@ -171,7 +185,9 @@ httpOnly, SameSite=Lax, Secure outside local, path `/`, eight hours
 | `issuedAt`, `expiresAt`       | now, now plus the lifetime                     | a refresh never extends them                                                             |
 | `cwToken`, `cwTokenExpiresAt` | `access_token`, now plus `expires_in`          | the bearer for the services (ES256 JWT with `sub`, `kind`, `tid`, `roles`, `sv`, `mfa`)  |
 | `providerRefreshToken`        | the provider session's refresh token           | what a refresh and a provider sign-out use; the fake's encodes the contact and the level |
+| `providerAccessToken`, `providerAccessExpiresAt` | the provider session's access token and expiry | what the factor calls and the re-exchange use; a refresh rotates both tokens, and the new pair is written back at once (D-073) |
 | `checkedAt`                   | now                                            | when `/me` was last read                                                                 |
+| `refreshNotBefore`            | absent                                         | set by the proxy after a rate-limited refresh: no retry before then                      |
 | `analyticsConsent`            | kept across refreshes                          | the analytics consent the onboarding recorded                                            |
 
 No email, phone or tenant name travels in the cookie: the account page reads them from `/me`

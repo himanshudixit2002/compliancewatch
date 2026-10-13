@@ -3,14 +3,16 @@ import "server-only";
 import { epochSeconds } from "@/entities/session/mappers";
 import type { SessionClaims } from "@/entities/session/types";
 import { getEnv, type WebEnv } from "../env";
-import { err, ok, type ApiError, type Result } from "../result";
+import type { ApiError } from "../result";
 import type { PendingContact, PendingSignIn, PendingSignUp } from "./pending";
 import type { AuthProvider, ProviderSession } from "./provider";
 import {
   claimsFromMe,
   exchangeSession,
+  providerSessionOf,
   readMe,
   signUpTenant,
+  withProviderSession,
   type ExchangeOutcome,
   type SessionDeps,
   type SignUpInput,
@@ -123,10 +125,21 @@ function at(deps: SessionDeps | undefined): number {
   return epochSeconds(deps?.now ?? new Date());
 }
 
-/** Whether the identity token is within the refresh margin of expiring (or has no expiry). */
+/** How long a rate-limited refresh waits before the next try when the provider named no Retry-After. */
+const RATE_LIMIT_BACKOFF_SECONDS = 30;
+
+/**
+ * Whether the identity token, or the provider's access token behind it, is within the refresh
+ * margin of expiring; never while a rate-limited refresh is waiting out its Retry-After.
+ */
 export function needsRefresh(claims: SessionClaims, now: number, env: WebEnv): boolean {
   if (claims.cwToken === undefined || claims.cwTokenExpiresAt === undefined) return false;
-  return claims.cwTokenExpiresAt - now < env.CW_WEB_TOKEN_REFRESH_SECONDS;
+  if (claims.refreshNotBefore !== undefined && now < claims.refreshNotBefore) return false;
+  const margin = env.CW_WEB_TOKEN_REFRESH_SECONDS;
+  if (claims.cwTokenExpiresAt - now < margin) return true;
+  return (
+    claims.providerAccessExpiresAt !== undefined && claims.providerAccessExpiresAt - now < margin
+  );
 }
 
 /** Whether /me was last read longer ago than the recheck interval. */
@@ -145,34 +158,73 @@ export type UpkeepOutcome =
   /** Identity could not be reached or reads no token: keep the claims, try again later. */
   | { kind: "deferred"; claims: SessionClaims; error: ApiError };
 
+export type RefreshOutcome =
+  | { ok: true; value: SessionClaims }
+  | {
+      ok: false;
+      error: ApiError;
+      /**
+       * The claims with the provider's rotated pair, when the provider refreshed but identity
+       * did not answer: a deferral keeps them, since the old refresh token is spent.
+       */
+      rotated?: SessionClaims;
+    };
+
 /**
- * A refresh through the provider and a new exchange: the same person, a fresh identity token.
- * The session's own window (`issuedAt`, `expiresAt`) is kept: a refresh never extends it.
+ * A new exchange for a fresh identity token: with the cookie's provider access token while it
+ * has more than the margin left, else after a refresh at the provider, whose rotated pair the
+ * new claims carry. The session's own window (`issuedAt`, `expiresAt`) is kept: a refresh never
+ * extends it.
  */
 export async function refreshSession(
   provider: AuthProvider,
   claims: SessionClaims,
   deps: SessionDeps = {},
-): Promise<Result<SessionClaims, ApiError>> {
-  if (claims.providerRefreshToken === undefined) {
-    return err(noRefresh("The session carries no refresh token; sign in again."));
+): Promise<RefreshOutcome> {
+  const env = deps.env ?? getEnv();
+  let session = providerSessionOf(claims, at(deps), env.CW_WEB_TOKEN_REFRESH_SECONDS);
+  let rotated: SessionClaims | undefined;
+  if (session === null) {
+    if (claims.providerRefreshToken === undefined) {
+      return {
+        ok: false,
+        error: noRefresh("The session carries no refresh token; sign in again."),
+      };
+    }
+    const refreshed = await provider.refresh(claims.providerRefreshToken);
+    if (!refreshed.ok) return { ok: false, error: refreshed.error };
+    session = refreshed.value;
+    rotated = withProviderSession(claims, session);
   }
-  const refreshed = await provider.refresh(claims.providerRefreshToken);
-  if (!refreshed.ok) return refreshed;
-  const outcome = await exchangeSession(refreshed.value, provider.name, deps);
+  const outcome = await exchangeSession(session, provider.name, deps);
   if (outcome.kind !== "signed-in") {
-    return err(
+    const error =
       outcome.kind === "failed" || outcome.kind === "provider-unavailable"
         ? outcome.error
-        : noRefresh(`The identity service answered ${outcome.kind} to the refresh.`),
-    );
+        : noRefresh(`The identity service answered ${outcome.kind} to the refresh.`);
+    return rotated === undefined ? { ok: false, error } : { ok: false, error, rotated };
   }
-  return ok({
-    ...outcome.claims,
-    issuedAt: claims.issuedAt,
-    expiresAt: claims.expiresAt,
-    ...(claims.analyticsConsent === undefined ? {} : { analyticsConsent: claims.analyticsConsent }),
-  });
+  return {
+    ok: true,
+    value: {
+      ...outcome.claims,
+      issuedAt: claims.issuedAt,
+      expiresAt: claims.expiresAt,
+      ...(claims.analyticsConsent === undefined
+        ? {}
+        : { analyticsConsent: claims.analyticsConsent }),
+    },
+  };
+}
+
+/** A refresh failure nothing answered for: identity or the provider down, or the provider rate-limiting the server. */
+function isDeferrable(error: ApiError): boolean {
+  return (
+    error.kind === "network" ||
+    error.kind === "unavailable" ||
+    error.kind === "server" ||
+    error.kind === "rate_limited"
+  );
 }
 
 function noRefresh(detail: string): ApiError {
@@ -195,7 +247,8 @@ function noRefresh(detail: string): ApiError {
  * expire, re-read /me when the last read is old, and sign the person out when identity says the
  * session is revoked (a bumped session version, a disabled user, a tenant being deleted). A
  * refresh that fails because identity refused the person is a revocation too; one that fails
- * because nothing answered is deferred.
+ * because nothing answered, or because the provider rate-limited the server, is deferred with
+ * whatever the provider rotated kept, and a rate limit waits out its Retry-After.
  */
 export async function keepSessionCurrent(
   provider: AuthProvider,
@@ -210,10 +263,16 @@ export async function keepSessionCurrent(
     const refreshed = await refreshSession(provider, current, deps);
     if (!refreshed.ok) {
       const { error } = refreshed;
-      if (error.kind === "network" || error.kind === "unavailable" || error.kind === "server") {
-        return { kind: "deferred", claims: current, error };
-      }
-      return { kind: "revoked" };
+      if (!isDeferrable(error)) return { kind: "revoked" };
+      const kept = refreshed.rotated ?? current;
+      const claims =
+        error.kind === "rate_limited"
+          ? {
+              ...kept,
+              refreshNotBefore: now + (error.retryAfterSeconds ?? RATE_LIMIT_BACKOFF_SECONDS),
+            }
+          : kept;
+      return { kind: "deferred", claims, error };
     }
     current = refreshed.value;
     changed = true;

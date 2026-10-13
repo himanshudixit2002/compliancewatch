@@ -4,8 +4,10 @@ import { sessionWindow } from "@/entities/session/mappers";
 import type { SessionClaims } from "@/entities/session/types";
 import { fakeIdentity } from "@/test/identity-fixture";
 import { loadEnv } from "../env";
+import { err, type Result } from "../result";
 import { FakeAuthProvider } from "./fake";
 import type { PendingSignIn } from "./pending";
+import { providerFailure, type AuthProvider, type ProviderSession } from "./provider";
 import {
   completeMfa,
   completeSignUp,
@@ -27,6 +29,37 @@ function setup() {
   const deps = { env, fetchImpl: identity.fetchImpl, now: NOW };
   return { identity, provider, deps };
 }
+
+/**
+ * A provider that rotates its refresh token like GoTrue: every refresh answers a new one and a
+ * token already used is refused (the session family revoked), which the fake never does.
+ */
+function rotating(inner: AuthProvider): AuthProvider & { issued: number; used: string[] } {
+  const used: string[] = [];
+  let issued = 0;
+  const refresh = async (token: string): Promise<Result<ProviderSession>> => {
+    if (used.includes(token)) {
+      return err(providerFailure("expired", "Invalid Refresh Token: Already Used"));
+    }
+    used.push(token);
+    const session = await inner.refresh(token.startsWith("rot-") ? ROTATED_INNER : token);
+    if (!session.ok) return session;
+    issued += 1;
+    wrapper.issued = issued;
+    return { ok: true, value: { ...session.value, refreshToken: `rot-${issued}` } };
+  };
+  const wrapper = Object.assign(Object.create(inner) as AuthProvider, {
+    refresh,
+    issued: 0,
+    used,
+  });
+  return wrapper;
+}
+
+/** What the rotating provider refreshes with underneath: the fake's own stateless token. */
+const ROTATED_INNER =
+  "fake.v1." +
+  Buffer.from(JSON.stringify({ contact: { phone: PHONE }, aal: "aal1" })).toString("base64url");
 
 describe("signInWithProviderSession", () => {
   it("goes to sign-up, then mfa, then a session, keeping next in the pending cookie", async () => {
@@ -172,6 +205,14 @@ describe("keeping a session current", () => {
     expect(
       needsRefresh({ ...fresh, cwToken: undefined, cwTokenExpiresAt: undefined }, AT, env),
     ).toBe(false);
+    expect(needsRefresh({ ...fresh, providerAccessExpiresAt: AT + 119 }, AT, env)).toBe(true);
+    expect(needsRefresh({ ...fresh, providerAccessExpiresAt: AT + 120 }, AT, env)).toBe(false);
+    expect(
+      needsRefresh({ ...fresh, cwTokenExpiresAt: AT + 10, refreshNotBefore: AT + 1 }, AT, env),
+    ).toBe(false);
+    expect(
+      needsRefresh({ ...fresh, cwTokenExpiresAt: AT + 10, refreshNotBefore: AT }, AT, env),
+    ).toBe(true);
     expect(needsRecheck(fresh, AT, env)).toBe(false);
     expect(needsRecheck(fresh, AT + 300, env)).toBe(true);
     expect(needsRecheck({ ...fresh, checkedAt: undefined }, AT, env)).toBe(true);
@@ -224,6 +265,137 @@ describe("keeping a session current", () => {
       deps,
     );
     expect(direct.ok).toBe(false);
+  });
+
+  it("re-exchanges the cookie's provider token while it lasts, refreshing only near its expiry", async () => {
+    const { identity, provider, deps } = setup();
+    const user = identity.provision({
+      contact: { phone: PHONE },
+      kind: "business",
+      roles: ["owner"],
+    });
+    const token = identity.providerToken({ phone: PHONE });
+    const lasting = claimsFor(identity, user.id, {
+      cwTokenExpiresAt: AT + 30,
+      providerAccessToken: token,
+      providerAccessExpiresAt: AT + 3600,
+    });
+    const kept = await keepSessionCurrent(provider, lasting, deps);
+    expect(kept.kind).toBe("updated");
+    if (kept.kind !== "updated") return;
+    expect(kept.claims.providerAccessToken).toBe(token);
+    expect(kept.claims.providerRefreshToken).toBe(lasting.providerRefreshToken);
+    expect(identity.requests.map((request) => request.pathname)).toEqual(["/v1/identity/sessions"]);
+    identity.requests.length = 0;
+    const nearly = { ...lasting, providerAccessExpiresAt: AT + 119 };
+    const refreshed = await keepSessionCurrent(provider, nearly, deps);
+    expect(refreshed.kind).toBe("updated");
+    if (refreshed.kind !== "updated") return;
+    // The fake mints the same token within a second; the provider call and the new expiry show it.
+    expect(refreshed.claims.providerAccessExpiresAt).toBeGreaterThan(AT + 119);
+    expect(identity.requests.map((request) => request.pathname)).toEqual([
+      "/v1/identity/dev/provider-tokens",
+      "/v1/identity/sessions",
+    ]);
+  });
+
+  it("writes the rotated refresh token back, so the next refresh uses it and never the spent one", async () => {
+    const { identity, provider, deps } = setup();
+    const user = identity.provision({
+      contact: { phone: PHONE },
+      kind: "business",
+      roles: ["owner"],
+    });
+    const gotrue = rotating(provider);
+    const stale = claimsFor(identity, user.id, {
+      cwTokenExpiresAt: AT + 30,
+      providerAccessToken: "old",
+      providerAccessExpiresAt: AT + 10,
+      providerRefreshToken: "rot-0",
+    });
+    const first = await keepSessionCurrent(gotrue, stale, deps);
+    expect(first.kind).toBe("updated");
+    if (first.kind !== "updated") return;
+    expect(first.claims.providerRefreshToken).toBe("rot-1");
+    const again = { ...first.claims, providerAccessExpiresAt: AT + 10, cwTokenExpiresAt: AT + 30 };
+    const second = await keepSessionCurrent(gotrue, again, deps);
+    expect(second.kind).toBe("updated");
+    if (second.kind === "updated") expect(second.claims.providerRefreshToken).toBe("rot-2");
+    expect(gotrue.used).toEqual(["rot-0", "rot-1"]);
+    // The cookie that missed the first write still holds rot-0: GoTrue has spent it.
+    expect(await keepSessionCurrent(gotrue, stale, deps)).toEqual({ kind: "revoked" });
+  });
+
+  it("keeps the rotated pair when identity does not answer after the provider refreshed", async () => {
+    const { identity, provider } = setup();
+    const user = identity.provision({
+      contact: { phone: PHONE },
+      kind: "business",
+      roles: ["owner"],
+    });
+    const gotrue = rotating(provider);
+    const identityDown = {
+      env,
+      now: NOW,
+      fetchImpl: async (input: Request, init?: RequestInit) => {
+        if (new URL(input.url).pathname === "/v1/identity/sessions") {
+          throw new TypeError("fetch failed");
+        }
+        return identity.fetchImpl(input, init);
+      },
+    };
+    const stale = claimsFor(identity, user.id, {
+      cwTokenExpiresAt: AT + 30,
+      providerAccessToken: "old",
+      providerAccessExpiresAt: AT + 10,
+      providerRefreshToken: "rot-0",
+    });
+    const outcome = await keepSessionCurrent(gotrue, stale, identityDown);
+    expect(outcome.kind).toBe("deferred");
+    if (outcome.kind !== "deferred") return;
+    expect(outcome.claims.providerRefreshToken).toBe("rot-1");
+    expect(outcome.claims.providerAccessToken).not.toBe("old");
+    expect(outcome.claims.cwToken).toBe(stale.cwToken);
+    // Identity back: the kept pair refreshes; the pair a lost write would have left is spent.
+    const recovered = await keepSessionCurrent(
+      gotrue,
+      { ...outcome.claims, providerAccessExpiresAt: AT + 10 },
+      { env, now: NOW, fetchImpl: identity.fetchImpl },
+    );
+    expect(recovered.kind).toBe("updated");
+    expect(await keepSessionCurrent(gotrue, stale, identityDown)).toEqual({ kind: "revoked" });
+  });
+
+  it("waits out a provider rate limit instead of signing the person out", async () => {
+    const { identity, provider, deps } = setup();
+    const user = identity.provision({
+      contact: { phone: PHONE },
+      kind: "business",
+      roles: ["owner"],
+    });
+    const limited = Object.assign(Object.create(provider) as AuthProvider, {
+      refresh: () =>
+        Promise.resolve(
+          err(providerFailure("rate_limited", "Too many requests", { retryAfterSeconds: 45 })),
+        ),
+    });
+    const stale = claimsFor(identity, user.id, {
+      cwTokenExpiresAt: AT + 30,
+      providerAccessToken: "old",
+      providerAccessExpiresAt: AT + 10,
+    });
+    const outcome = await keepSessionCurrent(limited, stale, deps);
+    expect(outcome.kind).toBe("deferred");
+    if (outcome.kind !== "deferred") return;
+    expect(outcome.claims.refreshNotBefore).toBe(AT + 45);
+    expect(outcome.claims.providerRefreshToken).toBe(stale.providerRefreshToken);
+    expect(needsRefresh(outcome.claims, AT + 44, env)).toBe(false);
+    expect(needsRefresh(outcome.claims, AT + 45, env)).toBe(true);
+    const unnamed = Object.assign(Object.create(provider) as AuthProvider, {
+      refresh: () => Promise.resolve(err(providerFailure("rate_limited"))),
+    });
+    const later = await keepSessionCurrent(unnamed, stale, deps);
+    expect(later.kind === "deferred" && later.claims.refreshNotBefore).toBe(AT + 30);
   });
 
   it("re-reads /me once the last read is old and takes the roles and version from it", async () => {

@@ -10,11 +10,15 @@ import {
   verifySecondFactor,
 } from "@/features/auth";
 import type { MfaFactorView } from "@/features/auth";
+import { epochSeconds } from "@/entities/session/mappers";
 import { providerFor } from "@/server/auth/provider";
+import { providerSessionOf } from "@/server/auth/sessions";
 import { verifySession } from "@/server/dal";
 import { getEnv } from "@/server/env";
+import { err, webError } from "@/server/result";
 import { MFA_REQUIRED_ROLES, requiresMfa } from "@/shared/config/roles";
 import { hrefFor, screenById } from "@/shared/config/screens";
+import { t } from "@/shared/i18n";
 import { ServiceError } from "@/shared/ui/service-error";
 import { safeNext } from "@/shared/lib/url";
 
@@ -31,7 +35,10 @@ interface SearchParams {
 /**
  * Two-step verification, for a signed-in person (who enrols, verifies or removes a factor)
  * or for a pending sign-in whose roles need the factor before identity issues a session (the
- * proxy lets that pending cookie through here). Nobody at all is told to sign in first.
+ * proxy lets that pending cookie through here). Nobody at all is told to sign in first. The
+ * factors are listed with the provider session the cookie carries (kept current by the proxy)
+ * or the pending sign-in's fresh one; a render never refreshes, since it could not write the
+ * rotated pair back, and a list that fails is shown as the failure, never as "no factor yet".
  */
 export default async function MfaPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const { next } = await searchParams;
@@ -43,18 +50,27 @@ export default async function MfaPage({ searchParams }: { searchParams: Promise<
   const who = session !== null ? "session" : pending !== null ? "pending" : "anonymous";
   const roles = session?.roles ?? [];
   let factors: MfaFactorView[] = [];
-  if (session !== null && provider.value.mfaMode === "totp" && session.providerRefreshToken) {
-    const refreshed = await provider.value.refresh(session.providerRefreshToken);
-    if (refreshed.ok) {
-      const listed = await provider.value.mfa.listFactors(refreshed.value);
-      if (listed.ok) {
-        factors = listed.value.map((factor) => ({
-          id: factor.id,
-          status: factor.status,
-          friendlyName: factor.friendlyName,
-        }));
-      }
-    }
+  if (provider.value.mfaMode === "totp" && who !== "anonymous") {
+    const providerSession =
+      session !== null
+        ? providerSessionOf(session, epochSeconds(new Date()))
+        : (pending?.session ?? null);
+    const listed =
+      providerSession === null
+        ? err(
+            webError(
+              "unauthenticated",
+              "web-provider-session-stale",
+              t("mfa.error.providerSessionStale"),
+            ),
+          )
+        : await provider.value.mfa.listFactors(providerSession);
+    if (!listed.ok) return <ServiceError heading={SCREEN.title} error={listed.error} />;
+    factors = listed.value.map((factor) => ({
+      id: factor.id,
+      status: factor.status,
+      friendlyName: factor.friendlyName,
+    }));
   }
   return (
     <MfaView

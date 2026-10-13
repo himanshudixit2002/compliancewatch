@@ -48,8 +48,17 @@ export interface SessionClaims {
   cwToken?: string;
   cwTokenExpiresAt?: number;
   providerRefreshToken?: string;
+  /**
+   * The provider's own access token and its expiry (seconds since the epoch): what the factor
+   * calls use, and what the proxy re-exchanges while it lasts. A refresh at the provider rotates
+   * both tokens, and the rotated pair is written back wherever a cookie can be written.
+   */
+  providerAccessToken?: string;
+  providerAccessExpiresAt?: number;
   /** When `/me` was last re-read, for the refresh done in the proxy. */
   checkedAt?: number;
+  /** Not before when the proxy tries a refresh again, after the provider rate-limited one. */
+  refreshNotBefore?: number;
   analyticsConsent?: boolean;
 }
 

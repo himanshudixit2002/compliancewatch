@@ -1334,3 +1334,21 @@ real sign-in. Consequences: the browser tests' personas are real users with real
 cookies carry a bearer every service reads in dual mode, a persona's roles can be changed and
 revoked like anyone's, and the local product (header mode) signs in the same way with the
 account page saying what identity cannot answer there.
+
+## D-073: The provider session rides in the cookie; a refresh happens only where the cookie can be written
+
+2026-10-14. GoTrue spends a refresh token on use: the refresh answers a new pair, and the old
+token used again (after a ten-second grace) revokes the whole session family. The first build
+refreshed at the provider on every MFA action and in the MFA page's render, and wrote the new
+pair back only when a sign-in completed, so a Supabase session died on the second action or
+the next proxy refresh. Now `cw_session` carries the provider's access token and expiry with
+its refresh token (`providerAccessToken`, `providerAccessExpiresAt`): the factor calls use that
+token as it is, the proxy re-exchanges it at identity while it lasts and asks the provider for a
+new pair only when it nears expiry, and every path that gets a rotated pair (the proxy, an MFA
+action whose token was stale, a factor verify) writes it back before anything else; a render
+never refreshes, since it cannot write, and shows a list it could not make as the failure. A
+refresh that nothing answered, or that the provider rate-limited, is deferred with whatever
+rotated kept and, for a rate limit, a `refreshNotBefore` from its Retry-After; only a refusal is
+a revocation. Consequences: the cookie is about a kilobyte larger; the provider is asked for a
+new pair about once an hour per session instead of every eight minutes; a cookie written before
+this field refreshes once at the next action or proxy pass and then carries the pair.
