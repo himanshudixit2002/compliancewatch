@@ -132,6 +132,23 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  "/v1/profile/admin/attribute-usage": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** How many profiles hold each attribute, in which state, across every tenant */
+    get: operations["attribute_usage_v1_profile_admin_attribute_usage_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/profile/data-export": {
     parameters: {
       query?: never;
@@ -266,10 +283,32 @@ export type paths = {
       path?: never;
       cookie?: never;
     };
-    /** Open review tasks of a node */
+    /** Open review tasks of a node, or every task of it with include_closed */
     get: operations["review_tasks_v1_profile_nodes__node_id__review_tasks_get"];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/profile/nodes/{node_id}/review-tasks/{task_id}/resolve": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Close a review task by hand, with an outcome and a note (tenant admins, analysts)
+     * @description A task closes on its own when the attribute it asks about is answered; this closes one a
+     *     person checked (``confirmed``) or set aside (``dismissed``), and writes ``review_task.closed``
+     *     to the audit trail. 404 for a task that is not the node's, 409 for one closed already.
+     */
+    post: operations["resolve_review_task_v1_profile_nodes__node_id__review_tasks__task_id__resolve_post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -419,6 +458,28 @@ export type components = {
      * @enum {string}
      */
     AttributeSource: "gstin_lookup" | "user_input" | "derived";
+    /**
+     * AttributeUsageOut
+     * @description How many profile nodes, across every tenant, hold an attribute in a state.
+     */
+    AttributeUsageOut: {
+      /**
+       * Count
+       * @description Distinct nodes; a per-year value counts its node once
+       */
+      count: number;
+      /** Key */
+      key: string;
+      state: components["schemas"]["ValueState"];
+    };
+    /** AttributeUsagesOut */
+    AttributeUsagesOut: {
+      /**
+       * Items
+       * @description One entry per (key, state) any node holds, in the order of (key, state)
+       */
+      items: components["schemas"]["AttributeUsageOut"][];
+    };
     /** BusinessChangeIn */
     BusinessChangeIn: {
       /**
@@ -1005,12 +1066,31 @@ export type components = {
       /** Name */
       name: string;
     };
+    /**
+     * ReviewClosedBy
+     * @description What closed a review task.
+     * @enum {string}
+     */
+    ReviewClosedBy: "answer" | "resolve";
+    /**
+     * ReviewOutcome
+     * @description How a review task ended.
+     * @enum {string}
+     */
+    ReviewOutcome: "answered" | "confirmed" | "dismissed";
     /** ReviewTaskOut */
     ReviewTaskOut: {
       /** As Of Fy */
       as_of_fy: string | null;
       /** Attribute Key */
       attribute_key: string;
+      /**
+       * Closed At
+       * @description Null while the task is open
+       */
+      closed_at?: string | null;
+      /** @description answer: the attribute was answered; resolve: a person closed it */
+      closed_by?: components["schemas"]["ReviewClosedBy"] | null;
       /**
        * Created At
        * Format: date-time
@@ -1026,17 +1106,48 @@ export type components = {
        * Format: uuid
        */
       node_id: string;
+      /**
+       * Note
+       * @description What the person said when resolving
+       * @default
+       */
+      note?: string;
       /** Open */
       open: boolean;
+      /** @description answered for an answer; confirmed or dismissed for a resolve */
+      outcome?: components["schemas"]["ReviewOutcome"] | null;
       /** Reason */
       reason: string;
+    };
+    /** ReviewTaskResolveIn */
+    ReviewTaskResolveIn: {
+      /**
+       * Note
+       * @description Why, in a sentence
+       * @default
+       */
+      note?: string;
+      /**
+       * Outcome
+       * @description confirmed: what the task asked about was checked and stands; dismissed: nothing to check, or checked elsewhere
+       * @enum {string}
+       */
+      outcome: "confirmed" | "dismissed";
     };
     /** SetResultOut */
     SetResultOut: {
       /** Changed */
       changed: string[];
+      /**
+       * Closed Review Tasks
+       * @description The open tasks of the node the save answered, closed with it
+       */
+      closed_review_tasks?: string[];
       node: components["schemas"]["NodeOut"];
-      /** Review Tasks */
+      /**
+       * Review Tasks
+       * @description The review tasks the save opened
+       */
       review_tasks: string[];
     };
     /** SnapshotOut */
@@ -1653,6 +1764,44 @@ export interface operations {
       };
     };
   };
+  attribute_usage_v1_profile_admin_attribute_usage_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AttributeUsagesOut"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   data_export_v1_profile_data_export_get: {
     parameters: {
       query?: never;
@@ -2102,7 +2251,10 @@ export interface operations {
   };
   review_tasks_v1_profile_nodes__node_id__review_tasks_get: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Closed tasks too, with how and when each closed */
+        include_closed?: boolean;
+      };
       header?: {
         /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
         "x-tenant-id"?: string | null;
@@ -2143,6 +2295,90 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  resolve_review_task_v1_profile_nodes__node_id__review_tasks__task_id__resolve_post: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Tenant UUID. A user's access token names the tenant, so a user leaves the header out or repeats that tenant; a service token names one here with the tenant:act scope. */
+        "x-tenant-id"?: string | null;
+      };
+      path: {
+        node_id: string;
+        task_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ReviewTaskResolveIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ReviewTaskOut"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };

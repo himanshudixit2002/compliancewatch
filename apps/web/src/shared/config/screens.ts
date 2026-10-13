@@ -1775,7 +1775,7 @@ const SCREEN_LIST = [
     section: "admin",
     roles: ["admin"],
     tenantKinds: ["internal"],
-    uses: [],
+    uses: [uses("notification", "POST", "/v1/notification/notifications/{notification_id}/resend")],
     awaits: [
       {
         ...servicesTrack(
@@ -1787,12 +1787,12 @@ const SCREEN_LIST = [
         header: "Idempotency-Key",
       },
     ],
-    status: "waiting",
+    status: "ready",
     e2e: [],
     guideRef: "15; 9",
     parent: "admin.notification",
     notes:
-      "Queue a notification that failed for good again, with a reason, by an admin; it waits for the hardened route (reason, admin role, Idempotency-Key, audit). The route on main takes none of them, so the console does not offer it.",
+      "Queue a notification that failed for good again, with a reason, by an admin naming the tenant in x-tenant-id (or a tenant admin for their own): the hardened route takes the reason and an optional recipient in the body and an Idempotency-Key, and writes notification.resent to the tenant's trail (M3-8). W11 adds the reason dialog; the console does not offer it yet.",
   },
   {
     id: "admin.notifications.templates",
@@ -1838,14 +1838,14 @@ const SCREEN_LIST = [
     section: "admin",
     roles: REGULATORY,
     tenantKinds: ["internal"],
-    uses: [RULE_VERSIONS],
+    uses: [RULE_VERSIONS, uses("profile", "GET", "/v1/profile/admin/attribute-usage")],
     awaits: [servicesTrack("WP30", "profile", "GET", "/v1/profile/admin/attribute-usage")],
-    status: "waiting",
+    status: "ready",
     e2e: [],
     guideRef: "15; G25",
     parent: "admin.ontology",
     notes:
-      "How many profiles hold each attribute and in which state, and the rules in force that read it, on the ontology browser; the counts wait for the profile admin route.",
+      "How many profiles hold each attribute and in which state, and the rules in force that read it, on the ontology browser; the profile admin route (M3-8) answers the counts across tenants, and the browser shows them once W11 builds it.",
   },
   {
     id: "admin.flags",
@@ -1889,13 +1889,15 @@ const SCREEN_LIST = [
     section: "admin",
     roles: ["admin"],
     tenantKinds: ["internal"],
-    uses: [],
+    uses: [uses("identity", "GET", "/v1/identity/admin/tenants")],
     awaits: [servicesTrack("WP30", "identity", "GET", "/v1/identity/admin/tenants")],
-    status: "waiting",
+    status: "ready",
     e2e: [],
     guideRef: "15; G80",
     nav: { group: "identity", order: 1 },
     parent: "admin.home",
+    notes:
+      "Every tenant with its kind, status, newest subscription's plan and status and user counts, a page at a time, searched by name or id (M3-8); W11 builds the page.",
   },
   {
     id: "admin.tenant",
@@ -1905,15 +1907,20 @@ const SCREEN_LIST = [
     section: "admin",
     roles: ["admin"],
     tenantKinds: ["internal"],
-    uses: [],
+    uses: [
+      uses("identity", "GET", "/v1/identity/admin/tenants/{tenant_id}"),
+      uses("identity", "GET", "/v1/identity/admin/tenants/{tenant_id}/users"),
+    ],
     awaits: [
       servicesTrack("WP30", "identity", "GET", "/v1/identity/admin/tenants/{tenant_id}"),
       servicesTrack("WP30", "identity", "GET", "/v1/identity/admin/tenants/{tenant_id}/users"),
     ],
-    status: "waiting",
+    status: "ready",
     e2e: [],
     guideRef: "15; G80",
     parent: "admin.tenants",
+    notes:
+      "One tenant's summary, and its users with their roles read for a reason the page asks for in a dialog and sends as the x-reason header; every read lands in the tenant's audit trail as tenant.users_read (M3-8); W11 builds the page.",
   },
   {
     id: "admin.tenant.impersonate",

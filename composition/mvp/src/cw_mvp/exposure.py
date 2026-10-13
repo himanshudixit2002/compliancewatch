@@ -5,7 +5,8 @@ Every route a hosted service serves has one class:
 - ``public``: user-facing routes, served on both listeners;
 - ``admin``: the regulatory team's and operators' routes (rulebook review, its review tasks
   and publishing, the engine's review queue and fan-out controls, the gateway's prompts, models
-  and usage, notification resends, the stored eval runs, the pipeline's source manager, uploads,
+  and usage, identity's tenant reads, profile's attribute usage, notification resends, the
+  stored eval runs, the pipeline's source manager, uploads,
   task queue and operations). The public listener serves them only when
   ``CW_AUTH_MODE=token``, where each route itself requires an analyst, reviewer or admin a
   verified token names; in ``header`` and ``dual`` mode a request without a token could reach
@@ -84,6 +85,12 @@ EXPOSURE: Final[Mapping[str, Mapping[str, Exposure]]] = {
         # What identity holds of a tenant's deletion, which every service's erasure consumer
         # checks before erasing (erasure:verify).
         "GET /v1/identity/erasures/{tenant_id}": INTERNAL,
+        # The regulatory team's admin reads every tenant's summary and, with a reason that is
+        # audited, a tenant's users. Each route requires an admin a verified token names, so
+        # the public listener serves them in token mode only.
+        "GET /v1/identity/admin/tenants": ADMIN,
+        "GET /v1/identity/admin/tenants/{tenant_id}": ADMIN,
+        "GET /v1/identity/admin/tenants/{tenant_id}/users": ADMIN,
     },
     "profile": {
         # One service's part of a tenant's export, which identity assembles (data:export).
@@ -97,6 +104,8 @@ EXPOSURE: Final[Mapping[str, Mapping[str, Exposure]]] = {
         "GET /v1/profile/nodes/{node_id}/snapshot": PUBLIC,
         "GET /v1/profile/nodes/{node_id}/next-question": PUBLIC,
         "GET /v1/profile/nodes/{node_id}/review-tasks": PUBLIC,
+        # A tenant admin closes a review task of their own tenant by hand.
+        "POST /v1/profile/nodes/{node_id}/review-tasks/{task_id}/resolve": PUBLIC,
         "POST /v1/profile/registrations/{node_id}/prefill": PUBLIC,
         "POST /v1/profile/financial-year-confirmations": PUBLIC,
         "POST /v1/businesses": PUBLIC,
@@ -106,6 +115,9 @@ EXPOSURE: Final[Mapping[str, Mapping[str, Exposure]]] = {
         "GET /v1/businesses/{business_id}/onboarding": PUBLIC,
         "POST /v1/businesses/{business_id}/registrations": PUBLIC,
         "GET /v1/ontology": PUBLIC,
+        # How many profiles hold each attribute, across every tenant, for the regulatory team's
+        # ontology browser; the route requires a regulatory role a verified token names.
+        "GET /v1/profile/admin/attribute-usage": ADMIN,
     },
     "rulebook": {
         "GET /v1/rulebook/ping": INTERNAL,

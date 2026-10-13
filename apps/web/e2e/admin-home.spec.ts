@@ -19,9 +19,7 @@ test.describe("admin home", () => {
     await expect(page.locator("[data-tool='admin.pipeline']")).toContainText("Available");
     await expect(page.locator("[data-tool='admin.evals.run']")).toContainText("Ready to build");
     await expect(page.locator("[data-tool='admin.audit']")).toContainText("Ready to build");
-    await expect(page.locator("[data-tool='admin.tenants']")).toContainText(
-      "Waiting for a backend",
-    );
+    await expect(page.locator("[data-tool='admin.tenants']")).toContainText("Ready to build");
     await expect(page.locator("[data-tool='admin.system']")).toContainText("Available");
     await expect(page.locator("[data-tool='admin.flags']")).toContainText("Available");
     await expect(page.getByRole("navigation", { name: "Internal tools" }).first()).toBeVisible();
