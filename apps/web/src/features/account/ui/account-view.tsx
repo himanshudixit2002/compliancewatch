@@ -1,4 +1,6 @@
-import { Banner, KeyValue, PageHeader } from "@compliancewatch/ui";
+import type { Route } from "next";
+import Link from "next/link";
+import { Banner, Button, KeyValue, PageHeader } from "@compliancewatch/ui";
 import type { KeyValueItem } from "@compliancewatch/ui";
 import { roleLabel } from "@/entities/screen/mappers";
 import { expiresAtDate } from "@/entities/session/mappers";
@@ -8,8 +10,21 @@ import type { MessageKey } from "@/shared/i18n";
 import { formatDateTime } from "@/shared/lib/dates";
 import { SignOutButton } from "@/shared/ui/sign-out-button";
 
+/** The profile fields identity's /me answers (the account queries' AccountProfile, structurally). */
+export interface AccountProfileView {
+  email: string;
+  phone: string;
+  tenantName: string;
+}
+
 export interface AccountViewProps {
   session: SessionDto;
+  /** From /me; null when it could not be read (`profileNote` says why). */
+  profile?: AccountProfileView | null;
+  /** Why the profile fields are missing, when they are. */
+  profileNote?: string;
+  /** The two-step verification page. */
+  mfaHref: string;
 }
 
 const KIND_KEYS: Record<SessionDto["tenantKind"], MessageKey> = {
@@ -28,10 +43,17 @@ function mfaText(session: SessionDto): string {
   return session.provider === "fake" ? t("account.mfaAsserted") : t("account.mfaVerified");
 }
 
-/** The facts the session carries, with a way out; profile fields arrive with identity's /me. */
-export function AccountView({ session }: AccountViewProps) {
+/** The session's facts and the profile identity holds, with the way to the second factor and out. */
+export function AccountView({ session, profile = null, profileNote, mfaHref }: AccountViewProps) {
   const items: KeyValueItem[] = [
     { key: "name", label: t("account.displayName"), value: session.displayName },
+    ...(profile === null
+      ? []
+      : [
+          { key: "email", label: t("account.email"), value: profile.email || t("common.none") },
+          { key: "phone", label: t("account.phone"), value: profile.phone || t("common.none") },
+          { key: "tenantName", label: t("account.tenantName"), value: profile.tenantName },
+        ]),
     {
       key: "user",
       label: t("account.userId"),
@@ -64,10 +86,17 @@ export function AccountView({ session }: AccountViewProps) {
       <PageHeader
         title={t("account.title")}
         description={t("account.intro")}
-        actions={<SignOutButton />}
+        actions={
+          <div className="flex flex-wrap gap-2">
+            <Button asChild variant="secondary" size="sm">
+              <Link href={mfaHref as Route}>{t("account.mfaLink")}</Link>
+            </Button>
+            <SignOutButton />
+          </div>
+        }
       />
       <KeyValue items={items} aria-label={t("account.facts")} />
-      <Banner tone="info">{t("account.profileNote")}</Banner>
+      {profileNote ? <Banner tone="info">{profileNote}</Banner> : null}
     </div>
   );
 }

@@ -40,6 +40,8 @@ export interface DevSignInFormProps {
   next?: string;
   /** The tenant the seed script filled last, offered as a one-click value. */
   seededTenantId?: string | null;
+  /** What the page says above the form (a session that ended, an expired link). */
+  notice?: string;
 }
 
 /** What a submit carried, so a refused submit shows the form as the visitor sent it. */
@@ -92,6 +94,7 @@ export function DevSignInForm({
   options,
   next,
   seededTenantId = null,
+  notice,
 }: DevSignInFormProps) {
   const { fields } = options;
   const [attempt, formAction, pending] = useActionState(
@@ -118,6 +121,7 @@ export function DevSignInForm({
   return (
     <div data-slot="dev-sign-in" className="flex max-w-xl flex-col gap-6">
       <PageHeader title={t("signIn.title")} description={t("signIn.devIntro")} />
+      {notice ? <Banner tone="info">{notice}</Banner> : null}
       <Banner tone="info">{t("signIn.devNotice")}</Banner>
       {state.status === "error" ? (
         <div
