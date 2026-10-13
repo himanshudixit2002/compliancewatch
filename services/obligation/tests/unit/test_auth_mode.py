@@ -1,6 +1,7 @@
 """The obligation routes in header, dual and token mode: where the tenant comes from, who may
-read and who may change an obligation, and when an assignee is checked with the identity
-service."""
+read and who may change an obligation (the error report route among the writes: the reporter is
+the user the token names, and a service or an analyst is refused), and when an assignee is
+checked with the identity service."""
 
 from collections.abc import Iterator
 from datetime import date
@@ -14,6 +15,8 @@ from fastapi.testclient import TestClient
 from domain_kernel.access import Role, Scope
 from domain_kernel.ids import ObligationId, UserId
 from obligation.application.materialise import MaterialiseRequest
+from obligation.domain.flags import ERROR_REPORTS
+from obligation.infrastructure.flags import StaticFlags
 from obligation.infrastructure.memory import MemoryStore
 from obligation.main import build_app
 from obligation.settings import ObligationSettings
@@ -42,12 +45,15 @@ STAFF_OF_OTHER = bearer(ISSUER.user(OTHER_TENANT, [Role.STAFF]))
 ANALYST = bearer(ISSUER.user(TENANT, [Role.ANALYST], mfa=True))
 QA_ACTING = bearer(ISSUER.service("qa", [Scope.LLM_CALL, Scope.TENANT_ACT]))
 QA_ALONE = bearer(ISSUER.service("qa", [Scope.LLM_CALL]))
+REPORT = {"category": "other", "description": "Example: something else is wrong (synthetic)."}
 
 
 THE_RULE = rule()
 
 
 def app_in(mode: AuthMode, members: FakeTenantMembers | None = None) -> FastAPI:
+    """The app in ``mode`` on the memory store, with the error reports flag on for every
+    tenant, so the report route is one of the writes."""
     app = build_app(
         ObligationSettings(
             _env_file=None,
@@ -57,6 +63,7 @@ def app_in(mode: AuthMode, members: FakeTenantMembers | None = None) -> FastAPI:
         ),
         rules=FakeRuleVersionReader([THE_RULE]),
         members=members or FakeTenantMembers([(TENANT, OWNER_ID), (TENANT, STAFF_ID)]),
+        flags=StaticFlags(ERROR_REPORTS),
     )
     app.state.wiring.materialise.run(
         MaterialiseRequest(TENANT, BUSINESS, DECISION, THE_RULE, date(2026, 9, 28))
@@ -188,11 +195,17 @@ def test_token_mode_lets_a_member_change_an_obligation_as_themselves(
         str(OWNER_ID),
         "owner",
     )
+    reported = token_mode.post(f"{route}/error-reports", json=REPORT, headers=keyed(OWNER))
+    assert reported.status_code == 201, reported.text
+    assert reported.json()["submitted_by"] == str(OWNER_ID), "the reporter the token names"
     detail = token_mode.get(route, headers=OWNER).json()
     (change,) = [c for c in detail["history"] if c["kind"] == "started"]
     assert change["actor"] == str(OWNER_ID)
     store = token_mode.app.state.wiring.unit_of_work  # type: ignore[attr-defined]
+    (report,) = store.error_reports.values()
+    assert report.submitted_by == OWNER_ID
     tracked = [entry for entry in store.audit if entry.action != "obligation.created"]
+    assert "error_report.submitted" in {entry.action for entry in tracked}
     assert {entry.actor.label for entry in tracked} == {"owner"}
     assert {entry.actor.id for entry in tracked} == {str(OWNER_ID)}
 
@@ -207,6 +220,7 @@ def test_token_mode_lets_a_service_read_an_obligation_but_never_change_one(
         ("post", f"{route}/status", {"action": "start"}),
         ("put", f"{route}/assignee", {"assignee_id": None}),
         ("post", f"{route}/comments", {"body": "Example comment (synthetic)"}),
+        ("post", f"{route}/error-reports", REPORT),
     ):
         refused = token_mode.request(
             method, path, json=body, headers=keyed({**QA_ACTING, **AS_TENANT})
