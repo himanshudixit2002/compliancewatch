@@ -1,8 +1,9 @@
 """The rulebook's erasure consumer: the rulebook holds regulatory data, and the one table that
 names a tenant is the review of its error reports, so with the flag on it nulls the tenant and
-empties the text of the tenant's reviews, keeps their decisions, lists what it keeps, and answers
-tenant.data.erased with its audit entry, so the deletion request can complete; off, it only
-logs."""
+empties the text of the tenant's reviews, keeps their decisions, counts the outbox rows it prunes
+(none on the memory store), lists what it keeps, and answers tenant.data.erased with its audit
+entry, so the deletion request can complete; off, it only logs.
+tests/integration/test_erasure_postgres.py runs the Postgres eraser, where the prune has rows."""
 
 import asyncio
 from datetime import UTC, datetime, timedelta
@@ -97,7 +98,7 @@ def test_with_the_flag_on_it_answers_with_what_it_keeps(tmp_path: Path) -> None:
     assert (answer.service, answer.tenant_id, dict(answer.tables)) == (
         "rulebook",
         tenant,
-        {"error_report_review": 0},
+        {"error_report_review": 0, "outbox_event": 0},
     )
     payload = payload_of(answer)
     kept = {item["table"] for item in payload["retained"]}
@@ -158,7 +159,7 @@ def test_with_the_flag_on_the_tenants_reviews_lose_their_tenant_and_text(tmp_pat
 
     (answer,) = outbox
     assert isinstance(answer, TenantDataErased)
-    assert dict(answer.tables) == {"error_report_review": 1}
+    assert dict(answer.tables) == {"error_report_review": 1, "outbox_event": 0}
     by_report = {review.report_id: review for review in store.error_reviews()}
     erased = by_report[ours.report_id]
     assert (erased.tenant_id, erased.description_masked) == (None, "")

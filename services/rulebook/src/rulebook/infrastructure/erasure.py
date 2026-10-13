@@ -5,11 +5,14 @@ their versions, citations, candidates and the review of all of them. One table n
 ``error_report_review``, the error reports a tenant's members made about their obligations, as
 the regulatory team reviews them. The eraser nulls the tenant and empties the masked text of the
 tenant's reviews and keeps each decision as a fact about the rule version (what the regulatory
-team found wrong in a rule is not the tenant's data); it deletes nothing else, lists what it
-keeps and why, writes its erased marker (``erased_tenant``) and answers ``tenant.data.erased``
-(service rulebook) with the count of the reviews it pseudonymised, so the deletion request can
-complete. The writers of the reviews check the marker: the intake consumer only marks an erased
-tenant's reports processed, and a decision on an erased tenant's review emits nothing.
+team found wrong in a rule is not the tenant's data); it prunes the tenant's published or dead
+events in ``outbox_event`` (the ``error_report.decided`` rows keyed by the tenant, which carry
+the report id, the decision and the notes; pending ones go out with the relay, as in every
+service); it deletes nothing else, lists what it keeps and why, writes its erased marker
+(``erased_tenant``) and answers ``tenant.data.erased`` (service rulebook) with the count of the
+reviews it pseudonymised and the outbox rows it pruned, so the deletion request can complete.
+The writers of the reviews check the marker: the intake consumer only marks an erased tenant's
+reports processed, and a decision on an erased tenant's review emits nothing.
 
 The reviewers and approvers the rulebook names are the regulatory team's users, of the internal
 tenant, which is never erased.
@@ -31,9 +34,11 @@ from domain_kernel.ids import TenantId
 from py_common.erasure import (
     ERASED_RETAINED,
     OUTBOX_RETAINED,
+    OUTBOX_TABLE,
     MemoryErasedTenants,
     PostgresTenantEraser,
     begin_erasure,
+    prune_outbox,
 )
 from rulebook.infrastructure.memory import MemoryKnowledgeStore
 from rulebook.infrastructure.models import ErrorReportReviewRow
@@ -56,9 +61,10 @@ RETAINED: Final = (
 )
 
 
-def erased(reviews: int) -> Erased:
-    """The answer: ``reviews`` rows of ``error_report_review`` pseudonymised, the rest kept."""
-    return Erased({ERROR_REPORTS: reviews}, RETAINED)
+def erased(reviews: int, outbox: int = 0) -> Erased:
+    """The answer: ``reviews`` rows of ``error_report_review`` pseudonymised, ``outbox`` rows of
+    ``outbox_event`` pruned, the rest kept."""
+    return Erased({ERROR_REPORTS: reviews, OUTBOX_TABLE: outbox}, RETAINED)
 
 
 class PostgresRulebookEraser(PostgresTenantEraser):
@@ -70,12 +76,13 @@ class PostgresRulebookEraser(PostgresTenantEraser):
             .values(tenant_id=None, description_masked="")
             .returning(ErrorReportReviewRow.id)
         )
-        return erased(len(pseudonymised.all()))
+        return erased(len(pseudonymised.all()), prune_outbox(self.connection, tenant_id))
 
 
 class MemoryRulebookEraser:
     """The eraser on a memory store: the audit entry in the store's log, the answer in
-    ``outbox``, the marker in ``erased``."""
+    ``outbox``, the marker in ``erased``. The memory outbox is a list with no published rows to
+    prune, so it answers ``outbox_event`` 0, as the other memory erasers do."""
 
     def __init__(
         self,
