@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { NextRequest } from "next/server";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetEnvCache } from "@/server/env";
 import { POST } from "./route";
 
@@ -14,6 +14,13 @@ function signOut(sent: Record<string, string>): Promise<Response> | Response {
   return POST(new NextRequest("http://localhost:3000/sign-out", { method: "POST", headers: sent }));
 }
 
+beforeEach(() => {
+  vi.stubEnv("CW_WEB_ENV", "test");
+  vi.stubEnv("CW_WEB_AUTH_PROVIDER", "fake");
+  vi.stubEnv("CW_WEB_SESSION_SECRET", Buffer.alloc(32, "t").toString("base64"));
+  resetEnvCache();
+});
+
 describe("POST /sign-out", () => {
   it("signs out a page served under another host name and stays on that host", async () => {
     const response = await signOut({
@@ -26,10 +33,12 @@ describe("POST /sign-out", () => {
     expect(response.headers.get("set-cookie")).toMatch(/^cw_session=;/);
     expect(response.headers.get("set-cookie")).toMatch(/Max-Age=0/i);
     const cookies = response.headers.getSetCookie();
-    expect(cookies).toHaveLength(2);
-    expect(cookies[1]).toMatch(/^cw_prefs_recipient=;/);
-    expect(cookies[1]).toMatch(/Path=\/(;|$)/);
+    expect(cookies).toHaveLength(3);
+    expect(cookies[1]).toMatch(/^cw_pending=;/);
     expect(cookies[1]).toMatch(/Max-Age=0/i);
+    expect(cookies[2]).toMatch(/^cw_prefs_recipient=;/);
+    expect(cookies[2]).toMatch(/Path=\/(;|$)/);
+    expect(cookies[2]).toMatch(/Max-Age=0/i);
   });
 
   it("accepts a browser's same-origin form post on a loopback address", async () => {
@@ -66,5 +75,17 @@ describe("POST /sign-out", () => {
     vi.stubEnv("CW_WEB_TRUST_FORWARDED_IP", "true");
     resetEnvCache();
     expect((await signOut(proxied)).status).toBe(303);
+  });
+});
+
+describe("the provider's part", () => {
+  it("tolerates a cookie it cannot read and ends with the same answer", async () => {
+    const response = await signOut({
+      host: "localhost:3000",
+      "sec-fetch-site": "same-origin",
+      cookie: "cw_session=not-a-session",
+    });
+    expect(response.status).toBe(303);
+    expect(response.headers.getSetCookie()[0]).toMatch(/^cw_session=;/);
   });
 });

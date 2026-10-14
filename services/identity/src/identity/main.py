@@ -59,6 +59,7 @@ from identity.application.data_requests import (
     RequestDeletion,
     RequestExport,
 )
+from identity.application.dev_personas import ProvisionDevPersona
 from identity.application.entitlements import ReadEntitlements, SeatCheck
 from identity.application.erasure import CheckErasure
 from identity.application.sessions import ExchangeSession, IssueServiceToken
@@ -320,8 +321,10 @@ def wire(
     )
     provider = identity_provider(settings)
     dev_provider: DevIdentityProvider | None = None
+    provision_dev_persona: ProvisionDevPersona | None = None
     if isinstance(provider, FakeIdentityProvider) and settings.is_dev:
         dev_provider = provider
+        provision_dev_persona = ProvisionDevPersona(unit_of_work, provider)
     access_ttl = timedelta(seconds=settings.access_token_ttl_seconds)
     return Wiring(
         settings=settings,
@@ -342,6 +345,7 @@ def wire(
         keys=keys,
         provider=provider,
         dev_provider=dev_provider,
+        provision_dev_persona=provision_dev_persona,
         exchange_session=ExchangeSession(unit_of_work, provider, minter, ttl=access_ttl),
         issue_service_token=IssueServiceToken(
             unit_of_work, minter, ttl=timedelta(seconds=settings.service_token_ttl_seconds)

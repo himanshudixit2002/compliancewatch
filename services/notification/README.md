@@ -40,11 +40,12 @@ not the subject's a 409 `notification-consent-address-not-theirs`, without a ten
 and when identity cannot answer a 503 `notification-dependency-unavailable`; nothing is recorded in
 any of these cases. Opt-outs and the other sources (`whatsapp_keyword`, `api`, `support`) are
 recorded without asking identity; outside header mode `api` and `support` need a service token
-(401 without one), since they skip the check. The trust boundary: only a service with
-`notification:preferences` reaches the route with a token, so the subject is the web app's server's
-word for its signed-in user; identity confirms the consent and the address, not who is at the
-browser. A change from the web records the tenant it was made for (`set_for_tenant_id`, migration
-0004), which decides which tenant's export shows it.
+(401 without one), since they skip the check. The trust boundary: a tenant member's token (the web
+app sends the signed-in person's) names its own user as the subject, and a body naming anyone
+else is a 403; a service with `notification:preferences` names the subject in the body, the web
+app's server's word for its signed-in user; identity confirms the consent and the address, not
+who is at the browser. A change from the web records the tenant it was made for
+(`set_for_tenant_id`, migration 0004), which decides which tenant's export shows it.
 
 The recipient, send, notification, bulk and data export routes act for one tenant, checked before the body (a
 request without one is a 401 `notification-tenant-required` problem). The spec is
@@ -63,7 +64,7 @@ as in `token` mode and one without it as in `header` mode; in `token` mode a bea
 
 | Routes | Who may call |
 | --- | --- |
-| preferences | a service with `notification:preferences` (the WhatsApp bot); no user, since preferences name no tenant |
+| preferences | a service with `notification:preferences` (the WhatsApp bot), or a user with a tenant member role (the web app's settings and onboarding pages), whose web opt-in is their own consent subject's; a service's opt-out or an `api`/`support` change by a person is refused |
 | `POST /send` | a service with `notification:send`, naming the tenant in `x-tenant-id` with `tenant:act` |
 | recipients, notifications | a user with a tenant member role, whose token names the tenant (an `x-tenant-id` naming another is a 403 `auth-tenant-mismatch`), or a service with `tenant:act` naming it |
 | `POST /receipts/whatsapp` | a service with `notification:receipts`; `x-cw-bot-token` is accepted only in `header` and `dual` mode |

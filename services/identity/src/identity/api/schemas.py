@@ -314,9 +314,14 @@ class SessionOut(BaseModel):
     token_type: Literal["Bearer"] = "Bearer"
     expires_in: int = Field(description="Seconds until the token expires")
     tenant_id: UUID
+    tenant_kind: TenantKind
     user_id: UUID
+    display_name: str
     roles: list[Role]
     mfa: bool = Field(description="Whether the person signed in with a second factor")
+    session_version: int = Field(
+        description="The user's session version the token carries; a bump revokes older tokens"
+    )
 
     @classmethod
     def from_session(cls, session: Session) -> "SessionOut":
@@ -325,9 +330,12 @@ class SessionOut(BaseModel):
             access_token=session.token.token,
             expires_in=session.token.expires_in,
             tenant_id=session.tenant.id.value,
+            tenant_kind=session.tenant.kind,
             user_id=session.user.id.value,
+            display_name=session.user.display_name,
             roles=sorted(principal.roles),
             mfa=principal.mfa,
+            session_version=principal.session_version,
         )
 
 
@@ -510,17 +518,47 @@ class DevProviderTokenIn(Strict):
     aal: Literal["aal1", "aal2"] = Field(
         default="aal1", description="aal2 stands for a sign-in with a second factor"
     )
+    tenant_kind: Literal["business", "ca_firm", "internal"] | None = Field(
+        default=None,
+        description=(
+            "A development persona: with roles, the person is made a user of a tenant of this "
+            "kind before the token is signed, so the token exchanges for a session at once"
+        ),
+    )
+    roles: list[Role] | None = Field(
+        default=None,
+        min_length=1,
+        description="The persona's roles, which the tenant's kind must allow; with tenant_kind",
+    )
+    display_name: str = Field(default="", max_length=MAX_NAME_CHARS)
+    tenant_id: UUID | None = Field(
+        default=None,
+        description=(
+            "The persona's tenant: an existing one, or the id the new one gets. Absent, a new "
+            "tenant for a business or CA firm, and the one development internal tenant for the "
+            "regulatory roles"
+        ),
+    )
+    tenant_name: str = Field(default="", max_length=MAX_NAME_CHARS)
 
     @model_validator(mode="after")
     def _one_contact(self) -> "DevProviderTokenIn":
         if not self.email and not self.phone:
             raise ValueError("give the email address or the phone number to sign in with")
+        if (self.tenant_kind is None) != (self.roles is None):
+            raise ValueError("a development persona names its tenant kind and its roles together")
+        if self.tenant_kind is None and (self.tenant_id is not None or self.tenant_name):
+            raise ValueError("a tenant is named only for a development persona (tenant_kind)")
         return self
 
 
 class DevProviderTokenOut(BaseModel):
     provider_token: str = Field(description="A fake provider token for POST /v1/identity/sessions")
     subject: str
+    tenant_id: UUID | None = Field(
+        default=None, description="The persona's tenant, when the request made or found one"
+    )
+    user_id: UUID | None = Field(default=None, description="The persona's user, likewise")
 
 
 class TenantIn(Strict):

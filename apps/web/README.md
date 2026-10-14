@@ -39,12 +39,14 @@ src/app/            route files only: page.tsx is gate, query, render; layouts, 
                     llm/models and llm/usage (the gateway's registries and spend), profiles/review-tasks
                     (the lookup), system (the services' health and readiness); [...slug] serves
                     unbuilt tools
-  sign-out/         POST handler: clears the session cookie and returns to /sign-in (GET is a 405)
+  sign-out/         POST handler: ends the provider session, clears the cookies and returns to /sign-in (GET is a 405)
+  auth/callback/    GET handler: the email link's token_hash exchanged with the provider and identity
   api/health/       liveness handler {status, version, commit}
 src/features/       one directory per screen family: model/, ui/, index.ts (ports, gateway, queries and
                     actions join when a feature reads data); today: home, sitemap, legal, not-available,
-                    admin-home, system-pages, design-catalogue, auth (the fake sign-in form, the signIn action,
-                    the seed-state query), account, business (the gateway over the business API and the
+                    admin-home, system-pages, design-catalogue, auth (the sign-in, sign-up and mfa forms and
+                    actions, the development form, the seed-state query), account (the /me read), team (the
+                    tenant's people: invite, roles, disable), business (the gateway over the business API and the
                     profile node routes, the attribute, snapshot, review-task and progress view models,
                     AttributeControl, AnswerButtons, ValueStateChip, the business step's form, result
                     panel and createBusiness action, the questions step with its skip-list cookie, the
@@ -97,9 +99,11 @@ src/server/         server-only modules; every file starts with `import "server-
                     session.ts: the encrypted cw_session cookie (jose), its options, set and clear (actions only)
                     dal.ts: verifySession, requireRole, requireAdmin, requireScreen, sessionForRender (the gates)
                     origin.ts: the same-origin check a POST route handler runs (Sec-Fetch-Site, Origin against Host)
-                    auth/provider.ts: the AuthProvider port and providerFor(env); auth/fake.ts: the development
-                    adapter (CW_WEB_AUTH_PROVIDER=fake, local and test only) minting a session for a chosen
-                    tenant, kind, roles and name
+                    auth/provider.ts: the AuthProvider port (phone code, email link, refresh, sign-out, mfa) and
+                    providerFor(env); auth/fake.ts: identity's development provider tokens (local and test only,
+                    a persona identity makes); auth/supabase.ts: GoTrue over fetch; auth/sessions.ts: the
+                    exchange with identity and /me; auth/usecases.ts: the flows and the proxy's session upkeep;
+                    auth/pending.ts: the cw_pending cookie; auth/signed-out.ts: where a revoked token ends
                     result.ts: Result, ApiError, mapBody (a success must carry its body) and the mapping to
                     a form's ActionState
                     api/client.ts: one openapi-fetch client per service (x-request-id, accept, time limit) and call()
@@ -153,8 +157,9 @@ scripts/stack-guard/  the end-to-end suite's guard (pnpm --filter web e2e:guard,
                     the chromium project's stack-guard setup): it refuses services that answer and are not
                     the memory stack make web-stack recorded, unless E2E_ALLOW_POSTGRES=1
 e2e/                fixtures.ts (the axe check failing on serious or critical, the personas signed in through
-                    the fake form, the seed-state reader, the stack's service URLs) and one spec per live page, plus a11y.spec.ts over
-                    every registered page; product/ holds the real-data journeys the product project runs
+                    the fake form, the seed-state reader, the stack's service URLs), identity-helpers.ts (an
+                    internal admin's bearer for a direct service call dual mode guards) and one spec per live
+                    page, plus a11y.spec.ts over every registered page; product/ holds the real-data journeys the product project runs
                     against make product (make product-e2e): the owner's obligations, changes and ask, and
                     the oversight tools (a fan-out and the hold, a dry run, a CA firm's change card);
                     tsconfig.scripts.json type-checks them

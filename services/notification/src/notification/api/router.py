@@ -4,12 +4,14 @@ Preferences are keyed by channel and address and carry no tenant: an opt-out typ
 WhatsApp arrives before we know which tenant the number belongs to, and must be honoured
 either way. The address in the path is normalised first, so ``919876543210`` and
 ``+91 98765 43210`` are one record; an address that cannot be normalised is a 422 problem.
-A service token needs the notification:preferences scope for them. An opt-in given on the web
-(source web_onboarding or web_settings) is recorded only when identity holds the subject's
-granted consent for the channel's purpose in the request's tenant and, where identity knows the
-subject's contact on the channel, for that address: without a consent or for another address it
-is a 409, without a tenant a 401, without a subject a 422, and an identity that cannot answer a
-503; nothing is recorded in any of those cases. A change given on the web keeps the tenant it was
+A service token needs the notification:preferences scope for them; a tenant member's token
+reaches them too. An opt-in given on the web (source web_onboarding or web_settings) is recorded
+only when identity holds the subject's granted consent for the channel's purpose in the request's
+tenant and, where identity knows the subject's contact on the channel, for that address: without
+a consent or for another address it is a 409, without a tenant a 401, without a subject a 422,
+and an identity that cannot answer a 503; nothing is recorded in any of those cases. The subject
+of a member's token is the member (a body naming anyone else is a 403). A change given on the
+web keeps the tenant it was
 given for, which the tenant's data export shows. Outside header mode the api and support sources
 need a service token (401 without one). Sends are tenant data and need a tenant; a service
 token needs notification:send, and tenant:act to name the tenant. The data export answers the
@@ -71,7 +73,7 @@ def set_preference(
     if body.source in WEB_SOURCES:
         tenant_id = caller.tenant()
     if needs_consent(body.opted_in, body.source):
-        subject = body.subject
+        subject = caller.subject(body.subject)
     preference = wired.set_preference.run(
         channel,
         recipient,

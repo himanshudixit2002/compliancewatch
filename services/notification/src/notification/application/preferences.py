@@ -8,10 +8,11 @@ that address. The web records that consent first, with the user id as the subjec
 preference never says yes where no consent says so (docs/legal/data-map.md). Opt-outs and the
 other sources (the WhatsApp keyword, the API, support) are recorded as they come.
 
-The trust boundary: the consent subject comes from the caller, the web app's server, which holds
-the notification:preferences scope and names the signed-in user; no user token reaches this
-route. Identity checks that the subject's consent exists and that the address is theirs when it
-knows their contact; it cannot tell that the person behind the subject is the one at the web app.
+The trust boundary: the consent subject is the user a member's token names (the route refuses a
+body naming anyone else), or, from the web app's server with the notification:preferences scope
+(and in header mode, where no token is read), the body's word for the signed-in user. Identity
+checks that the subject's consent exists and that the address is theirs when it knows their
+contact; it cannot tell that the person behind a body subject is the one at the web app.
 The ``api`` and ``support`` sources skip the consent check, so outside header mode only a service
 token records them (the route refuses an anonymous caller).
 

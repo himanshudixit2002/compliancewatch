@@ -60,7 +60,11 @@ describe("encryptSession and decryptSession", () => {
       ...claims,
       cwToken: "a-service-token",
       cwTokenExpiresAt: claims.issuedAt + 600,
+      providerRefreshToken: "a-refresh-token",
+      providerAccessToken: "a-provider-token",
+      providerAccessExpiresAt: claims.issuedAt + 3600,
       checkedAt: claims.issuedAt,
+      refreshNotBefore: claims.issuedAt + 30,
       analyticsConsent: false,
     };
     const back = await decryptSession(await encryptSession(withToken, KEY), KEY, NOW);

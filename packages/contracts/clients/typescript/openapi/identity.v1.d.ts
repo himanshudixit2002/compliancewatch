@@ -323,7 +323,7 @@ export type paths = {
     };
     get?: never;
     put?: never;
-    /** Sign a fake provider token (fake provider, local and test only) */
+    /** Sign a fake provider token, for a development persona made on the spot or not (fake provider, local and test only) */
     post: operations["dev_provider_token_v1_identity_dev_provider_tokens_post"];
     delete?: never;
     options?: never;
@@ -946,6 +946,11 @@ export type components = {
        * @enum {string}
        */
       aal?: "aal1" | "aal2";
+      /**
+       * Display Name
+       * @default
+       */
+      display_name?: string;
       /** Email */
       email?: string | null;
       /**
@@ -953,6 +958,26 @@ export type components = {
        * @description E.164 number
        */
       phone?: string | null;
+      /**
+       * Roles
+       * @description The persona's roles, which the tenant's kind must allow; with tenant_kind
+       */
+      roles?: components["schemas"]["Role"][] | null;
+      /**
+       * Tenant Id
+       * @description The persona's tenant: an existing one, or the id the new one gets. Absent, a new tenant for a business or CA firm, and the one development internal tenant for the regulatory roles
+       */
+      tenant_id?: string | null;
+      /**
+       * Tenant Kind
+       * @description A development persona: with roles, the person is made a user of a tenant of this kind before the token is signed, so the token exchanges for a session at once
+       */
+      tenant_kind?: ("business" | "ca_firm" | "internal") | null;
+      /**
+       * Tenant Name
+       * @default
+       */
+      tenant_name?: string;
     };
     /** DevProviderTokenOut */
     DevProviderTokenOut: {
@@ -963,6 +988,16 @@ export type components = {
       provider_token: string;
       /** Subject */
       subject: string;
+      /**
+       * Tenant Id
+       * @description The persona's tenant, when the request made or found one
+       */
+      tenant_id?: string | null;
+      /**
+       * User Id
+       * @description The persona's user, likewise
+       */
+      user_id?: string | null;
     };
     /** EntitlementsOut */
     EntitlementsOut: {
@@ -1328,6 +1363,8 @@ export type components = {
        * @description An ES256 access token; send it as a bearer token
        */
       access_token: string;
+      /** Display Name */
+      display_name: string;
       /**
        * Expires In
        * @description Seconds until the token expires
@@ -1341,10 +1378,16 @@ export type components = {
       /** Roles */
       roles: components["schemas"]["Role"][];
       /**
+       * Session Version
+       * @description The user's session version the token carries; a bump revokes older tokens
+       */
+      session_version: number;
+      /**
        * Tenant Id
        * Format: uuid
        */
       tenant_id: string;
+      tenant_kind: components["schemas"]["TenantKind"];
       /**
        * Token Type
        * @default Bearer
@@ -2558,8 +2601,26 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };

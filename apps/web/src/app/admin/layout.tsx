@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { toSessionDto } from "@/entities/session/mappers";
-import { requireAdmin } from "@/server/dal";
+import { requireAdmin, requireMfa } from "@/server/dal";
 import { webEnvName } from "@/server/env";
 import { adminNavFor } from "@/shared/config/nav";
 import { hrefFor, screenById } from "@/shared/config/screens";
@@ -12,9 +12,12 @@ export const dynamic = "force-dynamic";
 
 // The shell lists the tools the session's roles may open. requireAdmin here is the outer
 // wall (a tenant role gets the 404 before any admin markup exists); every admin page and
-// action calls it again, because a layout is not re-run on every navigation.
+// action calls it again, because a layout is not re-run on every navigation. The regulatory
+// roles sign in with a second factor: a session without one verifies it first and comes back.
 export default async function AdminLayout({ children }: Readonly<{ children: ReactNode }>) {
-  const session = await requireAdmin({ next: hrefFor(screenById("admin.home")) });
+  const home = hrefFor(screenById("admin.home"));
+  await requireAdmin({ next: home });
+  const session = await requireMfa({ next: home });
   const groups = adminNavFor({ roles: session.roles, tenantKind: session.tenantKind });
   return (
     <InternalShell

@@ -3,12 +3,34 @@ import type { Instrumentation } from "next";
 /**
  * Called once when a Next.js server starts. On the Node.js runtime it registers OpenTelemetry
  * behind the flag `web.otel_enabled` (server/telemetry.ts): off by default, and exporting spans
- * only when an OTLP endpoint is configured. The edge runtime registers nothing.
+ * only when an OTLP endpoint is configured. It also says, once, when the /admin allow-list is
+ * empty outside production, where that opens the tools to every address (src/proxy.ts). The
+ * edge runtime registers nothing.
  */
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
   const { registerTelemetry } = await import("./server/telemetry");
   await registerTelemetry();
+  await warnAboutAnOpenAdmin();
+}
+
+/** The environment is parsed per request; here it is read only to warn, never to refuse. */
+async function warnAboutAnOpenAdmin(): Promise<void> {
+  try {
+    const { getEnv } = await import("./server/env");
+    const env = getEnv();
+    if (env.CW_WEB_ENV !== "prod" && env.CW_WEB_ADMIN_IP_ALLOWLIST.length === 0) {
+      console.warn(
+        JSON.stringify({
+          level: "warn",
+          event: "admin_allowlist_empty",
+          message: `CW_WEB_ADMIN_IP_ALLOWLIST is empty: /admin is open to every address in ${env.CW_WEB_ENV} (in prod it would answer 404)`,
+        }),
+      );
+    }
+  } catch {
+    // A bad variable is reported with its name at the first request, not at startup.
+  }
 }
 
 /**

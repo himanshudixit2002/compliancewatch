@@ -20,7 +20,10 @@ export const WEB_ENVS = ["local", "test", "staging", "prod"] as const;
 
 export type WebEnvName = (typeof WEB_ENVS)[number];
 
-/** `fake` mints sessions locally; `supabase` is reserved until its adapter exists. */
+/**
+ * `fake` signs in through identity's development provider tokens (local and test only);
+ * `supabase` through Supabase Auth's GoTrue API, server-side (server/auth/supabase.ts).
+ */
 export const AUTH_PROVIDER_NAMES = ["fake", "supabase"] as const;
 
 export type AuthProviderName = (typeof AUTH_PROVIDER_NAMES)[number];
@@ -75,8 +78,24 @@ const schema = z
   .object({
     CW_WEB_ENV: z.enum(WEB_ENVS).default("local"),
     CW_WEB_AUTH_PROVIDER: z.enum(AUTH_PROVIDER_NAMES).optional(),
+    // The Supabase project's URL and anon key, read by the supabase adapter alone and never
+    // sent to a browser (server/auth/supabase.ts); required only when the provider is supabase.
+    CW_WEB_SUPABASE_URL: httpUrl.optional(),
+    CW_WEB_SUPABASE_ANON_KEY: z.string().min(1).optional(),
+    // This deployment's own origin (https://app.example.com), from which the email link's
+    // callback address is built (features/auth/queries.ts); required with the supabase provider,
+    // so no request header decides where a sign-in link comes back to. The fake adapter, which
+    // sends nothing, takes the host the browser asked for instead.
+    CW_WEB_PUBLIC_URL: httpUrl.optional(),
     CW_WEB_SESSION_SECRET: sessionSecret.optional(),
     CW_WEB_SESSION_TTL_SECONDS: positiveInt.max(86_400).default(28_800),
+    // How the proxy keeps a session current (src/proxy.ts): the identity token is refreshed
+    // through the provider once fewer than this many seconds remain, and /me is re-read for
+    // the roles, the second factor and the session version once this many seconds have passed
+    // since the last read (0 re-reads on every request, for a test that must see a revocation
+    // at once).
+    CW_WEB_TOKEN_REFRESH_SECONDS: positiveInt.max(3_600).default(120),
+    CW_WEB_SESSION_RECHECK_SECONDS: z.coerce.number().int().nonnegative().max(86_400).default(300),
     CW_WEB_REQUEST_TIMEOUT_MS: positiveInt.max(120_000).default(10_000),
     // The two shared secrets (ADR-018). The write token is the rulebook's CW_RULEBOOK_WRITE_TOKEN,
     // which the pipeline reads as its own copy: server/api/rulebook-write.ts sends it to the
@@ -112,6 +131,18 @@ const schema = z
         path: ["CW_WEB_AUTH_PROVIDER"],
         message: "fake is allowed only when CW_WEB_ENV is local or test",
       });
+    }
+    if (env.CW_WEB_AUTH_PROVIDER === "supabase") {
+      const required = ["CW_WEB_SUPABASE_URL", "CW_WEB_SUPABASE_ANON_KEY", "CW_WEB_PUBLIC_URL"];
+      for (const name of required as (keyof typeof env)[]) {
+        if (env[name] === undefined) {
+          ctx.addIssue({
+            code: "custom",
+            path: [name],
+            message: "required when CW_WEB_AUTH_PROVIDER is supabase",
+          });
+        }
+      }
     }
   });
 

@@ -228,10 +228,10 @@ const SCREEN_LIST = [
     uses: [],
     awaits: [SESSION_EXCHANGE, DEV_PROVIDER_TOKENS],
     status: "live",
-    e2e: ["sign-in.spec.ts", "a11y.spec.ts", "journey-visitor.spec.ts"],
+    e2e: ["sign-in.spec.ts", "sign-up.spec.ts", "a11y.spec.ts", "journey-visitor.spec.ts"],
     guideRef: "10, 12, 16; ADR-014",
     notes:
-      "The development sign-in on the fake provider (local and test); the identity routes it awaits bring the real one.",
+      "By phone (a code) or email (a link) through the configured provider; in local and test the fake adapter adds the development sign-in, a persona identity makes.",
   },
   {
     id: "system.sign-out",
@@ -245,7 +245,8 @@ const SCREEN_LIST = [
     status: "live",
     e2e: ["sign-in.spec.ts", "journey-owner.spec.ts"],
     guideRef: "16",
-    notes: "POST only; clears the session cookie and returns to the sign-in page.",
+    notes:
+      "POST only; ends the provider session where one is kept, clears the session cookie and returns to the sign-in page.",
   },
   {
     id: "system.sitemap",
@@ -339,9 +340,11 @@ const SCREEN_LIST = [
     roles: "public",
     uses: [SESSIONS],
     awaits: [SESSION_EXCHANGE],
-    status: "ready",
-    e2e: [],
+    status: "live",
+    e2e: ["sign-up.spec.ts", "a11y.spec.ts"],
     guideRef: "ADR-014",
+    notes:
+      "After the email step; with the fake adapter in local and test the link is shown here instead of sent.",
   },
   {
     id: "system.sign-up",
@@ -352,9 +355,11 @@ const SCREEN_LIST = [
     roles: "public",
     uses: [uses("identity", "POST", "/v1/identity/tenants")],
     awaits: [servicesTrack("WP14", "identity", "POST", "/v1/identity/tenants")],
-    status: "ready",
-    e2e: [],
+    status: "live",
+    e2e: ["sign-up.spec.ts", "a11y.spec.ts"],
     guideRef: "6, 10",
+    notes:
+      "Needs the pending sign-in cookie a first sign-in leaves; without one it says to sign in first.",
   },
   {
     id: "system.auth-callback",
@@ -365,9 +370,11 @@ const SCREEN_LIST = [
     roles: "public",
     uses: [SESSIONS],
     awaits: [SESSION_EXCHANGE],
-    status: "ready",
-    e2e: [],
+    status: "live",
+    e2e: ["sign-up.spec.ts"],
     guideRef: "ADR-014",
+    notes:
+      "GET with the link's token_hash; an expired link returns to /sign-in?error=link-expired.",
   },
   {
     id: "system.sign-in-sso",
@@ -479,10 +486,12 @@ const SCREEN_LIST = [
     roles: [...MEMBERS, ...REGULATORY],
     uses: [SESSIONS, DEV_TOKENS],
     awaits: [SESSION_EXCHANGE, DEV_PROVIDER_TOKENS],
-    status: "ready",
-    e2e: [],
+    status: "live",
+    e2e: ["mfa.spec.ts", "a11y.spec.ts"],
     guideRef: "16, 17",
     nav: { group: "account", order: 3 },
+    notes:
+      "Also serves a pending sign-in (the proxy lets the cw_pending cookie through) whose roles need the factor first.",
   },
   // ---- owner ------------------------------------------------------------------------------
   {
@@ -1065,8 +1074,8 @@ const SCREEN_LIST = [
     tenantKinds: BUSINESS_TENANTS,
     uses: IDENTITY_USER_ROUTES,
     awaits: IDENTITY_USERS,
-    status: "ready",
-    e2e: [],
+    status: "live",
+    e2e: ["team.spec.ts", "a11y.spec.ts"],
     guideRef: "5, 6, 16",
     nav: { group: "settings", order: 6 },
     parent: "owner.settings",
@@ -1231,8 +1240,8 @@ const SCREEN_LIST = [
     tenantKinds: ["internal"],
     uses: IDENTITY_USER_ROUTES,
     awaits: IDENTITY_USERS,
-    status: "ready",
-    e2e: [],
+    status: "live",
+    e2e: ["team.spec.ts", "a11y.spec.ts"],
     guideRef: "15, 17",
     nav: { group: "identity", order: 3 },
     parent: "admin.home",

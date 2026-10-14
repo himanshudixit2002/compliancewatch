@@ -22,17 +22,21 @@ import { mapBody, type Result } from "@/server/result";
 import type { FanOutPort, FanOutVersionsPort } from "./ports";
 
 /**
- * The fan-out screens over the typed clients: the engine's admin routes (no tenant header; a
- * fan-out belongs to no tenant) and the rulebook's version read. Nothing is cached: a run moves on
- * batch by batch and a control changes it at once. The role is checked by the caller before a
- * control is sent; the engine checks it again once it reads tokens.
+ * The fan-out screens over the typed clients: the engine's admin routes (no tenant header, since
+ * a fan-out belongs to no tenant, with the session's bearer, since a control needs an admin a
+ * token names outside header mode) and the rulebook's version read. Nothing is cached: a run
+ * moves on batch by batch and a control changes it at once. The role is checked by the caller
+ * before a control is sent; the engine checks it again.
  */
 export class FanOutsGateway implements FanOutPort, FanOutVersionsPort {
   private readonly engine: ApplicabilityEngineClient;
   private readonly rulebook: RulebookClient;
 
-  constructor(ctx: Pick<ClientContext, "fetchImpl">) {
-    this.engine = applicabilityEngineAdminClient({ fetchImpl: ctx.fetchImpl });
+  constructor(ctx: Partial<Pick<ClientContext, "session" | "fetchImpl">>) {
+    this.engine = applicabilityEngineAdminClient({
+      session: ctx.session ?? null,
+      fetchImpl: ctx.fetchImpl,
+    });
     this.rulebook = rulebookClient({ fetchImpl: ctx.fetchImpl });
   }
 
@@ -117,6 +121,8 @@ export class FanOutsGateway implements FanOutPort, FanOutVersionsPort {
 }
 
 /** The gateway for a page or an action; tests pass fetchImpl. */
-export function fanOutsGateway(ctx: Pick<ClientContext, "fetchImpl"> = {}): FanOutsGateway {
+export function fanOutsGateway(
+  ctx: Partial<Pick<ClientContext, "session" | "fetchImpl">> = {},
+): FanOutsGateway {
   return new FanOutsGateway(ctx);
 }

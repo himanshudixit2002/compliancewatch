@@ -36,7 +36,8 @@ export class DecisionReviewGateway implements ReviewQueuePort, ReviewVersionsPor
   private readonly rulebook: RulebookClient;
 
   constructor(ctx: ClientContext) {
-    this.engine = applicabilityEngineClient(ctx);
+    // The review routes read the tenant from the header and the reviewer from the token.
+    this.engine = applicabilityEngineClient({ ...ctx, bearerWithOverride: true });
     this.rulebook = rulebookClient({ fetchImpl: ctx.fetchImpl });
   }
 

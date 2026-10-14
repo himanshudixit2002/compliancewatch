@@ -20,7 +20,20 @@ test.describe("account", () => {
     await expect(facts).toContainText("IST");
     await expect(facts).toContainText("Development (fake)");
     await expect(page.getByRole("button", { name: "Copy Tenant id" })).toBeVisible();
-    await expect(page.locator("[data-slot='banner']")).toContainText("/me");
+    // What /me adds: with identity reading tokens (make web-stack AUTH=dual, the CI job) the
+    // email, the mobile number and the account name; in header mode a note instead.
+    const note = page.locator("[data-slot='banner']");
+    if ((await note.count()) > 0) {
+      await expect(note).toContainText("header mode");
+      await expect(facts).not.toContainText("Email");
+    } else {
+      await expect(facts).toContainText("@fake.compliancewatch.invalid");
+      await expect(facts).toContainText("Mobile number");
+      await expect(facts).toContainText("Account name");
+    }
+    await expect(
+      page.locator("[data-slot='account']").getByRole("link", { name: "Two-step verification" }),
+    ).toHaveAttribute("href", "/account/mfa");
     await expect(page.locator("main form[data-slot='sign-out']")).toHaveAttribute(
       "action",
       "/sign-out",

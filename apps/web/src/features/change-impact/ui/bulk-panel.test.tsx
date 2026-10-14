@@ -7,6 +7,8 @@ import { BulkPanel, type BulkAction } from "./bulk-panel";
 import type { BulkSummary } from "./bulk-shared";
 
 const FORM_UUID = "5d1c8b2e-3f4a-4b6c-8d9e-0f1a2b3c4d5e";
+/** The key a re-rendered page mints behind the form after the first send. */
+const LATER_UUID = "9a7b6c5d-4e3f-4a1b-8c2d-1e0f9a8b7c6d";
 const TARGETS = [
   { businessId: REGISTRATION_ID, label: "Example business: GSTIN example" },
   { businessId: ENTITY_ID, label: "Example business: the client itself" },
@@ -33,16 +35,42 @@ function summary(replayed: boolean): BulkSummary {
   };
 }
 
+function keyInput(value: string) {
+  return <input type="hidden" name="idempotency_key" value={value} />;
+}
+
 function renderPanel(action: BulkAction, props: Partial<Parameters<typeof BulkPanel>[0]> = {}) {
   return render(
     <BulkPanel
       action={action}
       targets={TARGETS}
       cut={false}
-      idempotencyInput={<input type="hidden" name="idempotency_key" value={FORM_UUID} />}
+      idempotencyInput={keyInput(FORM_UUID)}
       {...props}
     />,
   );
+}
+
+/** Opens the dialog from the send button and confirms it. */
+async function sendThroughDialog(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  await user.click(screen.getByRole("button", { name: /^Send the change card to/ }));
+  await user.click(
+    within(await screen.findByRole("dialog", { name: "Send the change card?" })).getByRole(
+      "button",
+      { name: "Send the change card" },
+    ),
+  );
+}
+
+/** The action records each request's key and businesses; the second answer is a replay. */
+function recordingAction(sent: [string, string[]][]): BulkAction {
+  return vi.fn<BulkAction>(async (_state, formData) => {
+    sent.push([
+      String(formData.get("idempotency_key")),
+      formData.getAll("business_id").map(String),
+    ]);
+    return { status: "ok", value: summary(sent.length > 1), message: "x" };
+  });
 }
 
 describe("BulkPanel", () => {
@@ -90,6 +118,63 @@ describe("BulkPanel", () => {
     expect(sent).toEqual([
       [FORM_UUID, [REGISTRATION_ID, ENTITY_ID]],
       [FORM_UUID, [REGISTRATION_ID, ENTITY_ID]],
+    ]);
+  });
+
+  it("sends the key it first sent when the page minted another and the businesses are the same", async () => {
+    const sent: [string, string[]][] = [];
+    const action = recordingAction(sent);
+    const { rerender, container } = renderPanel(action);
+    const user = userEvent.setup();
+    await sendThroughDialog(user);
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Example sent."));
+    // A session cookie refreshed on the action's request re-renders the page behind the form.
+    rerender(
+      <BulkPanel
+        action={action}
+        targets={TARGETS}
+        cut={false}
+        idempotencyInput={keyInput(LATER_UUID)}
+      />,
+    );
+    const field = container.querySelector("input[name='idempotency_key']") as HTMLInputElement;
+    expect(field.value).toBe(LATER_UUID);
+    await sendThroughDialog(user);
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toBe("Example already sent."),
+    );
+    expect(
+      container.querySelector("[data-slot='bulk-outcome']")?.getAttribute("data-replayed"),
+    ).toBe("true");
+    const ids = [REGISTRATION_ID, ENTITY_ID];
+    expect(sent).toEqual([
+      [FORM_UUID, ids],
+      [FORM_UUID, ids],
+    ]);
+  });
+
+  it("takes the page's new key when the businesses to send are no longer the same", async () => {
+    const sent: [string, string[]][] = [];
+    const action = recordingAction(sent);
+    const { rerender } = renderPanel(action);
+    const user = userEvent.setup();
+    await sendThroughDialog(user);
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Example sent."));
+    rerender(
+      <BulkPanel
+        action={action}
+        targets={TARGETS.slice(0, 1)}
+        cut={false}
+        idempotencyInput={keyInput(LATER_UUID)}
+      />,
+    );
+    await sendThroughDialog(user);
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toBe("Example already sent."),
+    );
+    expect(sent).toEqual([
+      [FORM_UUID, [REGISTRATION_ID, ENTITY_ID]],
+      [LATER_UUID, [REGISTRATION_ID]],
     ]);
   });
 

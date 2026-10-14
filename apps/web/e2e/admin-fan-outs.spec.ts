@@ -11,6 +11,7 @@ import {
   test,
   waitForHydration,
 } from "./fixtures";
+import { adminAuthHeaders } from "./identity-helpers";
 import { latestVersion } from "./rulebook-helpers";
 
 /**
@@ -34,7 +35,7 @@ interface HoldBody {
 async function engine<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`${serviceUrl("applicability-engine")}${path}`, {
     ...init,
-    headers: { "content-type": "application/json", ...init.headers },
+    headers: { "content-type": "application/json", ...(await adminAuthHeaders()), ...init.headers },
   });
   expect(response.ok, `${path}: ${response.status}`).toBe(true);
   return (await response.json()) as T;

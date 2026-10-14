@@ -47,7 +47,7 @@ describe("AdminHomeView", () => {
     expect(tenant?.querySelector("a")).toBeNull();
     expect(tenant?.textContent).toContain("services/identity/README.md");
     const team = container.querySelector("[data-tool='admin.team']");
-    expect(team?.textContent).toContain("+");
+    expect(team?.textContent).toContain("Available");
     const task = container.querySelector("[data-tool='admin.review.task']");
     expect(task?.textContent).toContain("Available");
     expect(task?.textContent).toContain("services/rulebook/README.md");
@@ -60,7 +60,6 @@ describe("AdminHomeView", () => {
     expect(sources?.textContent).toContain("Available");
     const pipeline = container.querySelector("[data-tool='admin.pipeline']");
     expect(pipeline?.textContent).toContain("Available");
-    expect(team?.textContent).toContain("Ready to build");
     const audit = container.querySelector("[data-tool='admin.audit']");
     expect(audit?.textContent).toContain("Ready to build");
     const tenants = container.querySelector("[data-tool='admin.tenants']");

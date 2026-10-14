@@ -8,6 +8,7 @@ import { screenById } from "@/shared/config/screens";
 import { fakeCookies } from "@/test/fake-cookies";
 import {
   requireAdmin,
+  requireMfa,
   requireRole,
   requireScreen,
   requireScreenSession,
@@ -209,5 +210,25 @@ describe("sessionForRender", () => {
     const dto = await sessionForRender();
     expect(dto).toMatchObject({ displayName: "Example owner", roles: ["owner"] });
     expect(dto).not.toHaveProperty("cwToken");
+  });
+});
+
+describe("requireMfa", () => {
+  it("sends a role that needs a second factor to verify it, with the path to return to", async () => {
+    vi.stubEnv("CW_WEB_ENV", "test");
+    await signedInAs({ tenantKind: "internal", roles: ["analyst"], mfa: false });
+    await redirectsTo(requireMfa({ next: "/admin/review" }), "/account/mfa?next=%2Fadmin%2Freview");
+    await redirectsTo(requireMfa(), "/account/mfa");
+  });
+
+  it("passes a verified factor, a role that needs none, and sends nobody to sign in", async () => {
+    vi.stubEnv("CW_WEB_ENV", "test");
+    const verified = await signedInAs({ tenantKind: "ca_firm", roles: ["ca_admin"], mfa: true });
+    expect(await requireMfa()).toEqual(verified);
+    fakeCookies.reset();
+    const owner = await signedInAs({ roles: ["owner"], mfa: false });
+    expect(await requireMfa()).toEqual(owner);
+    fakeCookies.reset();
+    await redirectsTo(requireMfa({ next: "/settings/team" }), "/sign-in?next=%2Fsettings%2Fteam");
   });
 });

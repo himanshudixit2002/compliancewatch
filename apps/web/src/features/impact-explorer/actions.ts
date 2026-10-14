@@ -32,7 +32,7 @@ export async function runDryRun(
   const values = formValues(formData);
   const parsed = parseDryRunForm(values);
   if (!parsed.ok) return { status: "error", fieldErrors: parsed.fieldErrors };
-  const result = await impactExplorerGateway().dryRun(parsed.request);
+  const result = await impactExplorerGateway({ session }).dryRun(parsed.request);
   if (!result.ok) {
     const state = toActionState<DryRunAnswer>({ ok: false, error: result.error });
     if (state.status === "error" && isProblemOf(result.error.problem, TOO_LARGE)) {

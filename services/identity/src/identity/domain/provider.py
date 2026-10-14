@@ -92,3 +92,7 @@ class DevIdentityProvider(IdentityProvider, Protocol):
     def issue(self, *, email: str = "", phone: str = "", aal: str = AAL1) -> str:
         """A provider token for the person with this email address or phone number."""
         ...
+
+    def subject_for(self, contact: Contact) -> str:
+        """The subject a token for ``contact`` names, before any token is issued."""
+        ...

@@ -59,7 +59,7 @@ export async function getFanOutList(
   cursor: string | null,
   deps: QueryDeps = {},
 ): Promise<Result<FanOutListView>> {
-  const gateway = fanOutsGateway({ fetchImpl: deps.fetchImpl });
+  const gateway = fanOutsGateway({ session, fetchImpl: deps.fetchImpl });
   const [hold, page] = await Promise.all([
     gateway.hold(),
     gateway.list({ limit: FAN_OUT_PAGE_SIZE, ...(cursor === null ? {} : { cursor }) }),
@@ -136,7 +136,7 @@ export async function getFanOutPage(
   ruleVersionId: string,
   deps: QueryDeps = {},
 ): Promise<Result<FanOutPageView>> {
-  const gateway = fanOutsGateway({ fetchImpl: deps.fetchImpl });
+  const gateway = fanOutsGateway({ session, fetchImpl: deps.fetchImpl });
   const [run, version, hold] = await Promise.all([
     gateway.get(ruleVersionId),
     gateway.version(ruleVersionId),

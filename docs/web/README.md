@@ -26,8 +26,12 @@ Flat; markdown files. Reading order for someone new to the app:
    `ActionState`, caching and revalidation, idempotency and natural keys, the shared secrets,
    and the local services with their seed.
 3. [auth-and-roles.md](auth-and-roles.md): roles and tenant kinds, the session cookie, the
-   proxy and the gates, the sign-in provider port and the fake adapter, what is not enforced
-   yet and what the identity work changes.
+   proxy and the gates, the sign-in provider port with its adapters, the pages, and what is
+   not enforced yet. [auth.md](auth.md): the sign-in flows drawn (phone, email link, sign-up,
+   the second factor, refresh and revocation), the cookies' contents, the claim mapping, the
+   provider matrix, the threats considered and the local set-up. [roles.md](roles.md):
+   generated; the roles with their kinds and sets, the capability matrix and the roles by
+   route.
 4. [design-system.md](design-system.md): tokens, light and dark schemes, the component
    inventory with the accessibility contract of each component, the catalogue at `/design`.
 5. [adding-a-screen.md](adding-a-screen.md): the procedure for a new screen, including a

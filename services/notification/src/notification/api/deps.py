@@ -14,15 +14,18 @@ mode, or ``dual`` mode without one) everything works as before tokens existed: t
   or ``ca_staff``) whose token names the tenant, never a service; it carries the audit actor and
   the request's correlation id. ``PUBLIC_CA_ROUTE`` is its ``openapi_extra``: those roles as
   ``x-roles``.
-- ``PreferenceAccess``: a service with the notification:preferences scope. Preferences are keyed
-  by channel and address and name no tenant, so no user may change them directly.
-- ``PreferenceCaller``: for a change given on the web, the tenant (``resolve_tenant``: a
-  service's ``x-tenant-id`` with tenant:act, or the anonymous principal's header), and for a web
-  opt-in, which identity's consent must cover, the consent subject the body names. Only a
-  service with notification:preferences reaches the route with a token (a user is refused), so
-  the subject is the web app's word for its signed-in user: the trust boundary
-  ``notification.application.preferences`` describes. Outside header mode the ``api`` and
-  ``support`` sources, which skip the consent check, need that service's token.
+- ``PreferenceAccess``: a service with the notification:preferences scope, or a user with a
+  tenant member role (the web sends the signed-in person's token, and a web change is the
+  tenant's). Preferences are keyed by channel and address and name no tenant themselves.
+- ``PreferenceCaller``: for a change given on the web, the tenant (``resolve_tenant``: the
+  user's own, a service's ``x-tenant-id`` with tenant:act, or the anonymous principal's
+  header), and for a web opt-in, which identity's consent must cover, the consent subject: a
+  user's token names its own user, and a body subject that differs is a 403; a service token
+  or the anonymous principal of header mode names it in the body, the web app's server's word
+  for its signed-in user, the trust boundary ``notification.application.preferences``
+  describes. The ``api`` and ``support`` sources, which skip the consent check, are a
+  service's: a person's token never records one, and outside header mode they need that
+  service's token.
 - ``Resender`` (``/notifications/{id}/resend``): who resends a failed notification, and for which
   tenant. A tenant admin (owner or ca_admin) resends their own tenant's, which their token names,
   as a CA firm's people send its bulk card; an admin of the internal tenant resends any tenant's,
@@ -64,7 +67,7 @@ from notification.domain.errors import (
 )
 from notification.wiring import Wiring
 from py_common.audit import audit_actor, current_correlation_id
-from py_common.auth.errors import AuthTokenRequiredError
+from py_common.auth.errors import AuthForbiddenError, AuthTokenRequiredError
 from py_common.auth.fastapi import (
     TENANT_HEADER_DESCRIPTION,
     CurrentPrincipal,
@@ -110,8 +113,25 @@ class OptInCaller:
         principal's header; None without."""
         return resolve_tenant(self.principal, self.offered_tenant)
 
+    def subject(self, named: str | None) -> str | None:
+        """The consent subject of a web opt-in: a person's token names its own user, and a
+        body naming anyone else is refused; any other caller names it in the body."""
+        if self.principal.kind is PrincipalKind.USER:
+            own = str(self.principal.user_id)
+            if named is not None and named != own:
+                raise AuthForbiddenError(
+                    "a person records a preference under their own consent subject"
+                )
+            return own
+        return named
+
     def require_service(self, source: str) -> None:
-        """Outside header mode, a change only a service records needs its token."""
+        """Outside header mode, a change only a service records needs its token; a person's
+        token never records one, whatever the mode."""
+        if self.principal.kind is PrincipalKind.USER:
+            raise AuthForbiddenError(
+                f"a preference with source {source} is recorded by a service, not by a person"
+            )
         if not self.principal.is_authenticated and not self.header_mode:
             raise AuthTokenRequiredError(
                 f"a preference with source {source} is recorded by a service: send its token"
@@ -222,8 +242,12 @@ ExportTenant = Annotated[TenantId, Depends(data_export_scope(SERVICE_NAME, Tenan
 PreferenceCaller = Annotated[OptInCaller, Depends(preference_caller)]
 Wired = Annotated[Wiring, Depends(wiring)]
 
-PreferenceAccess = Depends(require_roles(scopes={Scope.NOTIFICATION_PREFERENCES}))
-"""A service token needs notification:preferences; without a token the routes work as before."""
+PreferenceAccess = Depends(
+    require_roles(TENANT_MEMBER_ROLES, scopes={Scope.NOTIFICATION_PREFERENCES})
+)
+"""A tenant member's token (the web app's settings and onboarding pages set and read a person's
+preference for them) or a service token with notification:preferences; without a token the
+routes work as before. A person's token records web sources only (``OptInCaller``)."""
 
 BotAccess = Depends(
     shared_token_or_roles(

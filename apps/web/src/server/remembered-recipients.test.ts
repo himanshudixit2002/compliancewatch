@@ -24,6 +24,18 @@ const OTHER_USER = "00000000-0000-4000-8000-000000000002";
 const NUMBER = "919800000001";
 const NOW = new Date("2000-01-01T00:00:00Z");
 
+/**
+ * The token with the first character of its authentication tag changed, whatever it was: that
+ * character carries six bits of the tag, so the tampered token never decrypts. (Replacing the
+ * last two characters with "xx" left one token in a few hundred as it was: the last character
+ * of a tag carries two bits, so "xw" and "xx" decode to the same bytes.)
+ */
+function tampered(token: string): string {
+  const at = token.lastIndexOf(".") + 1;
+  const first = token[at] === "A" ? "B" : "A";
+  return `${token.slice(0, at)}${first}${token.slice(at + 1)}`;
+}
+
 beforeEach(() => {
   fakeCookies.reset();
   vi.stubEnv("CW_WEB_SESSION_SECRET", SECRET);
@@ -48,7 +60,7 @@ describe("encryptRecipients and decryptRecipients", () => {
     expect(await decryptRecipients(token, USER, new Uint8Array(randomBytes(32)), NOW)).toEqual({});
     const later = new Date(NOW.getTime() + (RECIPIENT_COOKIE_MAX_AGE_SECONDS + 60) * 1000);
     expect(await decryptRecipients(token, USER, KEY, later)).toEqual({});
-    expect(await decryptRecipients(`${token.slice(0, -2)}xx`, USER, KEY, NOW)).toEqual({});
+    expect(await decryptRecipients(tampered(token), USER, KEY, NOW)).toEqual({});
   });
 
   it("drops values that are not the service's keys and tokens of another kind", async () => {

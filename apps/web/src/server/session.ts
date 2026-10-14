@@ -39,7 +39,10 @@ const payloadSchema = z.object({
   cwToken: z.string().min(1).optional(),
   cwTokenExpiresAt: z.number().int().optional(),
   providerRefreshToken: z.string().min(1).optional(),
+  providerAccessToken: z.string().min(1).optional(),
+  providerAccessExpiresAt: z.number().int().optional(),
   checkedAt: z.number().int().optional(),
+  refreshNotBefore: z.number().int().optional(),
   analyticsConsent: z.boolean().optional(),
 });
 

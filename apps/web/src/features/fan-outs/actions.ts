@@ -102,7 +102,7 @@ export async function setFanOutHold(
   const reason = reasonOf(formData, true);
   if ("error" in reason) return reasonRefused(reason.error);
   const held = parsed.data === "on";
-  const result = await fanOutsGateway().setHold(held, reason.reason);
+  const result = await fanOutsGateway({ session }).setHold(held, reason.reason);
   return answered(
     result,
     ruleVersionId?.toLowerCase() ?? null,
@@ -133,7 +133,7 @@ export async function controlFanOut(
   const reason = reasonOf(formData, control !== "resume");
   if ("error" in reason) return reasonRefused(reason.error);
   const id = ruleVersionId.toLowerCase();
-  const gateway = fanOutsGateway();
+  const gateway = fanOutsGateway({ session });
   const result =
     control === "pause"
       ? await gateway.pause(id, reason.reason)
