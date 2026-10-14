@@ -14,7 +14,12 @@ import { call, type CallOutcome } from "./client";
  *
  * The key is minted once per render: a page puts `<IdempotencyKeyInput />` inside the form,
  * the browser sends the same hidden value on every submit of that render, and the server action
- * turns it into the header with `idempotencyHeaders(formData, operation)`. The header is sent
+ * turns it into the header with `idempotencyHeaders(formData, operation)`. A render does not
+ * outlive every submit, though: when the proxy refreshes the session cookie on an action's
+ * request, Next tells the browser that cookies changed and the page's server components render
+ * again, so the hidden input then holds a key the service has never seen. A form that must send
+ * the same request twice (the bulk change card panel) therefore keeps the key it first sent for
+ * that request rather than reading the input again. The header is sent
  * only for an operation in `IDEMPOTENT_OPERATIONS`: the routes that read it, which answer 428
  * without it and replay the first response for 24 hours (py-common's idempotency module):
  * starting a subscription with the billing provider, the business API's two creating POSTs, the applicability engine's evaluate, which appends a

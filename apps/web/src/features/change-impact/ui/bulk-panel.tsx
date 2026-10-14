@@ -17,6 +17,7 @@ import {
 } from "@compliancewatch/ui";
 import { t } from "@/shared/i18n";
 import { idleAction, type ActionState } from "@/shared/lib/action-state";
+import { IDEMPOTENCY_KEY_FIELD } from "@/shared/lib/idempotency";
 import { BULK_FIELDS, type BulkSummary, type BulkTarget } from "./bulk-shared";
 
 export type BulkAction = (
@@ -35,14 +36,49 @@ export interface BulkPanelProps {
   idempotencyInput: ReactNode;
 }
 
+/** A request this panel sent: its key and the businesses it named, in the order sent. */
+interface SentRequest {
+  key: string;
+  businesses: readonly string[];
+}
+
 interface Attempt {
   last: ActionState<BulkSummary>;
   /** The request whose answer never arrived, kept whole (key included) for "Try again". */
   lost: FormData | null;
   count: number;
+  /**
+   * The last request sent from this panel, so the same businesses sent again carry the same key
+   * however often the page minted a new one since: a server action whose request refreshed the
+   * session cookie re-renders the page (Next refreshes the tree when cookies change), and the
+   * hidden input then holds a key the service has never seen.
+   */
+  sent: SentRequest | null;
 }
 
-const START: Attempt = { last: idleAction(), lost: null, count: 0 };
+const START: Attempt = { last: idleAction(), lost: null, count: 0, sent: null };
+
+function sentRequestOf(formData: FormData): SentRequest | null {
+  const key = formData.get(IDEMPOTENCY_KEY_FIELD);
+  if (typeof key !== "string" || key === "") return null;
+  return { key, businesses: formData.getAll(BULK_FIELDS.businessId).map(String) };
+}
+
+function sameBusinesses(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((id, index) => id === b[index]);
+}
+
+/**
+ * The form's data with the key this panel already sent for these businesses, in this order,
+ * else with the page's key as the form holds it: the same request keeps its key, a different
+ * one (another list of businesses) takes a new one.
+ */
+function withSentKey(formData: FormData, sent: SentRequest | null): FormData {
+  if (sent === null) return formData;
+  const businesses = formData.getAll(BULK_FIELDS.businessId).map(String);
+  if (sameBusinesses(sent.businesses, businesses)) formData.set(IDEMPOTENCY_KEY_FIELD, sent.key);
+  return formData;
+}
 
 function isFrameworkError(error: unknown): boolean {
   if (typeof error !== "object" || error === null || !("digest" in error)) return false;
@@ -54,7 +90,9 @@ function isFrameworkError(error: unknown): boolean {
  * client; the firm's own people hear in their daily digest). The form carries the businesses and
  * the key the page minted, so sending again from the same page, or "Try again" after an answer
  * that never arrived, is the same request: the service sends nothing twice and answers with its
- * first answer, which the panel says in words. The outcome lists what became of each business.
+ * first answer, which the panel says in words. The panel keeps the key it sent for these
+ * businesses (`withSentKey`), so the request stays the same even once the page re-rendered and
+ * minted another key behind the form. The outcome lists what became of each business.
  */
 export function BulkPanel({ action, targets, cut, idempotencyInput }: BulkPanelProps) {
   const formRef = useRef<HTMLFormElement>(null);
@@ -62,12 +100,13 @@ export function BulkPanel({ action, targets, cut, idempotencyInput }: BulkPanelP
   const [confirming, setConfirming] = useState(false);
   const [attempt, dispatch, pending] = useActionState(
     async (previous: Attempt, formData: FormData): Promise<Attempt> => {
+      const sent = sentRequestOf(formData) ?? previous.sent;
       try {
         const last = await action(idleAction(), formData);
-        return { last, lost: null, count: previous.count + 1 };
+        return { last, lost: null, count: previous.count + 1, sent };
       } catch (error) {
         if (isFrameworkError(error)) throw error;
-        return { last: previous.last, lost: formData, count: previous.count + 1 };
+        return { last: previous.last, lost: formData, count: previous.count + 1, sent };
       }
     },
     START,
@@ -77,7 +116,7 @@ export function BulkPanel({ action, targets, cut, idempotencyInput }: BulkPanelP
   }, [attempt]);
   const labels = new Map(targets.map((target) => [target.businessId, target.label]));
   const send = (formData: FormData) => startTransition(() => dispatch(formData));
-  const { last, lost } = attempt;
+  const { last, lost, sent } = attempt;
   const formErrors = last.status === "error" ? (last.formErrors ?? []) : [];
   return (
     <section aria-labelledby="bulk-heading" data-slot="bulk-panel" className="flex flex-col gap-3">
@@ -214,7 +253,7 @@ export function BulkPanel({ action, targets, cut, idempotencyInput }: BulkPanelP
           pending={pending}
           onConfirm={() => {
             setConfirming(false);
-            if (formRef.current !== null) send(new FormData(formRef.current));
+            if (formRef.current !== null) send(withSentKey(new FormData(formRef.current), sent));
           }}
         />
       ) : null}
