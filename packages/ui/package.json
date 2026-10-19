@@ -27,8 +27,8 @@
   "dependencies": {
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
-    "lucide-react": "1.53.0",
-    "radix-ui": "1.7.0",
+    "lucide-react": "1.57.0",
+    "radix-ui": "1.8.1",
     "sonner": "2.0.8",
     "tailwind-merge": "3.7.0"
   },
@@ -36,12 +36,12 @@
     "@tailwindcss/node": "4.3.3",
     "@testing-library/dom": "^10.4.0",
     "@testing-library/react": "^16.3.0",
-    "@testing-library/user-event": "14.6.7",
+    "@testing-library/user-event": "14.6.8",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "axe-core": "4.14.0",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "tailwindcss": "4.3.3"
   }
 }
